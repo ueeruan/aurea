@@ -359,6 +359,8 @@ void Engine::apply_omega_view_locked(RenderSettings& rs) const noexcept {
     // AE layers (B10): guias da prévia, só na saída da tela (EngineAeLayers.cpp).
     rs.previewGuides = previewGuides_;
     rs.guideGridSpacing = previewGridSpacing_;
+    rs.guideGridRgb = previewGridRgb_;
+    rs.guideGridBlend = previewGridBlend_;
     if (omegaViewMode_ != 0 && !omegaViewIds_.empty()) {
         rs.viewSelection = static_cast<u8>(omegaViewMode_);
         rs.viewSelectionCount = static_cast<u32>(std::min<usize>(omegaViewIds_.size(), kOmegaViewMaxIds));

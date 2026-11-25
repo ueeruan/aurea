@@ -9,7 +9,7 @@ import { generateKeyPairSync } from "node:crypto";
 
 import worker from "../worker.js";
 import { esquecerMemo } from "../contas.js";
-import { HYPER_SUBSCRIPTION, RENOVACAO_INTERVALO_S } from "../entitlements.js";
+import { HYPER_SUBSCRIPTION, HYPER_SEMANAL, HYPER_PLANOS, RENOVACAO_INTERVALO_S } from "../entitlements.js";
 import { kvFalso, d1Falso, pedido } from "./falsos.mjs";
 
 const SEGREDO = "segredo-do-admin-de-teste-0123456789";
@@ -302,6 +302,40 @@ test("sem a migração 0012 a leitura continua (nada vence) e a compra de assina
     const r = await comprar(env, a, "google", "aurea_hyper_mensal", "tok");
     assert.equal(r.status, 503);
     assert.deepEqual((await meus(env, a)).corpo.products, ["aureahyper_lifetime"]);
+  } finally {
+    loja.restaurar();
+  }
+});
+
+// 1.0.9: os três planos do AureaHyper (semanal, mensal, anual) se vendem e liberam
+// tudo; o semanal vence em 7 dias e renova como os outros (o vencimento vem da loja).
+test("1.0.9: AureaHyper semanal na Play e na App Store, com renovação semanal", async () => {
+  const env = ambiente();
+  const a = await cadastro(env, "semanal@aurea.app");
+  const b = await cadastro(env, "semanal-apple@aurea.app");
+  const db = env.AUREA_DB.sqlite;
+  const loja = lojas();
+  try {
+    const venda = (await meus(env, a)).corpo.purchasable;
+    for (const plano of HYPER_PLANOS) assert.ok(venda.includes(plano), plano);
+    const semana = agora() + 7 * 86400;
+    loja.play.sem = playAtiva(HYPER_SEMANAL, semana);
+    const ok = await comprar(env, a, "google", HYPER_SEMANAL, "sem");
+    assert.equal(ok.status, 200);
+    assert.deepEqual(ok.corpo.products, [HYPER_SEMANAL]);
+    assert.equal(ok.corpo.expires[HYPER_SEMANAL], semana);
+    // A semana passou e a Play renovou por mais 7 dias.
+    db.prepare("UPDATE entitlements SET expires_at = ?, store_checked_at = ?").run(agora() - 60, agora() - 2 * RENOVACAO_INTERVALO_S);
+    const proxima = agora() + 7 * 86400;
+    loja.play.sem = playAtiva(HYPER_SEMANAL, proxima, { latestOrderId: "GPA.3300-1..1" });
+    const renovada = await meus(env, a);
+    assert.deepEqual(renovada.corpo.products, [HYPER_SEMANAL]);
+    assert.equal(renovada.corpo.expires[HYPER_SEMANAL], proxima);
+
+    loja.apple.tx["4901"] = appleTx("4901", HYPER_SEMANAL, semana);
+    const apple = await comprar(env, b, "apple", HYPER_SEMANAL, "4901");
+    assert.equal(apple.status, 200);
+    assert.deepEqual(apple.corpo.products, [HYPER_SEMANAL]);
   } finally {
     loja.restaurar();
   }

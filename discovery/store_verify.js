@@ -1,7 +1,7 @@
 // =============================================================================
 //  Conferência de compras na loja (Google Play / App Store) para os direitos de
 //  entitlements.js: NÃO consumíveis (aurea_aureaos, o AureaOS no AureaMCP) e,
-//  desde 16/11/2026, ASSINATURAS mensais (AureaHyper e cada efeito/Texto 3D;
+//  desde 16/11/2026, ASSINATURAS (AureaHyper semanal/mensal/anual e os avulsos legados;
 //  docs/release/assinaturas.md). O app só traz o recibo; quem diz se pagou é a loja.
 //
 //  Mesmos segredos do Mural (mural.js), nenhum novo:
@@ -110,7 +110,7 @@ export async function verifyApplePurchase(env, transactionId, product) {
 }
 
 // -----------------------------------------------------------------------------
-//  ASSINATURAS (16/11/2026): AureaHyper mensal e cada efeito/Texto 3D avulso.
+//  ASSINATURAS (16/11/2026): AureaHyper (1.0.9: semanal, mensal, anual) e os avulsos legados.
 //  Cada conferência devolve {error} ou {key, ref, expiresAt}:
 //    key        a compra na loja (uma compra = uma conta Aurea, como acima);
 //    ref        o que se guarda para conferir a renovação depois (o purchaseToken

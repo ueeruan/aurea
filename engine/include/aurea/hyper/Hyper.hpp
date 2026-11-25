@@ -137,21 +137,28 @@ inline constexpr const char* kHyperClean   = "aurea.hyper.clean";
 /// telas; o motor não decide quem pagou.
 inline constexpr const char* kProductId = "aureahyper_lifetime";
 
-/// 16/11/2026 (decisão do dono): o conteúdo pago vira ASSINATURA MENSAL.
-///   · AureaHyper (kHyperSubscriptionId, R$ 59,50/mês) libera TUDO o que é pago
-///     (cada efeito pago, o Texto 3D e as 3 ferramentas Hyper);
-///   · cada efeito pago e o Texto 3D são uma assinatura própria (R$ 5,00/mês).
+/// 16/11/2026 (decisão do dono): o conteúdo pago vira ASSINATURA.
+///   · o AureaHyper libera TUDO o que é pago (cada efeito pago, o Texto 3D e as
+///     3 ferramentas Hyper);
+///   · cada efeito pago e o Texto 3D foram uma assinatura avulsa (R$ 5,00/mês).
 /// Os preços vivem nas lojas; os ids abaixo são os mesmos na Play e na App Store
 /// (docs/release/assinaturas.md). As telas perguntam ao motor qual produto
 /// libera um item e se o conjunto de produtos da conta dá acesso a ele — a
 /// tabela não se repete no Kotlin/Swift.
-/// 1.0.2.1 (pedido do dono, 19/11/2026): só existe o AureaHyper ANUAL (R$ 100/ano),
-/// que libera tudo; acabaram a mensalidade e as assinaturas avulsas. É o único
-/// produto que as telas oferecem. O AureaHyper mensal e os avulsos de antes
-/// continuam reconhecidos (quem já assinou não perde nada), mas não se vendem.
+/// 1.0.2.1 (19/11/2026): acabaram as assinaturas avulsas (não se vendem mais;
+/// quem já assinou continua com o acesso dela).
+/// 1.0.9 (decisão do dono, 25/11/2026): o AureaHyper tem TRÊS planos à venda,
+/// todos liberam tudo: SEMANAL (R$ 7), MENSAL (R$ 30) e ANUAL (R$ 150). Quem já
+/// assinava mantém o preço até renovar (coisa da loja). Ordem de venda:
+/// hyper_plans_on_sale().
 inline constexpr const char* kHyperSubscriptionId = "aurea_hyper_anual";
-/// O AureaHyper mensal de 16/11 a 19/11/2026 (legado: libera tudo, não se vende).
-inline constexpr const char* kHyperMonthlyLegacyId = "aurea_hyper_mensal";
+inline constexpr const char* kHyperAnnualId = kHyperSubscriptionId;
+/// O AureaHyper mensal (à venda de novo desde a 1.0.9).
+inline constexpr const char* kHyperMonthlyId = "aurea_hyper_mensal";
+/// Nome antigo (de quando o mensal era só legado); mantido para quem ainda chama.
+inline constexpr const char* kHyperMonthlyLegacyId = kHyperMonthlyId;
+/// O AureaHyper semanal (novo na 1.0.9).
+inline constexpr const char* kHyperWeeklyId = "aurea_hyper_semanal";
 inline constexpr const char* kText3DProductId = "aurea_texto3d";
 
 /// Classificação comum do catálogo. As plataformas continuam verificando a
@@ -186,17 +193,26 @@ inline constexpr u32 kFlowRetimeNeuralValue = 3;
 [[nodiscard]] const char* effect_product_id(u32 effectTypeId) noexcept;
 /// A assinatura avulsa do Texto 3D (kText3DProductId).
 [[nodiscard]] const char* text3d_product_id() noexcept;
-/// Este produto libera TUDO o que é pago? (AureaHyper mensal e o legado vitalício.)
+/// Este produto libera TUDO o que é pago? (AureaHyper semanal, mensal, anual e o
+/// legado vitalício.)
 [[nodiscard]] bool product_unlocks_everything(std::string_view productId) noexcept;
-/// Os produtos que o app reconhece: o AureaHyper anual primeiro (o ÚNICO à venda
-/// desde 1.0.2.1), depois o mensal legado e cada avulso legado (ordem estável,
-/// sem repetição). As telas usam para restaurar; à venda só kHyperSubscriptionId.
+/// Os planos do AureaHyper À VENDA, na ordem da tela: semanal, mensal, anual.
+/// As telas mostram um cartão por plano; o anual é o destacado.
+[[nodiscard]] std::vector<std::string> hyper_plans_on_sale();
+/// Quanto o plano ANUAL economiza (%, arredondado para baixo) contra pagar um ano
+/// do plano mais barato entre semanal (×52) e mensal (×12), com os preços da
+/// loja em micros (mesma moeda). Preço ausente/≤ 0 fica fora da conta; 0 = sem
+/// economia ou sem preço para comparar (a tela não mostra o selo).
+[[nodiscard]] u32 hyper_annual_savings_percent(i64 weeklyMicros, i64 monthlyMicros, i64 annualMicros) noexcept;
+/// Os produtos que o app reconhece: os 3 planos do AureaHyper primeiro (na ordem
+/// de hyper_plans_on_sale), depois cada avulso legado (ordem estável, sem
+/// repetição). As telas usam para restaurar; à venda só hyper_plans_on_sale.
 [[nodiscard]] std::vector<std::string> subscription_product_ids();
 
 /// A REGRA de acesso (uma só, para as duas plataformas): a conta que tem
 /// `owned` pode usar o item pago cuja assinatura avulsa é `itemProduct`
-/// (nullptr/"" = item só do AureaHyper) quando tem o AureaHyper mensal, o
-/// legado vitalício ou a assinatura do próprio item.
+/// (nullptr/"" = item só do AureaHyper) quando tem qualquer plano do AureaHyper,
+/// o legado vitalício ou a assinatura do próprio item.
 [[nodiscard]] bool has_access(const std::vector<std::string>& owned, const char* itemProduct) noexcept;
 /// A regra aplicada a um efeito: grátis passa sempre; pago segue `has_access`.
 [[nodiscard]] bool has_effect_access(const std::vector<std::string>& owned, u32 effectTypeId) noexcept;

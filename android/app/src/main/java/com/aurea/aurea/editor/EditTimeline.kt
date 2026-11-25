@@ -462,19 +462,24 @@ private fun EditLanes(
                 val frame = frameAt(p.x)
                 val edgeFrames = edge / view.pxPerFrame
                 var near: Triple<Int, LaneClip, Int>? = null
+                var nearestEdge = Float.POSITIVE_INFINITY
                 for (clip in currentLanes[lane]) {
                     val s = clip.row.startFrame.toFloat()
                     val e = clip.row.endFrame.toFloat()
                     if (frame < s - edgeFrames || frame > e + edgeFrames) continue
-                    val inside = frame >= s && frame <= e
+                    val inset = min(edgeFrames, (e - s) / 3f)
                     val zone = when {
-                        // Clipe estreito: o miolo continua alcançável.
-                        (e - s) * view.pxPerFrame > edge * 3 && frame <= s + edgeFrames -> DRAG_TRIM_IN
-                        (e - s) * view.pxPerFrame > edge * 3 && frame >= e - edgeFrames -> DRAG_TRIM_OUT
+                        clip.virtual -> DRAG_MOVE
+                        frame <= s + inset -> DRAG_TRIM_IN
+                        frame >= e - inset -> DRAG_TRIM_OUT
                         else -> DRAG_MOVE
                     }
-                    if (inside) return Triple(lane, clip, zone)
-                    near = Triple(lane, clip, if (frame < s) DRAG_TRIM_IN else DRAG_TRIM_OUT)
+                    if (frame >= s && frame < e) return Triple(lane, clip, zone)
+                    val distance = min(abs(frame - s), abs(frame - e))
+                    if (!clip.virtual && distance < nearestEdge) {
+                        nearestEdge = distance
+                        near = Triple(lane, clip, zone)
+                    }
                 }
                 return near
             }
@@ -641,7 +646,13 @@ private fun EditLanes(
                     while (true) {
                         val event = awaitPointerEvent()
                         val pressed = event.changes.count { it.pressed }
-                        if (pressed == 0) break
+                        if (pressed == 0) {
+                            val release = event.changes.firstOrNull { it.id == down.id }
+                            val current = view.drag
+                            if (current != null && release != null && release.position != last)
+                                updateDrag(current, start, release.position)
+                            break
+                        }
                         if (pressed >= 2 && view.drag == null) pinching = true
                         val change = event.changes.firstOrNull { it.id == down.id }
                         if (pinching) {

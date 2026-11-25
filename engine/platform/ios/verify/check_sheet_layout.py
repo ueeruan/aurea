@@ -85,7 +85,7 @@ def main():
         'text editing is the text mode, not a sheet or a dialog':
             '.sheet(item: $model.textContentRequest)' not in editor and re.search(r'(?<![A-Za-z])TextContentEditor\(', editor) is None and 'TextEditPanel()' in editor,
         'text mode input strip is 60 pt and scrolls long text natively':
-            'let strip: CGFloat = 60' in text and '.frame(height: strip)' in text and 'view.isScrollEnabled = true' in textmode,
+            '.frame(height: 60)' in textmode and 'private func input(alignment: Int, is3D: Bool)' in textmode and 'view.isScrollEnabled = true' in textmode,
         'text mode Done lives in the style bar and refuses an empty 3D text':
             '"text.style.done"' in textmode and 'state.draftBlank' in textmode and 'enabled: !blank' in textmode,
         'text input focuses, selects new text and types live':

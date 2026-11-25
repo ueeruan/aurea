@@ -207,6 +207,7 @@ struct Flatten {
     u64 only = 0;
     const ExportNestedAudioSource* exportNested = nullptr;
     const EffectRegistry* registry = nullptr;
+    u64 assetRevision = 0;
 
     /// Acrescenta os sons de `comp`. `shift`: amostra da raiz − amostra de
     /// `comp`. [lo, hi): janela visível na raiz (a pré-comp corta o que passa
@@ -268,8 +269,11 @@ struct Flatten {
             if (nestedAsset) c.asset = nestedAsset;
             else if (a && a->has_audio()) {
                 c.asset = l.source.pack();
-                if (cache) cache->register_asset(c.asset, AudioAssetRef{resolve ? resolve(ctx, a->sourcePath) : a->sourcePath,
-                                                                        asset_length(*a)});
+                if (cache) {
+                    const u64 version = cache->register_asset_revision(c.asset, AudioAssetRef{
+                        resolve ? resolve(ctx, a->sourcePath) : a->sourcePath, asset_length(*a)});
+                    assetRevision = hmix(hmix(assetRevision, c.asset), version);
+                }
             }
             c.start = std::max(lo, ls + shift);
             c.end = std::min(hi, le + shift);
@@ -401,6 +405,7 @@ std::shared_ptr<AudioMixSnapshot> build_snapshot(const Composition& comp, const 
     // Volume com expressão: avaliado quadro a quadro aqui (sob o lock do modelo).
     const expr::Scope exprScope(project.timeline());
     f.add(comp, 0, 0, snap->endSample, 1.0f, 0, {}, 0);
+    snap->revision = f.assetRevision;
     u64 pluginBytes = 0;
     for (const auto& clip : snap->clips) for (const auto& stage : clip.chain) if (stage.plugin) {
         pluginBytes += stage.plugin->stateBytes + stage.plugin->immutableBytes;

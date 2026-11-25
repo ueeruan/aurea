@@ -972,7 +972,6 @@ AUREA_JNI jint AUREA_FN(nativeSubmitCommands)(JNIEnv* env, jclass, jlong handle,
         blobSize = static_cast<u32>(std::min<jlong>(stringBlobSize, buffer_capacity(env, stringBlob)));
     }
     const u32 accepted = c->engine.submit_commands(commands, static_cast<u32>(count), blob, blobSize);
-    c->engine.request_render();
     return static_cast<jint>(accepted);
 }
 
@@ -1778,11 +1777,13 @@ AUREA_JNI jboolean AUREA_FN(nativeGizmoMoveLocal)(JNIEnv* env, jclass, jlong han
     return JNI_TRUE;
 }
 
-AUREA_JNI jlong AUREA_FN(nativeImportHdri)(JNIEnv* env, jclass, jlong handle, jstring path) {
+AUREA_JNI jlong AUREA_FN(nativeImportHdri)(JNIEnv* env, jclass, jlong handle, jstring path,
+                                           jlong objectLayer, jboolean showAsBackground) {
     NativeContext* c = ctx_of(handle);
     if (!c || !path) return -static_cast<jlong>(Errc::InvalidState);
     const char* p = env->GetStringUTFChars(path, nullptr);
-    const Result<u64> r = c->engine.import_hdri(p);
+    if (!p) return -static_cast<jlong>(Errc::OutOfMemory);
+    const Result<u64> r = c->engine.import_hdri(p, static_cast<u64>(objectLayer), showAsBackground == JNI_TRUE);
     env->ReleaseStringUTFChars(path, p);
     if (!r.ok()) return -static_cast<jlong>(r.status().code());
     return static_cast<jlong>(*r);
@@ -3080,9 +3081,10 @@ AUREA_JNI jboolean AUREA_FN(nativeToggleMaterialKeys)(JNIEnv*, jclass, jlong han
         ? JNI_TRUE : JNI_FALSE;
 }
 
-AUREA_JNI void AUREA_FN(nativeSetPreviewGuides)(JNIEnv*, jclass, jlong handle, jint flags, jfloat gridSpacing) {
+AUREA_JNI void AUREA_FN(nativeSetPreviewGuides)(JNIEnv*, jclass, jlong handle, jint flags, jfloat gridSpacing, jint rgb, jint blend) {
     NativeContext* c = ctx_of(handle);
-    if (c && flags >= 0) c->engine.set_preview_guides(static_cast<u32>(flags), gridSpacing);
+    if (c && flags >= 0) c->engine.set_preview_guides(static_cast<u32>(flags), gridSpacing,
+                                                    static_cast<u32>(rgb), static_cast<u32>(blend));
 }
 
 AUREA_JNI jint AUREA_FN(nativePreviewGuides)(JNIEnv*, jclass, jlong handle) {
@@ -7011,6 +7013,25 @@ AUREA_JNI jobjectArray AUREA_FN(nativeSubscriptionProductIds)(JNIEnv* env, jclas
         env->DeleteLocalRef(s);
     }
     return out;
+}
+
+/// 1.0.9: os planos do AureaHyper à venda, na ordem da tela (semanal, mensal, anual).
+AUREA_JNI jobjectArray AUREA_FN(nativeHyperPlansOnSale)(JNIEnv* env, jclass) {
+    const auto ids = hyper::hyper_plans_on_sale();
+    jclass stringClass = env->FindClass("java/lang/String");
+    jobjectArray out = env->NewObjectArray(static_cast<jsize>(ids.size()), stringClass, nullptr);
+    if (!out) return nullptr;
+    for (jsize i = 0; i < static_cast<jsize>(ids.size()); ++i) {
+        jstring s = env->NewStringUTF(ids[static_cast<usize>(i)].c_str());
+        env->SetObjectArrayElement(out, i, s);
+        env->DeleteLocalRef(s);
+    }
+    return out;
+}
+
+/// 1.0.9: o selo "economize N%" do anual (preços da loja em micros; 0 = sem selo).
+AUREA_JNI jint AUREA_FN(nativeHyperAnnualSavingsPercent)(JNIEnv*, jclass, jlong weekly, jlong monthly, jlong annual) {
+    return static_cast<jint>(hyper::hyper_annual_savings_percent(weekly, monthly, annual));
 }
 
 /// `itemProduct` null = item só do AureaHyper (as 3 ferramentas Hyper).

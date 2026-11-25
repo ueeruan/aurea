@@ -2,12 +2,15 @@
 //  ASSINATURAS (16/11/2026, decisão do dono; docs/release/assinaturas.md).
 //  Par do Android: hyper/Subscriptions.kt (loja) e hyper/Paywall.kt (tela).
 //
-//  AureaHyper (R$ 59,90/mês) libera tudo o que é pago; cada efeito pago e o
-//  Texto 3D são uma assinatura avulsa (R$ 5,00/mês). Na App Store cada avulso
-//  fica no SEU grupo de assinatura (senão assinar um segundo efeito trocaria o
-//  primeiro) e o AureaHyper também. Os preços vivem na loja: a tela mostra o
-//  `displayPrice` do Product e, sem ele, o texto padrão. Os ids vêm do motor
-//  (hyper::subscription_product_ids).
+//  1.0.9 (decisão do dono, 25/11/2026): o AureaHyper tem três planos à venda —
+//  SEMANAL (R$ 7), MENSAL (R$ 30) e ANUAL (R$ 150) — e todos liberam tudo o que é
+//  pago. Na App Store os três ficam no MESMO grupo (22585277), então trocar de
+//  plano é upgrade/downgrade da loja, não uma segunda assinatura. Os avulsos
+//  (efeitos, Texto 3D; cada um no seu grupo) não se vendem mais; quem já tem
+//  continua com o acesso e o preço até renovar (coisa da loja). Os preços vivem
+//  na loja: a tela mostra o `displayPrice` do Product e, sem ele, o texto padrão.
+//  Os ids vêm do motor (hyper::hyper_plans_on_sale para vender,
+//  hyper::subscription_product_ids para restaurar).
 //
 //  Compra: StoreKit 2 (Product.purchase) → o id da transação vai ao Worker
 //  (POST /api/entitlements/purchase, que confere na App Store) → só depois do OK
@@ -16,8 +19,9 @@
 //  fora do app chegam por Transaction.updates.
 //
 //  accessibilityIdentifier (as mesmas tags do Android):
-//    assinatura · assinatura.fechar · assinatura.avulso · assinatura.hyper ·
-//    assinatura.restaurar · assinatura.entrar · assinatura.verificar · assinatura.aviso
+//    assinatura · assinatura.fechar · assinatura.semanal · assinatura.mensal ·
+//    assinatura.hyper (o anual) · assinatura.economia · assinatura.restaurar ·
+//    assinatura.entrar · assinatura.verificar · assinatura.aviso
 // =============================================================================
 import StoreKit
 import SwiftUI
@@ -61,8 +65,12 @@ final class AureaSubscriptions: ObservableObject {
 
     private init() {}
 
+    /// O AureaHyper ANUAL (o plano destacado).
     var hyperProduct: String { AureaEngine.hyperSubscriptionId() }
+    /// Tudo o que o app reconhece, para restaurar (hyper::subscription_product_ids).
     var productIds: [String] { AureaEngine.subscriptionProductIds() }
+    /// 1.0.9: os planos à venda na ordem da tela — semanal, mensal, anual (hyper::hyper_plans_on_sale).
+    var plansOnSale: [String] { AureaEngine.hyperPlansOnSale() }
 
     func clearNotice() { notice = nil }
 
@@ -99,8 +107,22 @@ final class AureaSubscriptions: ObservableObject {
         products = map
     }
 
-    /// O preço mensal localizado da loja, ou nil (a tela usa o texto padrão).
+    /// O preço localizado da loja (por período do plano), ou nil (a tela usa o texto padrão).
     func price(_ id: String) -> String? { products[id]?.displayPrice }
+
+    /// "Economize N%" do anual contra um ano do plano curto mais barato, só com os
+    /// preços da loja carregados e na mesma moeda (a conta é do motor). 0 = sem selo.
+    func annualSavingsPercent(weekly: String?, monthly: String?, annual: String?) -> Int {
+        guard let annual, let a = products[annual] else { return 0 }
+        let currency = a.priceFormatStyle.currencyCode
+        func micros(_ id: String?) -> Int64 {
+            guard let id, let p = products[id], p.priceFormatStyle.currencyCode == currency else { return 0 }
+            return NSDecimalNumber(decimal: p.price * 1_000_000).int64Value
+        }
+        let w = micros(weekly), m = micros(monthly)
+        guard w > 0 || m > 0 else { return 0 }
+        return Int(AureaEngine.hyperAnnualSavingsPercent(weekly: w, monthly: m, annual: micros(annual)))
+    }
 
     /// Assina `id` pela App Store e entrega ao servidor.
     func buy(_ id: String) async {
@@ -314,26 +336,79 @@ private struct PaywallStatus: View {
     }
 }
 
-/// A assinatura do AureaHyper anual (1.0.2.1: a única à venda) e "Restaurar compras".
-/// Também aparece no painel bloqueado do AureaHyper (só o AureaHyper).
+/// Como a tela mostra um plano do AureaHyper (o id vem do motor; as mesmas tags do Android).
+private struct HyperPlanRow: Identifiable {
+    let id: String
+    let titleKey: String
+    let perKey: String
+    let fallbackKey: String
+    let tag: String
+    let best: Bool
+
+    init(_ id: String, annual: String) {
+        self.id = id
+        best = id == annual
+        let row: [String]
+        if best {
+            row = ["assinatura_plano_anual", "assinatura_por_ano", "assinatura_preco_hyper", "assinatura.hyper"]
+        } else if id.hasSuffix("_semanal") {
+            row = ["assinatura_plano_semanal", "assinatura_por_semana", "assinatura_preco_semanal", "assinatura.semanal"]
+        } else {
+            row = ["assinatura_plano_mensal", "assinatura_por_mes", "assinatura_preco_mensal", "assinatura.mensal"]
+        }
+        titleKey = row[0]
+        perKey = row[1]
+        fallbackKey = row[2]
+        tag = row[3]
+    }
+}
+
+/// Os planos do AureaHyper à venda (1.0.9: semanal, mensal, anual; todos liberam
+/// tudo) e "Restaurar compras". Também aparece no painel bloqueado do AureaHyper.
 struct SubscriptionOptions: View {
     @ObservedObject private var store = AureaSubscriptions.shared
     @ObservedObject private var entitlements = HyperEntitlements.shared
     let item: PaidItem
 
+    private var plans: [HyperPlanRow] {
+        let annual = store.hyperProduct
+        return store.plansOnSale.map { HyperPlanRow($0, annual: annual) }
+    }
+
+    private var savings: Int {
+        let rows = plans
+        return store.annualSavingsPercent(weekly: rows.first { $0.tag == "assinatura.semanal" }?.id,
+                                          monthly: rows.first { $0.tag == "assinatura.mensal" }?.id,
+                                          annual: rows.first { $0.best }?.id)
+    }
+
+    /// Um cartão (em função à parte: o Swift infere o `body` mais rápido).
+    private func card(_ plan: HyperPlanRow, saved: Int, purchasable: Set<String>) -> SubscriptionOptionCard {
+        let shown: String = store.price(plan.id) ?? AureaText.t(plan.fallbackKey)
+        let badge: String? = plan.best ? AureaText.t("assinatura_melhor_valor") : nil
+        let savings: String? = plan.best && saved > 0 ? AureaText.t("assinatura_economize", saved) : nil
+        let enabled: Bool = store.busy == nil && purchasable.contains(plan.id)
+        return SubscriptionOptionCard(title: AureaText.t(plan.titleKey), price: AureaText.t(plan.perKey, shown), badge: badge,
+                                      savings: savings, id: plan.tag, highlighted: plan.best, busy: store.busy == plan.id,
+                                      enabled: enabled) { Task { await store.buy(plan.id) } }
+    }
+
     var body: some View {
         let purchasable = entitlements.purchasable
+        let rows = plans
+        let saved = savings
         VStack(alignment: .leading, spacing: 0) {
-            // 1.0.2.1 (19/11/2026): só o AureaHyper ANUAL se vende; acabaram os avulsos
-            // (quem já tinha um continua com ele: hyper::has_access).
-            let hyper = store.hyperProduct
-            let hyperPrice = store.price(hyper) ?? AureaText.t("assinatura_preco_hyper")
-            SubscriptionOptionCard(
-                title: AureaText.t("hyper_title"),
-                price: AureaText.t("assinatura_por_ano", hyperPrice) + " · " + AureaText.t("assinatura_libera_tudo"),
-                id: "assinatura.hyper", highlighted: true,
-                busy: store.busy == hyper, enabled: store.busy == nil && purchasable.contains(hyper)
-            ) { Task { await store.buy(hyper) } }
+            // 1.0.9: semanal, mensal e anual; os avulsos não se vendem mais (quem já
+            // tinha um continua com ele: hyper::has_access). O selo só com os preços da loja.
+            if !rows.isEmpty {
+                Text(AureaText.t("assinatura_escolha_plano")).font(.aurea(size: 13, weight: .semibold)).foregroundStyle(AureaColors.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer().frame(height: 10)
+            }
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, plan in
+                if index > 0 { Spacer().frame(height: 10) }
+                card(plan, saved: saved, purchasable: purchasable)
+            }
             if purchasable.isEmpty {
                 Spacer().frame(height: 12)
                 Text(AureaText.t("assinatura_em_breve")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
@@ -365,20 +440,35 @@ struct SubscriptionOptions: View {
 private struct SubscriptionOptionCard: View {
     let title: String
     let price: String
+    let badge: String?
+    let savings: String?
     let id: String
     let highlighted: Bool
     let busy: Bool
     let enabled: Bool
     let action: () -> Void
 
+    private var spoken: String { [title, badge, price, savings].compactMap { $0 }.joined(separator: ", ") }
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.aurea(size: 16, weight: .bold))
-                        .foregroundStyle(enabled || busy ? AureaColors.text : AureaColors.disabled)
+                    HStack(spacing: 8) {
+                        Text(title).font(.aurea(size: 16, weight: .bold))
+                            .foregroundStyle(enabled || busy ? AureaColors.text : AureaColors.disabled)
+                        if let badge {
+                            Text(badge).font(.aurea(size: 11, weight: .bold)).foregroundStyle(AureaColors.onAccent)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(AureaColors.accent))
+                        }
+                    }
                     Text(price).font(.aurea(size: 14, weight: .semibold))
                         .foregroundStyle(!enabled && !busy ? AureaColors.disabled : (highlighted ? AureaColors.accent : AureaColors.muted))
+                    if let savings {
+                        Text(savings).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.accent)
+                            .accessibilityIdentifier("assinatura.economia")
+                    }
                 }
                 Spacer(minLength: 0)
                 if busy { ProgressView().tint(AureaColors.accent) }
@@ -394,7 +484,7 @@ private struct SubscriptionOptionCard: View {
         }
         .buttonStyle(.plain).disabled(!enabled)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(title), \(price)")
+        .accessibilityLabel(spoken)
         .accessibilityValue(busy ? AureaText.t("assinatura_processando") : "")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier(id)

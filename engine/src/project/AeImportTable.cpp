@@ -496,12 +496,12 @@ constexpr PRule kRadialBlurReference[] = {
 
 // Detail-preserving Upscale (batch A2): the Fit buttons have no value.
 constexpr PRule kUpscaleReference[] = {
-    I(1, "Fit to Comp Width"),
-    I(2, "Fit to Comp Height"),
-    P(3, "Scale", "scale"),
-    P(4, "Reduce Noise", "reduce_noise"),
-    P(5, "Detail", "detail"),
-    E(6, "Alpha", "alpha", kMinus1),
+    I(3, "Fit to Comp Width"),
+    I(4, "Fit to Comp Height"),
+    P(1, "Scale", "scale"),
+    P(2, "Reduce Noise", "reduce_noise"),
+    P(7, "Detail", "detail"),
+    E(5, "Alpha", "alpha", kMinus1),
 };
 
 constexpr PRule kRipple[] = {
@@ -1381,11 +1381,85 @@ constexpr PRule kSapphireRandomEdits[] = {
     P(50, "Edit Frame Length", "edit_length"), P(51, "Seed", "seed"),
 };
 constexpr PRule kSapphireShake[] = {
+    U(2, "Mask from Layer", 0),
+    E(1100, "Style", "style", kMinus1),
     P(50, "Amplitude", "amount", PConv::Same, 100),
     P(51, "Frequency", "frequency"), P(52, "Phase", "phase"),
     P(56, "Seed", "seed"), P(59, "X Rand Amp", "amplitude_x"),
-    P(64, "Y Rand Amp", "amplitude_y"), P(74, "Tilt Rand Amp", "rotation"),
+    P(60, "X Rand Freq", "frequency_x"), P(64, "Y Rand Amp", "amplitude_y"),
+    P(1101, "Y Rand Freq", "frequency_y"), P(68, "Y Phase", "phase_y"),
+    P(69, "Z Rand Amp", "zoom"), P(1102, "Z Rand Freq", "frequency_zoom"),
+    P(74, "Tilt Rand Amp", "rotation"), P(1103, "Tilt Rand Freq", "frequency_rotation"),
+    P(110, "Stillness", "stillness", PConv::Same, 100),
+    P(111, "Twitch Frequency", "twitch_frequency"),
+    P(113, "Drift", "drift", PConv::Same, 100),
+    P(114, "Center Bias", "center_bias", PConv::Same, 100),
+    I(238, "Save Preset"), I(239, "Load Preset"), I(241, "Edit Mocha"), I(249, "Help"),
+    I(250, "Mocha"), I(251, ""), I(252, "X Shake"), I(253, ""), I(254, "Y Shake"), I(255, ""),
+    I(256, "Z Shake"), I(257, ""), I(258, "Tilt Shake"), I(259, ""), I(260, "Channels"),
+    I(261, ""), I(262, "Crop Input"), I(263, ""),
 };
+constexpr PRule kTwitchReference[] = {
+    P(2, "Amount", "amount"), P(1, "Speed", "speed"), I(64, "Enable"),
+    P(7, "Blur", "blur_enabled", PConv::Bool), P(4, "Color", "color_enabled", PConv::Bool),
+    P(5, "Light", "light_enabled", PConv::Bool), P(6, "Scale", "scale_enabled", PConv::Bool),
+    P(8, "Slide", "slide_enabled", PConv::Bool), P(9, "Time", "time_enabled", PConv::Bool),
+    I(65, ""), I(66, "Behaviour"), P(10, "Ease In", "ease_in"), P(11, "Ease Out", "ease_out"),
+    E(15, "Border", "border", kMinus1), P(13, "Show Twitch Only", "show_twitch_only", PConv::Bool),
+    P(16, "Seed", "seed"), P(63, "Randomize Minimum", "randomize_minimum"), I(67, ""),
+    I(12, "Operator Controls"), I(33, ""),
+    P(34, "Blur Amount", "blur_amount"), P(35, "Blur Twitches [sec]", "blur_rate"),
+    P(39, "Blur Tint", "blur_tint", PConv::Color), P(40, "Blur Holdout", "blur_holdout"),
+    P(59, "Blur Holdout Sharpness", "blur_sharpness"), P(41, "Blur Boost", "blur_boost"),
+    P(36, "Blur Opacity", "blur_opacity"), E(37, "Blur Transfer Mode", "blur_blend", kMinus1),
+    P(38, "Blur Aspect", "blur_aspect"), P(60, "Use Lens Blur", "lens_blur", PConv::Bool),
+    P(42, "Unique Blur Seed", "blur_seed"), I(43, ""), I(17, ""),
+    P(18, "Color Amount", "color_amount"), P(19, "Color Twitches [sec]", "color_rate"),
+    P(3, "Colorize", "colorize", PConv::Color), P(20, "Color Randomize", "color_randomize"),
+    P(21, "Unique Color Seed", "color_seed"), I(22, ""), I(23, ""),
+    P(24, "Light Amount", "light_amount"), P(25, "Light Twitches [sec]", "light_rate"),
+    E(68, "Light Behaviour", "light_behavior", kMinus1), P(26, "Unique Light Seed", "light_seed"),
+    I(27, ""), I(28, ""), P(29, "Scale Amount", "scale_amount"), P(30, "Scale Twitches [sec]", "scale_rate"),
+    P(78, "Scale Origin", "scale_origin", PConv::PointRel), P(79, "Scale Origin Randomize", "scale_origin_random"),
+    P(82, "Scale Motion Blur", "scale_motion_blur"), P(31, "Unique Scale Seed", "scale_seed"), I(32, ""),
+    I(44, ""), P(45, "Slide Amount", "slide_amount"), P(46, "Slide Twitches [sec]", "slide_rate"),
+    P(49, "Slide Direction", "slide_direction"), P(61, "Slide Spread", "slide_spread"),
+    P(62, "Slide Tendency", "slide_tendency"), P(77, "Slide RGB Split", "slide_rgb_split"),
+    P(14, "Slide Motion Blur", "slide_motion_blur"), P(50, "Unique Slide Seed", "slide_seed"), I(51, ""),
+    I(52, ""), P(56, "Time Amount", "time_amount"), P(54, "Time Twitches [sec]", "time_rate"),
+    E(55, "Time Direction", "time_direction", kMinus1), P(53, "Unique Time Seed", "time_seed"), I(57, ""), I(58, ""),
+};
+constexpr PRule kBccLensBlur[] = {
+    P(1, "Iris Scale", "radius"), P(2, "Scale X", "scale_x"), P(3, "Scale Y", "scale_y"),
+    P(4, "Iris Rotation", "iris_rotation"), P(5, "Iris Curvature", "iris_curvature"),
+    P(6, "Highlight Boost", "highlight_boost"), P(7, "Mix with Original", "mix", PConv::Same, -1, 100),
+    I(8, "Show Iris Widget"),
+};
+constexpr PRule kBccDirectionalBlur[] = {
+    P(1, "Blur Amount", "amount"), P(2, "Angle", "angle"), P(3, "Mix with Original", "mix_source"),
+    P(4, "Avoid Clipping", "boundary", PConv::Same, 1, 1),
+};
+constexpr PRule kBccLinearLumaKey[] = {
+    I(1, "Effect Presets & Docs"), P(5, "Threshold", "threshold", PConv::Same, 100.0 / 255.0),
+    P(1100, "Softness", "softness", PConv::Same, 100.0 / 255.0),
+};
+constexpr PRule kSapphireGlowDist[] = {
+    P(1, "Brightness", "brightness"), P(2, "Color", "tint", PConv::Color),
+    P(3, "Threshold", "threshold", PConv::Same, 100),
+    P(4, "Threshold Add Color", "threshold_color", PConv::Color), P(5, "Glow Width", "width"),
+    P(6, "Width Red", "width_red"), P(7, "Width Green", "width_green"), P(8, "Width Blue", "width_blue"),
+    U(9, "Mask from Layer", 0), I(10, "Load Preset"), I(11, "Save Preset"), I(12, "Edit Mocha"),
+    I(13, "Show Glow Width"), I(14, "Help"),
+};
+constexpr PRule kSapphireHueSatBright[] = {
+    P(1, "Hue Shift", "hue", PConv::Same, 360), P(2, "Saturation", "chroma_scale"),
+    P(3, "Brightness", "brightness_gain"), P(4, "Preserve Luma", "preserve_luma", PConv::Bool),
+    P(5, "Scale Colors", "channel_scale", PConv::Color), P(6, "Offset Darks", "dark_offset"),
+    U(7, "Mask from Layer", 0), I(8, "Load Preset"), I(9, "Save Preset"), I(10, "Edit Mocha"), I(11, "Help"),
+};
+constexpr FixedValue kBccLensDefaults[] = {{"highlight_boost", {0, 0, 0, 0}}};
+constexpr FixedValue kBccDirectionalDefaults[] = {{"boundary", {1, 0, 0, 0}}, {"angle", {0, 0, 0, 0}}};
+constexpr FixedValue kBccLinearLumaDefaults[] = {{"key_type", {1, 0, 0, 0}}, {"softness", {0, 0, 0, 0}}};
 constexpr PRule kSapphireRays[] = {
     P(50, "Center XY", "center", PConv::PointRel),
     P(51, "Rays Length", "length", PConv::Same, 100),
@@ -1421,6 +1495,8 @@ constexpr FixedValue kRetimeFixed[] = {{"speed", {100, 0, 0, 0}}};
 #define RULEX(ae, name, key, params, reason, fixed, nfixed, post) \
     ERule{ae, name, key, params, static_cast<u32>(std::size(params)), reason, fixed, nfixed, post}
 #define NONE(ae, name, reason) ERule{ae, name, nullptr, nullptr, 0, reason, nullptr, 0, nullptr}
+#define NAMED_RULE(ae, name, key, params, reason, fixed, nfixed) \
+    ERule{ae, name, key, params, static_cast<u32>(std::size(params)), reason, fixed, nfixed, nullptr, true}
 #define SAPPHIRE(ae, key) RULEX(ae, ae, key, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr)
 
 const ERule kRules[] = {
@@ -1475,6 +1551,7 @@ const ERule kRules[] = {
     RULE("ADBE Motion Blur", "Directional Blur", effect_keys::kDirectionalBlur, kDirectionalBlur),
     RULE("ADBE Radial Blur", "Radial Blur", "aurea.blur.radial_blur_reference", kRadialBlurReference),
     RULE("ADBE Upscale", "Detail-preserving Upscale", "aurea.distort.upscale_reference", kUpscaleReference),
+    RULE("Videocopilot Twitch", "Twitch", "aurea.motion.twitch_reference", kTwitchReference),
     RULE("CC Radial Fast Blur", "CC Radial Fast Blur", effect_keys::kZoomBlur, kRadialFastBlur),
     // Luz e estilo
     RULEX("ADBE Glo2", "Glow", effect_keys::kGlow, kGlow, nullptr, nullptr, 0, post_glow),
@@ -1519,6 +1596,9 @@ const ERule kRules[] = {
     // Chave
     RULEX("Keylight 906", "Keylight (1.2)", effect_keys::kChromaKey, kKeylight,
           "Keylight: só a cor da tela entra; o resto é a chave de croma do Aurea", nullptr, 0, nullptr),
+    RULEX("BCC3Linear Luma Key", "BCC Linear Luma Key", effect_keys::kLumaKey, kBccLinearLumaKey,
+          "limiar convertido para a chave de luma do Aurea; confira o tipo de recorte", kBccLinearLumaDefaults,
+          std::size(kBccLinearLumaDefaults), nullptr),
     // Áudio
     RULE("ADBE Aud Tone", "Tone", "aurea.audio.tone", kTone),
     RULE("ADBE Aud Reverb", "Reverb", "aurea.audio.room_reverb", kReverb),
@@ -1634,6 +1714,10 @@ const ERule kRules[] = {
           "parâmetros aproximados: só o grão de película entra; a emulação de cor do FilmConvert não", nullptr, 0, nullptr),
     RULEX("BCC Magic Sharp", "BCC Magic Sharp", effect_keys::kUnsharp, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
     RULEX("BCC Fast Film Glow", "BCC Fast Film Glow", effect_keys::kGlow, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+    NAMED_RULE("BCC6LensBlur", "BCC Lens Blur", effect_keys::kLensBlur, kBccLensBlur,
+               "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", kBccLensDefaults, 1),
+    NAMED_RULE("BCC3Directional Blur", "BCC Directional Blur", "aurea.blur.photographic_direction", kBccDirectionalBlur,
+               "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", kBccDirectionalDefaults, 2),
     RULEX("Universe_Stylize_Glitch", "uni.Glitch", "aurea.glitch.video_glitch", kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
     RULEX("com.FXHOME.HitFilm.Flicker", "HitFilm Flicker", "aurea.motion.flicker", kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
     RULEX("com.FXHOME.HitFilm.Echo", "HitFilm Echo", effect_keys::kEchoTrail, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
@@ -1644,7 +1728,9 @@ const ERule kRules[] = {
     SAPPHIRE("S_Gamma", "aurea.color.levels"), SAPPHIRE("S_Tint", "aurea.color.tint"),
     SAPPHIRE("S_DuoTone", "aurea.color.duotone"), SAPPHIRE("S_TriTone", "aurea.color.gradient_map"),
     SAPPHIRE("S_QuadTone", "aurea.color.quadtone"), SAPPHIRE("S_Monochrome", "aurea.color.black_white"),
-    SAPPHIRE("S_HueSatBright", "aurea.color.hue_saturation"), SAPPHIRE("S_ChannelSwitcher", "aurea.color.shift_channels"),
+    NAMED_RULE("S_HueSatBright", "HueSatBright", effect_keys::kHueSaturation, kSapphireHueSatBright,
+               "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0),
+    SAPPHIRE("S_ChannelSwitcher", "aurea.color.shift_channels"),
     SAPPHIRE("S_Posterize", "aurea.color.luma_posterize"), SAPPHIRE("S_PseudoColor", "aurea.color.luma_hue_cycle"),
     SAPPHIRE("S_BleachBypass", "aurea.color.silver_retention"), SAPPHIRE("S_Solarize", "aurea.color.solarize"),
     SAPPHIRE("S_ClampChroma", "aurea.color.video_limiter"), SAPPHIRE("S_MathOps", "aurea.color.arithmetic"),
@@ -1658,6 +1744,8 @@ const ERule kRules[] = {
     SAPPHIRE("S_Sharpen", "aurea.blur.detail_sharpen"), SAPPHIRE("S_SoftFocus", "aurea.blur.soft_focus"),
     SAPPHIRE("S_Median", "aurea.blur.median"), SAPPHIRE("S_Glow", "aurea.light.chromatic_halo"),
     SAPPHIRE("S_GlowAura", "aurea.light.spectral_aura"), SAPPHIRE("S_GlowDarks", "aurea.light.shadow_halo"),
+    NAMED_RULE("S_GlowDist", "GlowDist", "aurea.light.displaced_halo", kSapphireGlowDist,
+               "halo por distância do Aurea; máscaras e composição avançada do plugin podem diferir", nullptr, 0),
     SAPPHIRE("S_GlowEdges", "aurea.light.outline_halo"), SAPPHIRE("S_GlowRainbow", "aurea.light.rainbow_halo"),
     SAPPHIRE("S_GlowRings", "aurea.light.glow_rings"), SAPPHIRE("S_UltraGlow", "aurea.light.multiscale_glow"),
     SAPPHIRE("S_Glare", "aurea.light.diffraction_glare"), SAPPHIRE("S_Glint", "aurea.light.spectral_glint"),
@@ -1726,6 +1814,7 @@ const ERule kRules[] = {
 #undef RULEX
 #undef NONE
 #undef SAPPHIRE
+#undef NAMED_RULE
 
 /// Número do sufixo "-NNNN" do matchName do parâmetro (0 = não tem).
 u16 suffix_number(std::string_view m, std::string_view effect) noexcept {
@@ -1759,10 +1848,17 @@ constexpr RuleAlias kAliases[] = {
     {"VIDEOCOPILOT CROSSPHERE", "CROSSPHERE_Bokeh"}, {"CROSSPHERE Bokeh", "CROSSPHERE_Bokeh"},
     {"Lumetri Color", "ADBE Lumetri"}, {"BCC Magic Sharp OBSOLETE", "BCC Magic Sharp"},
     {"BCC Fast Film Glow OBSOLETE", "BCC Fast Film Glow"},
+    {"BCC Lens Blur", "BCC6LensBlur"}, {"BCC Lens Blur OBS", "BCC6LensBlur"},
+    {"BCC Lens Blur OBSOLETE", "BCC6LensBlur"}, {"BCC Fast Lens Blur", "BCC6LensBlur"},
+    {"BCC Directional Blur", "BCC3Directional Blur"}, {"BCC Directional Blur OBS", "BCC3Directional Blur"},
+    {"BCC Directional Blur OBSOLETE", "BCC3Directional Blur"},
+    {"BCC Linear Luma Key", "BCC3Linear Luma Key"}, {"BCC Linear Luma Key OBSOLETE", "BCC3Linear Luma Key"},
+    {"Twitch", "Videocopilot Twitch"}, {"Video Copilot Twitch", "Videocopilot Twitch"},
+    {"HueSatBright", "S_HueSatBright"}, {"Sapphire HueSatBright", "S_HueSatBright"},
 };
 
 const ERule* exact_rule(std::string_view m) noexcept {
-    for (const ERule& r : kRules) if (m == r.ae) return &r;
+    for (const ERule& r : kRules) if (iequals(m, r.ae)) return &r;
     return nullptr;
 }
 } // namespace
@@ -1785,12 +1881,15 @@ const ERule* find_effect_rule_by_name(std::string_view name) noexcept {
 }
 
 u16 effect_param_number(const ERule& r, std::string_view s) noexcept {
-    if (const u16 n = suffix_number(s, r.ae)) return n;
+    if (!r.paramsByNameOnly) {
+        if (const u16 n = suffix_number(s, r.ae)) return n;
+    }
     for (u32 i = 0; i < r.paramCount; ++i) if (iequals(s, r.params[i].aeName) && r.params[i].aeName[0]) return r.params[i].ae;
     return 0;
 }
 
 u16 effect_param_by_position(const ERule& r, u32 position) noexcept {
+    if (r.paramsByNameOnly) return 0;
     if (std::strcmp(r.ae, "PEDG") == 0) {
         // The native UI includes nested groups and help fields between controls.
         // Numeric JSX property access must retain the observed physical positions.

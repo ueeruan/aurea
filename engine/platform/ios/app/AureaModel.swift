@@ -357,6 +357,14 @@ struct EffectCatalogItem: Identifiable, Equatable {
     var category: String
     var paramCount: UInt32
     var id: UInt32 { typeId }
+
+    func supportsLayer(_ kind: UInt32, textModel: Bool?, shapeModel: Bool?) -> Bool {
+        let layerMask = flags >> 8
+        if layerMask == 0 { return true }
+        guard kind > 0, kind < 32, layerMask & (1 << kind) != 0 else { return false }
+        if kind != 10 { return true }
+        return (flags & 2 == 0 || textModel != false) && (flags & 4 == 0 || shapeModel != false)
+    }
 }
 
 struct ProjectFile: Identifiable, Equatable {
@@ -2416,7 +2424,7 @@ final class AureaModel: ObservableObject {
     private func refreshStatus() {
         // Native startup freezes the document under modelMutex. Polling it
         // here would move that background wait straight back onto UIKit.
-        guard started, !exportPreparing, !exportBackgroundSavePending, !preRenderPreparing, !preExportPreparing else { return }
+        guard started, !openingProject, !exportPreparing, !exportBackgroundSavePending, !preRenderPreparing, !preExportPreparing else { return }
         var out = AureaStatus()
         guard engine.readStatus(&out) else { return }
         // Detail is evaluated at the native playhead. The optimistic timeline
@@ -3591,17 +3599,29 @@ final class AureaModel: ObservableObject {
         return true
     }
 
-    func open(_ project: ProjectFile) {
-        guard canChangeProject() else { return }
+    func open(_ project: ProjectFile) async -> Bool {
+        guard canChangeProject() else { return false }
+        guard started else {
+            toast = startError ?? AureaText.t("engine_not_ready")
+            return false
+        }
         mediaCreationRequest = UUID()
         openingProject = true
-        defer { openingProject = false }
-        var loadError: NSString?
-        var loadCode: Int32 = 0
-        guard engine.loadProject(project.url.path, error: &loadError, code: &loadCode) else {
-            let reason = AureaEngineText.reason(loadError as String?, code: Int(loadCode))
+        let loader = engine
+        let path = project.url.path
+        let result: (ok: Bool, detail: String?, code: Int) = await withCheckedContinuation { continuation in
+            mediaQueue.async {
+                var loadError: NSString?
+                var loadCode: Int32 = 0
+                let loaded = loader.loadProject(path, error: &loadError, code: &loadCode)
+                continuation.resume(returning: (loaded, loadError as String?, Int(loadCode)))
+            }
+        }
+        openingProject = false
+        guard result.ok else {
+            let reason = AureaEngineText.reason(result.detail, code: result.code)
             toast = AureaText.t("msg_nao_foi_possivel_abrir_o_projeto", reason)
-            return
+            return false
         }
         projectURL = project.url
         projectName = project.name
@@ -3621,6 +3641,7 @@ final class AureaModel: ObservableObject {
         }
         refreshModel(force: true)
         enterEditor()
+        return true
     }
 
     func enterEditor() {
@@ -3663,6 +3684,23 @@ final class AureaModel: ObservableObject {
         }
         dirty = false
         return true
+    }
+
+    private func saveImportedMedia() {
+        guard let url = projectURL else { return }
+        let generation = projectGeneration
+        let operation = beginProjectOperation()
+        let saver = engine
+        autosaveQueue.async { [weak self] in
+            let saved = saver.saveProject(url.path)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.endProjectOperation(operation)
+                guard self.projectGeneration == generation else { return }
+                if saved { self.homeCardStale = true }
+                else { self.toast = AureaText.t("ios_save_failed") }
+            }
+        }
     }
 
     /// A capa do projeto na Home. É o MESMO caminho do Android: o motor
@@ -3816,6 +3854,7 @@ final class AureaModel: ObservableObject {
     // Importação
     // =========================================================================
     private func canChangeProject() -> Bool {
+        if openingProject { toast = AureaText.t("export_service_preparing"); return false }
         if preRenderPreparing { toast = AureaText.t("prerender_preparing"); return false }
         if preExportPreparing || preExport.running { toast = AureaText.t("prx_busy"); return false }
         if exporting { toast = AureaText.t("editor_mantenha_aurea_aberto_ate_terminar"); return false }
@@ -3947,7 +3986,7 @@ final class AureaModel: ObservableObject {
                     self.engine.selectLayers(ids.map { NSNumber(value: $0) })
                     self.selection = Set(ids)
                     self.refreshModel(force: true)
-                    _ = self.saveProject(writeThumbnail: false)
+                    self.saveImportedMedia()
                 }
                 if let layeredError { self.toast = AureaModel.layeredImportError(gif: layeredError.0, code: layeredError.1) }
                 else if let audioError { self.toast = audioError }
@@ -4000,6 +4039,7 @@ final class AureaModel: ObservableObject {
         mediaQueue.async { [weak self] in
             importer.beginImportBatch()
             var imported: [Int64] = [], failures = 0
+            var audioFailure: String?
             for pick in picks {
                 do {
                     // 1.0.2: o trecho cortado já está em Media/ (e pode ser de outro projeto também).
@@ -4007,8 +4047,10 @@ final class AureaModel: ObservableObject {
                     if pick.window != nil { destination = pick.url } else { destination = try AureaPaths.importIntoMedia(pick.url) }
                     let name = pick.window?.name ?? pick.url.deletingPathExtension().lastPathComponent
                     let ext = pick.url.pathExtension.lowercased()
+                    let audio = !pick.video && OmegaPickedMedia.kind(pick.url) == .audio
                     let layered = !pick.video && (ext == "gif" || ext == "psd")
-                    let result = pick.video ? importer.importVideo(destination.path, name: name,
+                    let result = audio ? importer.importAudio(destination.path, name: name)
+                         : pick.video ? importer.importVideo(destination.path, name: name,
                                                                    windowStartUs: pick.window?.windowStartUs ?? 0,
                                                                    originRef: pick.window?.originRef ?? "")
                         : ext == "gif" ? importer.importGIF(destination.path, name: name)
@@ -4017,13 +4059,18 @@ final class AureaModel: ObservableObject {
                     if layered { try? FileManager.default.removeItem(at: destination) }
                     if result >= 0 {
                         // Duração e corte no MESMO passo (o lote está aberto).
-                        if !layered && (pick.durationFrames > 0 || pick.trimOutUs > pick.trimInUs) {
+                        if !audio && !layered && (pick.durationFrames > 0 || pick.trimOutUs > pick.trimInUs) {
                             _ = importer.applyImportTiming(result, durationFrames: pick.video ? 0 : pick.durationFrames,
                                                            sourceInUs: pick.video ? pick.trimInUs : 0, sourceOutUs: pick.video ? pick.trimOutUs : 0)
                         }
                         imported.append(result)
                     } else {
                         failures += 1
+                        if audio {
+                            let raw = importer.lastImportError
+                            audioFailure = raw.isEmpty ? AureaText.t("ios_import_failed_code", String(-result))
+                                : AureaEngineText.sentence(raw, code: Int(-result))
+                        }
                         // O trecho reaproveitado pode ser de outro projeto: fica (a limpeza do armazenamento decide).
                         if !layered && pick.window == nil { try? FileManager.default.removeItem(at: destination) }
                     }
@@ -4031,7 +4078,7 @@ final class AureaModel: ObservableObject {
             }
             // Fecha o passo de desfazer mesmo se algo falhou no meio.
             _ = importer.endImportBatch(imported.map { NSNumber(value: $0) }, placement: placement)
-            let ids = imported, failed = failures
+            let ids = imported, failed = failures, audioError = audioFailure
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.importingMedia = false
@@ -4039,9 +4086,10 @@ final class AureaModel: ObservableObject {
                     self.engine.selectLayers(ids.map { NSNumber(value: $0) })
                     self.selection = Set(ids)
                     self.refreshModel(force: true)
-                    _ = self.saveProject(writeThumbnail: false)
+                    self.saveImportedMedia()
                 }
-                if failed > 0 { self.toast = AureaText.t("msg_nao_consegui_ler_esse_arquivo") }
+                if let audioError { self.toast = audioError }
+                else if failed > 0 { self.toast = AureaText.t("msg_nao_consegui_ler_esse_arquivo") }
             }
         }
     }
@@ -4115,7 +4163,7 @@ final class AureaModel: ObservableObject {
     }
 
     /// `atPlayhead`: o clipe entra no cabeçote (o vídeo gerado pela IA), não no zero.
-    func importMedia(url: URL, kind: ImportKind, objectHDRI: Int64? = nil, atPlayhead: Bool = false) {
+    func importMedia(url: URL, kind: ImportKind, objectHDRI: Int64? = nil, atPlayhead: Bool = false, showHDRIBackground: Bool = false) {
         guard !importingMedia else { return }
         // Modelo 3D: o fluxo com orçamento de memória ("Otimizar modelo").
         if kind == .model { importModelFiles(urls: [url]); return }
@@ -4140,7 +4188,7 @@ final class AureaModel: ObservableObject {
                 case .model: result = importer.importModel(destination.path, name: name)
                 case .hdri:
                     if let objectHDRI { result = importer.importObjectHDRI(destination.path, layer: objectHDRI) }
-                    else { result = importer.importHdri(destination.path) }
+                    else { result = importer.importHdri(destination.path, showAsBackground: showHDRIBackground) }
                 }
                 if result < 0 {
                     // A frase do motor sai no idioma do app (AureaEngineText).
@@ -4160,7 +4208,7 @@ final class AureaModel: ObservableObject {
                 else { self.engine.selectLayers([NSNumber(value: importedId)]); self.selection = [importedId] }
                 self.refreshModel(force: true)
                 if atPlayhead && kind != .hdri { self.moveToPlayhead(importedId) }
-                _ = self.saveProject(writeThumbnail: false)
+                self.saveImportedMedia()
             }
         }
     }
@@ -4197,7 +4245,7 @@ final class AureaModel: ObservableObject {
                 }
                 self.engine.selectLayers([NSNumber(value: result)]); self.selection = [result]
                 self.refreshModel(force: true)
-                _ = self.saveProject(writeThumbnail: false)
+                self.saveImportedMedia()
                 self.toast = AureaText.t(interrupted ? "voice_interrupted" : "voice_saved")
             }
         }
@@ -5616,7 +5664,7 @@ final class AureaModel: ObservableObject {
             refreshModel(force: true)
         }
         guard type == fxEffectTypeId("aurea.key.rotobrush") else { add(); return }
-        guard ids.allSatisfy({ id in layers.contains { $0.id == id && ($0.kind == 1 || $0.kind == 2) } }) else { toast = AureaText.t("roto_select_media"); return }
+        guard ids.allSatisfy({ id in editingLayers.contains { $0.id == id && ($0.kind == 1 || $0.kind == 2) } }) else { toast = AureaText.t("roto_select_media"); return }
         add()
     }
 
@@ -5625,19 +5673,29 @@ final class AureaModel: ObservableObject {
     /// Adiciona o efeito `type` às camadas escolhidas (destravadas) e aplica a
     /// variação `preset` (índice em `engine.effectPresets(type)`) no efeito NOVO de
     /// cada uma, tudo num passo de desfazer. `preset` < 0 = só o efeito.
-    /// O motor pode aplicar o "adicionar" no quadro seguinte: o grupo de desfazer
-    /// fica aberto até o efeito novo aparecer (≤ ~1 s) e o preset entrar.
+    /// A consulta dos efeitos esvazia a fila do motor antes de ler a pilha.
     func addEffectWithPreset(_ type: UInt32, preset: Int) {
-        let targets = layers.filter { selection.contains($0.id) && !$0.locked }.map(\.id)
-        guard preset >= 0, started, !targets.isEmpty, !HyperEffectGate.locked(typeId: type) else {
-            addCatalogEffect(type, layers: targets.isEmpty ? Array(selection) : targets)
+        let selected = editingSelection
+        let targets = editingLayers.filter { selected.contains($0.id) && !$0.locked }.map(\.id)
+        guard !targets.isEmpty else {
+            toast = AureaText.t(selected.isEmpty ? "edt_cmd_select_layer" : "sh_layers_locked_unlock_to_edit")
+            return
+        }
+        guard preset >= 0, started, !HyperEffectGate.locked(typeId: type) else {
+            addCatalogEffect(type, layers: targets)
             return
         }
         var before: [Int64: [UInt32]] = [:]
         for layer in targets { before[layer] = omegaEffectIds(ofType: type, layer: layer) }
         beginGesture("adicionar efeito")
+        defer { endGesture() }
         addCatalogEffect(type, layers: targets)
-        omegaApplyPresetWhenAdded(type, preset: preset, targets: targets, before: before, tries: 0)
+        for layer in targets {
+            let known = Set(before[layer] ?? [])
+            if let added = omegaEffectIds(ofType: type, layer: layer).last(where: { !known.contains($0) }) {
+                _ = engine.applyEffectPreset(UInt32(preset), effect: added, forLayer: layer)
+            }
+        }
     }
 
     /// Os efeitos do tipo `type` na camada, na ordem da pilha (leitura direta do motor).
@@ -5645,24 +5703,6 @@ final class AureaModel: ObservableObject {
         engine.effects(forLayer: layer).compactMap { row in
             (row["typeId"] as? NSNumber)?.uint32Value == type ? (row["effectId"] as? NSNumber)?.uint32Value : nil
         }
-    }
-
-    private func omegaApplyPresetWhenAdded(_ type: UInt32, preset: Int, targets: [Int64], before: [Int64: [UInt32]], tries: Int) {
-        var fresh: [(layer: Int64, effect: UInt32)] = []
-        for layer in targets {
-            let known = Set(before[layer] ?? [])
-            if let effect = omegaEffectIds(ofType: type, layer: layer).last(where: { !known.contains($0) }) {
-                fresh.append((layer: layer, effect: effect))
-            }
-        }
-        if fresh.count < targets.count && tries < 60 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { [weak self] in
-                self?.omegaApplyPresetWhenAdded(type, preset: preset, targets: targets, before: before, tries: tries + 1)
-            }
-            return
-        }
-        for item in fresh { _ = engine.applyEffectPreset(UInt32(preset), effect: item.effect, forLayer: item.layer) }
-        endGesture()
     }
 
     func detectBeats() { detectBeats(for: selectedLayer) }

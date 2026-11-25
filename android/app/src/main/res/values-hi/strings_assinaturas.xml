@@ -1,17 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 16/11/2026: assinaturas mensais (hyper/Paywall.kt, AureaSubscriptions.swift; docs/release/assinaturas.md). -->
+    <!-- 16/11/2026: assinaturas; 1.0.9: AureaHyper semanal, mensal e anual (hyper/Paywall.kt, AureaSubscriptions.swift; docs/release/assinaturas.md). -->
     <string name="assinatura_badge">सशुल्क सुविधा</string>
-    <string name="assinatura_intro_efeito">यह इफ़ेक्ट AureaHyper का हिस्सा है। साल में एक बार AureaHyper की सदस्यता लें और सभी सशुल्क इफ़ेक्ट, 3D टेक्स्ट और Hyper टूल अनलॉक करें।</string>
-    <string name="assinatura_intro_texto3d">3D टेक्स्ट AureaHyper का हिस्सा है। साल में एक बार AureaHyper की सदस्यता लें और सभी सशुल्क इफ़ेक्ट और Hyper टूल भी अनलॉक करें।</string>
+    <string name="assinatura_intro_efeito">यह इफ़ेक्ट AureaHyper का हिस्सा है। AureaHyper की साप्ताहिक, मासिक या वार्षिक सदस्यता लें और सभी सशुल्क इफ़ेक्ट, 3D टेक्स्ट और Hyper टूल अनलॉक करें।</string>
+    <string name="assinatura_intro_texto3d">3D टेक्स्ट AureaHyper का हिस्सा है। AureaHyper की साप्ताहिक, मासिक या वार्षिक सदस्यता लें और सभी सशुल्क इफ़ेक्ट और Hyper टूल भी अनलॉक करें।</string>
     <string name="assinatura_intro_hyper">AureaHyper सभी सशुल्क इफ़ेक्ट, 3D टेक्स्ट और Hyper टूल अनलॉक करता है।</string>
     <string name="assinatura_so_efeito">सिर्फ़ इस इफ़ेक्ट की सदस्यता लें</string>
     <string name="assinatura_so_texto3d">सिर्फ़ 3D टेक्स्ट की सदस्यता लें</string>
+    <string name="assinatura_escolha_plano">अपना AureaHyper प्लान चुनें। हर प्लान सब कुछ अनलॉक करता है।</string>
+    <string name="assinatura_plano_semanal">साप्ताहिक</string>
+    <string name="assinatura_plano_mensal">मासिक</string>
+    <string name="assinatura_plano_anual">वार्षिक</string>
+    <string name="assinatura_por_semana">%1$s/सप्ताह</string>
+    <string name="assinatura_melhor_valor">सबसे किफ़ायती</string>
+    <string name="assinatura_economize">%1$d%% बचाएँ</string>
     <string name="assinatura_por_mes">%1$s/माह</string>
     <string name="assinatura_por_ano">%1$s/वर्ष</string>
     <string name="assinatura_libera_tudo">सब कुछ अनलॉक करता है</string>
     <string name="assinatura_restaurar">खरीदारी बहाल करें</string>
-    <string name="assinatura_renovacao">रद्द करने तक हर साल अपने-आप नवीनीकृत होती है। %1$s में कभी भी रद्द करें।</string>
+    <string name="assinatura_renovacao">रद्द करने तक हर अवधि (सप्ताह, महीना या साल) के अंत में अपने-आप नवीनीकृत होती है। %1$s में कभी भी रद्द करें।</string>
     <string name="assinatura_entrar">सदस्यता लेने के लिए अपने Aurea खाते में साइन इन करें। सदस्यता खाते से जुड़ी रहती है।</string>
     <string name="assinatura_em_breve">सदस्यताएँ अभी उपलब्ध नहीं हैं। यहाँ कोई शुल्क नहीं लिया जाता।</string>
     <string name="assinatura_obrigado">सदस्यता सक्रिय है। अब आप इसका उपयोग कर सकते हैं।</string>

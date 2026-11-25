@@ -109,15 +109,16 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
     androidx.compose.runtime.LaunchedEffect(store) {
         androidx.compose.runtime.snapshotFlow { store.project.path }.collect { StageView.reset(store) }
     }
-    // AE layers (B10), só no Aurea PC: grade, margens seguras e réguas são desenhadas
-    // pelo MOTOR na saída da prévia (nunca no export); aqui só vai o pedido. Lido num
-    // snapshotFlow para o corpo do palco não recompor quando a coluna de modos muda.
-    // No celular nada é pedido: a grade continua a do overlay (drawStageOverlay).
-    if (com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe) androidx.compose.runtime.LaunchedEffect(store) {
+    // The display pass can blend the grid with pixels from the native surface.
+    val context = LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(store, ui, context) {
+        ViewModes.load(context)
+        val desktop = com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe
         androidx.compose.runtime.snapshotFlow {
-            val bits = (if (ViewModes.grid) 1 else 0) or (if (ViewModes.safe) 2 else 0) or (if (ViewModes.rulers) 4 else 0)
-            Triple(bits, ViewModes.gridSpacing, store.project.path)
-        }.collect { (bits, spacing, _) -> store.setPreviewGuides(bits, spacing.toFloat()) }
+            val bits = (if (ViewModes.grid && (desktop || (!store.rawPlayback && !ui.fullscreen))) 1 else 0) or
+                (if (desktop && ViewModes.safe) 2 else 0) or (if (desktop && ViewModes.rulers) 4 else 0)
+            Triple(store.project.path, bits to ViewModes.gridSpacing, ViewModes.gridAppearance)
+        }.collect { (_, controls, look) -> store.setPreviewGuides(controls.first, controls.second.toFloat(), look.rgb, look.blend.wire) }
     }
     Box(modifier.testTag("editor.stage").background(AureaColors.EditorTopBar).clipToBounds()) {
         PreviewSurface(store, Modifier.fillMaxSize())
@@ -488,42 +489,8 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     m.handlesValid = false
     m.markerAnchorValid = false
     if (!m.valid) return
-    // Omega chrome (área 02, P1-2): grade de ESPAÇAMENTO (px da composição, a
-    // partir do centro) + cruz do centro, ligada pela coluna de modos. O
-    // tamanho da composição em 1× vai para os degraus de zoom da coluna.
+    // O tamanho da composição em 1× define os degraus de zoom da coluna.
     StageView.noteExtent(m.compW * m.baseFit, m.compH * m.baseFit)
-    // No Aurea PC a grade (e a cruz do centro) sai do motor, na saída da prévia
-    // (Engine::set_preview_guides, shaders/composite/output.frag); no celular
-    // continua a deste overlay, como sempre.
-    if (ViewModes.grid && !com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe) {
-        val gridInk = AureaColors.Text.copy(alpha = .35f)
-        val gridStroke = 1.dp.toPx()
-        val step = ViewModes.gridSpacing.toFloat().coerceAtLeast(1f)
-        val halfW = m.compW / 2f
-        val halfH = m.compH / 2f
-        // Linhas a menos de 4 px na tela viram borrão: só a cruz do centro.
-        if (step * m.fit >= 4f) {
-            var d = step
-            while (d <= halfW) {
-                for (gx in floatArrayOf(m.sx(halfW - d), m.sx(halfW + d))) {
-                    drawLine(gridInk, Offset(gx, m.sy(0f)), Offset(gx, m.sy(m.compH)), gridStroke)
-                }
-                d += step
-            }
-            d = step
-            while (d <= halfH) {
-                for (gy in floatArrayOf(m.sy(halfH - d), m.sy(halfH + d))) {
-                    drawLine(gridInk, Offset(m.sx(0f), gy), Offset(m.sx(m.compW), gy), gridStroke)
-                }
-                d += step
-            }
-        }
-        val cx = m.sx(halfW)
-        val cy = m.sy(halfH)
-        val arm = 10.dp.toPx()
-        drawLine(AureaColors.Text.copy(alpha = .6f), Offset(cx - arm, cy), Offset(cx + arm, cy), gridStroke * 1.5f)
-        drawLine(AureaColors.Text.copy(alpha = .6f), Offset(cx, cy - arm), Offset(cx, cy + arm), gridStroke * 1.5f)
-    }
     // Borda do quadro: dá para ver onde a composição termina mesmo com o fundo
     // do projeto da cor da área de trabalho (só na prévia, nunca no export).
     drawRect(Color.White.copy(alpha = .16f), topLeft = Offset(m.sx(0f), m.sy(0f)),

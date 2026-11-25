@@ -576,16 +576,19 @@ void CommandListImpl::dispatch(u32 x, u32 y, u32 z) noexcept {
     }
     if (dirty_ && !flush_descriptors()) return;
     if (!lastSet_) return;   // sem descritores amarrados o driver lê um set nulo
-    // 1.0.6: o 1º dispatch de cada pipeline neste processo roda sob o guarda de
-    // travamento (SIGSEGV 0xf0 no vkCmdDispatch do vulkan.adreno.so: Galaxy Tab
-    // S7 FE e S20+, export/render/prévia de efeito). Se o driver derrubar o
-    // processo, a próxima abertura conta; na 2ª o pipeline fica bloqueado.
     const VkPipeline handle = pipeline_->pipeline;
     const bool proven = std::find(provenDispatch_.begin(), provenDispatch_.end(), handle) != provenDispatch_.end();
-    if (!proven) backend_->guard_begin(pipeline_->guardKey, pipeline_->guardName);
+    bool guarded = !proven;
+#if defined(__ANDROID__)
+    // Adreno also crashed hundreds of frames into the same export. A pipeline
+    // that succeeded with an earlier frame's resources can still crash later.
+    constexpr u32 qualcommVendorId = 0x5143;
+    guarded |= frame_->offscreen && backend_->caps_.vendorId == qualcommVendorId;
+#endif
+    if (guarded) backend_->guard_begin(pipeline_->guardKey, pipeline_->guardName);
     backend_->device_dispatch().vkCmdDispatch(cmd_, x, y, z);
+    if (guarded) backend_->guard_end();
     if (!proven) {
-        backend_->guard_end();
         // Handles de pipelines destruídos podem ser reaproveitados pelo driver:
         // a lista é curta (efeitos de compute), então só cresce até um teto.
         if (provenDispatch_.size() >= 64) provenDispatch_.erase(provenDispatch_.begin());
@@ -674,6 +677,11 @@ Status CommandListImpl::finish_pass() noexcept {
     if (!backend_) return Status{Errc::InvalidState, "sem backend"};
     if (!backend_->recordingStatus_.ok()) return backend_->recordingStatus_;
     if (!frame_ || !cmd_) return Status{Errc::InvalidState, "sem frame"};
+#if defined(__ANDROID__)
+    // Android segments run as fenced offscreen frames in Renderer. Recording
+    // another primary inside this frame triggered native Adreno driver crashes.
+    return OkStatus;
+#else
     ++frame_->passesInCommandBuffer;
     // So o export (offscreen) e fatiado: a previa manda o quadro inteiro num
     // job, como antes - fatiar a cada 8 passes e esperar a GPU entre fatias
@@ -731,6 +739,7 @@ Status CommandListImpl::finish_pass() noexcept {
     if (hasViewport_) backend_->device_dispatch().vkCmdSetViewport(cmd_, 0, 1, &viewport_);
     if (hasScissor_) backend_->device_dispatch().vkCmdSetScissor(cmd_, 0, 1, &scissor_);
     return OkStatus;
+#endif
 }
 
 // =============================================================================

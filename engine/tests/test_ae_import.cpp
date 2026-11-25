@@ -2796,3 +2796,103 @@ AUREA_TEST(AeImport, PluginAndSapphireEffectsMapToAureaEffects) {
     AUREA_CHECK(json.find("\"reasonKey\":\"ae_reason_params_approx\"") != std::string::npos);
     AUREA_CHECK(json.find("\"messageKey\":\"ae_msg_ok_ffx\"") != std::string::npos);
 }
+
+AUREA_TEST(AeImport, AepReportedEffectsKeepNativeParametersAndKeyframes) {
+    constexpr u32 ts = 30720;
+    std::string stack;
+    const auto append = [&](const char* match, const char* name,
+                            const std::vector<std::pair<std::string, u8>>& definitions,
+                            const std::vector<std::pair<u32, std::string>>& values) {
+        stack += tdmn(match) + effect(match, name, definitions, values);
+    };
+    append("ADBE Upscale", "Detail-preserving Upscale", {},
+           {{1, prop("Scale", 1, {250}, ts)}, {7, prop_keys("Detail", 1, {{ts, {80}}}, ts)}});
+    append("BCC6LensBlur", "BCC Lens Blur OBS", {{"Iris Scale", 2}},
+           {{1, prop("", 1, {18}, ts)}, {77, prop("Mix with Original", 1, {25}, ts)}});
+    append("S_Shake", "S_Shake", {},
+           {{2, prop("Mask from Layer", 1, {0}, ts)}, {69, prop("Z Rand Amp", 1, {35}, ts)},
+            {110, prop("Stillness", 1, {.4}, ts)}, {111, prop("Twitch Frequency", 1, {3}, ts)},
+            {113, prop("Drift", 1, {.6}, ts)}, {114, prop("Center Bias", 1, {.2}, ts)},
+            {239, prop("Load Preset", 1, {0}, ts)}, {252, prop("X Shake", 1, {0}, ts)}});
+    append("Videocopilot Twitch", "Twitch", {},
+           {{8, prop("Slide", 1, {1}, ts)}, {45, prop_keys("Slide Amount", 1, {{0, {10}}, {ts, {80}}}, ts)},
+            {78, prop("Scale Origin", 2, {.25, .75}, ts, 1, true)}});
+    append("S_HueSatBright", "S_HueSatBright", {},
+           {{50, prop("Hue Shift", 1, {.25}, ts)}, {71, prop("Saturation", 1, {1.6}, ts)},
+            {72, prop("Brightness", 1, {.8}, ts)}});
+    // A vendor revision changes the effect match name and parameter IDs.
+    append("BCC Direction Blur Vendor", "BCC Directional Blur OBSOLETE", {},
+           {{92, prop("Blur Amount", 1, {42}, ts)}, {82, prop("Angle", 1, {63}, ts)},
+            {62, prop("Mix with Original", 1, {12}, ts)}});
+    append("BCC3Linear Luma Key", "BCC Linear Luma Key OBSOLETE", {},
+           {{5, prop_keys("", 1, {{0, {0}}, {ts, {255}}}, ts)}});
+    append("S_GlowDist", "GlowDist", {},
+           {{50, prop("Brightness", 1, {1.2}, ts)}, {51, prop("Glow Width", 1, {.2}, ts)},
+            {52, prop("Threshold", 1, {.65}, ts)}, {53, prop("Width Blue", 1, {1.7}, ts)}});
+    std::string timing(164, '\0');
+    timing.replace(0, 4, be32(18));
+    timing.replace(8, 4, be32(1));
+    timing.replace(12, 8, be32(0) + be32(60));
+    timing.replace(20, 8, be32(0) + be32(60));
+    timing.replace(28, 8, be32(120) + be32(60));
+    timing.replace(0x6c, 4, be32(1));
+    timing[0x26] = 2;
+    timing[0x27] = 5;
+    const auto layer = list("Layr", chunk("ldta", timing) + chunk("Utf8", "Effects") +
+        list("tdgp", tdmn("ADBE Effect Parade") + list("tdgp", stack)));
+    const auto file = aep_file(aep_comp(7, "Imported stack", 640, 360, layer));
+
+    AeRig rig;
+    const auto report = rig.e.import_ae_data(file, "reported.aep", 0);
+    if (!report.ok || !report.skipped.empty()) dump(report);
+    AUREA_CHECK(report.ok && report.skipped.empty());
+    AUREA_CHECK_EQ(report.effects, 8u);
+    const auto* wrapper = layer_named(rig, "Imported stack");
+    AUREA_CHECK(wrapper != nullptr);
+    if (!wrapper) return;
+    const auto* inner = rig.e.project()->timeline().composition(wrapper->nested.composition);
+    const auto* target = inner ? inner->layer(inner->order().at(0)) : nullptr;
+    AUREA_CHECK(target && target->effects.size() == 8);
+    if (!target || target->effects.size() != 8) return;
+    const char* keys[] = {"aurea.distort.upscale_reference", "aurea.blur.lens", effect_keys::kShake,
+                          "aurea.motion.twitch_reference", effect_keys::kHueSaturation, "aurea.blur.photographic_direction",
+                          effect_keys::kLumaKey, "aurea.light.displaced_halo"};
+    for (usize i = 0; i < std::size(keys); ++i) AUREA_CHECK_EQ(target->effects[i].type, effect_type_id(keys[i]));
+    const auto constant = [&](u32 index, const char* parameter, u32 channel = 0) {
+        const u32 param = param_index(rig.e, keys[index], parameter);
+        const auto& params = target->effects[index].params;
+        return param < params.size() ? params[param].constant.v[channel] : -999.0f;
+    };
+    const auto track = [&](u32 index, const char* parameter) {
+        const u32 param = param_index(rig.e, keys[index], parameter);
+        return target->tracks.find(TrackProperty::EffectParam, target->effects[index].id, param_track_key(param, 0));
+    };
+    AUREA_CHECK_NEAR(constant(0, "scale"), 250, 1e-5);
+    const Track* detail = track(0, "detail");
+    AUREA_CHECK(detail && detail->keys.size() == 1 && detail->keys.front().value == 80);
+    AUREA_CHECK_NEAR(constant(1, "radius"), 18, 1e-5);
+    AUREA_CHECK_NEAR(constant(1, "mix"), 75, 1e-5);
+    AUREA_CHECK_NEAR(constant(2, "zoom"), 35, 1e-5);
+    AUREA_CHECK_NEAR(constant(2, "stillness"), 40, 1e-5);
+    AUREA_CHECK_NEAR(constant(2, "twitch_frequency"), 3, 1e-5);
+    AUREA_CHECK_NEAR(constant(2, "drift"), 60, 1e-5);
+    AUREA_CHECK_NEAR(constant(2, "center_bias"), 20, 1e-5);
+    AUREA_CHECK_NEAR(constant(3, "slide_enabled"), 1, 1e-5);
+    AUREA_CHECK_NEAR(constant(3, "scale_origin", 0), .25, 1e-5);
+    AUREA_CHECK_NEAR(constant(3, "scale_origin", 1), .75, 1e-5);
+    const Track* slide = track(3, "slide_amount");
+    AUREA_CHECK(slide && slide->keys.size() == 2 && slide->keys.back().value == 80);
+    AUREA_CHECK_NEAR(constant(4, "hue"), 90, 1e-5);
+    AUREA_CHECK_NEAR(constant(4, "chroma_scale"), 1.6, 1e-5);
+    AUREA_CHECK_NEAR(constant(4, "brightness_gain"), .8, 1e-5);
+    AUREA_CHECK_NEAR(constant(5, "amount"), 42, 1e-5);
+    AUREA_CHECK_NEAR(constant(5, "angle"), 63, 1e-5);
+    AUREA_CHECK_NEAR(constant(5, "mix_source"), 12, 1e-5);
+    const Track* luma = track(6, "threshold");
+    AUREA_CHECK(luma && luma->keys.size() == 2);
+    if (luma && luma->keys.size() == 2) AUREA_CHECK_NEAR(luma->keys.back().value, 100, 1e-5);
+    AUREA_CHECK_NEAR(constant(7, "brightness"), 1.2, 1e-5);
+    AUREA_CHECK_NEAR(constant(7, "width"), .2, 1e-5);
+    AUREA_CHECK_NEAR(constant(7, "threshold"), 65, 1e-5);
+    AUREA_CHECK_NEAR(constant(7, "width_blue"), 1.7, 1e-5);
+}

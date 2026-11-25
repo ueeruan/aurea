@@ -243,7 +243,7 @@ AUREA_TEST(FrameGraphSegmentsGpu, RealFencedSegmentsPreserveEveryPixelAndImporte
     AUREA_REQUIRE_GPU();
     Gpu isolated; AUREA_CHECK(isolated.ok); if (!isolated.ok) return;
     SegmentPixels baseline;
-    for (const u32 chunk : {0u, 1u, 2u, 3u}) {
+    for (const u32 chunk : {0u, 1u, 2u, 3u, 8u}) {
         SegmentGpuGraph fixture(isolated); if (!fixture.setup()) return;
         const auto pixels = fixture.run(chunk, false);
         AUREA_CHECK(pixels.ok); if (!pixels.ok) return;

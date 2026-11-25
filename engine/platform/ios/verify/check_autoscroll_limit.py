@@ -89,7 +89,7 @@ def main() -> int:
         "auto-rolagem limitada pelo teto do gesto": "GestureLimit.clampView(viewFrame + Double(AutoScroll.step(" in view and "limit: g.limit)" in view,
         "mover clipe: deslocamento preso ao teto": "GestureLimit.maxShift(maxEnd: latest, limit: g.limit)" in view,
         "mover clipe: sem Int32.max - latest": "Int64(Int32.max) - Int64(latest)" not in view,
-        "aparar: alvo preso ao teto": view.count("GestureLimit.clampFrame(max(0, snapped == Snap.none ? timelineFrame(desired) : snapped), limit: g.limit)") == 2,
+        "aparar: alvo preso ao teto": view.count("GestureLimit.clampFrame(") >= 5 and "GestureLimit.clampFrame(magneticStart ? proposed : max(0, proposed), limit: g.limit)" in view,
         "Android tem a mesma regra": "object GestureLimit" in (ROOT / "android/app/src/main/java/com/aurea/aurea/editor/timeline/TimelineMath.kt").read_text(encoding="utf-8"),
     }
     for label, valid in checks.items():

@@ -5,10 +5,20 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,9 +61,12 @@ internal fun StageFloatPills(store: EditorStore, modifier: Modifier) {
     val on = stringResource(R.string.common_on)
     val off = stringResource(R.string.common_off)
     Column(modifier.padding(top = 12.dp, end = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.End) {
-        FloatPill("stage.pill.grid", stringResource(R.string.om_vm_grid), if (ViewModes.grid) on else off, ViewModes.grid, {
-            ViewModes.grid = !ViewModes.grid
-        }) { tint -> CupertinoIcon(CupertinoGlyph.Grid, 16.dp, tint) }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (ViewModes.grid) GridAppearanceButton()
+            FloatPill("stage.pill.grid", stringResource(R.string.om_vm_grid), if (ViewModes.grid) on else off, ViewModes.grid, {
+                ViewModes.grid = !ViewModes.grid
+            }) { tint -> CupertinoIcon(CupertinoGlyph.Grid, 16.dp, tint) }
+        }
         // O "olho": esconde o contorno e as alças da seleção (aceso = escondido).
         FloatPill("stage.pill.overlay", stringResource(R.string.om_vm_overlay), if (ViewModes.hideOverlay) on else off, ViewModes.hideOverlay, {
             ViewModes.hideOverlay = !ViewModes.hideOverlay
@@ -70,6 +83,51 @@ internal fun StageFloatPills(store: EditorStore, modifier: Modifier) {
             Text(percent, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, fontWeight = FontWeight.W600, color = tint)).merge(AureaType.Tabular))
         }
     }
+}
+
+@Composable
+internal fun GridAppearanceButton() {
+    var open by remember { mutableStateOf(false) }
+    FloatPill("stage.grid.appearance", stringResource(R.string.preview_grid_appearance), null, false, { open = true }) {
+        CupertinoIcon(CupertinoGlyph.Gear, 16.dp, it)
+    }
+    if (!open) return
+    var look by remember { mutableStateOf(ViewModes.gridAppearance) }
+    var menu by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = { open = false },
+        title = { Text(stringResource(R.string.preview_grid_appearance)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box {
+                    val label = stringResource(R.string.preview_grid_blend)
+                    val mode = stringResource(look.blend.label)
+                    OutlinedButton(onClick = { menu = true }, modifier = Modifier.testTag("stage.grid.blend")
+                        .semantics { contentDescription = "$label, $mode" }) { Text(mode) }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        GridBlend.entries.forEach { blend ->
+                            DropdownMenuItem(text = { Text(stringResource(blend.label)) }, onClick = {
+                                look = look.copy(blend = blend); menu = false
+                            })
+                        }
+                    }
+                }
+                if (look.blend != GridBlend.HighContrast) {
+                    Text(stringResource(R.string.preview_grid_color))
+                    val color = remember(look.rgb) { floatArrayOf((look.rgb shr 16 and 255) / 255f, (look.rgb shr 8 and 255) / 255f, (look.rgb and 255) / 255f, 1f) }
+                    com.aurea.aurea.ui.ds.EmbeddedColorPicker(color, onColor = { v ->
+                        fun byte(i: Int) = kotlin.math.round(v[i].coerceIn(0f, 1f) * 255).toInt()
+                        look = look.copy(rgb = (byte(0) shl 16) or (byte(1) shl 8) or byte(2))
+                    }, modifier = Modifier.fillMaxWidth().height(190.dp), withAlpha = false)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { ViewModes.changeGridAppearance(look); open = false }) { Text(stringResource(R.string.common_save)) } },
+        dismissButton = { TextButton(onClick = { open = false }) { Text(stringResource(R.string.common_cancel)) } },
+        containerColor = AureaColors.EditorTopBar,
+        titleContentColor = AureaColors.Text,
+        textContentColor = AureaColors.Text,
+    )
 }
 
 /** Nome de cada vista do AE (o índice é o modo de `Engine::set_view_mode`). */

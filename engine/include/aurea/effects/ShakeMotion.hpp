@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 
@@ -28,22 +29,40 @@ struct Settings {
     float amount = 1, smoothness = 1, phase = 0, wave = 0;
     std::uint32_t seed = 1, style = 0;
     bool separate = true;
+    std::array<float, 4> frequencyScale{1, 1, 1, 1};
+    float phaseY = 0, stillness = .7f, twitchFrequency = 0, drift = .15f, centerBias = 0;
 };
 struct Pose { float x = 0, y = 0, rotation = 0, scale = 1; };
 inline Pose sample(const Settings& s, double seconds) noexcept {
     if (!std::isfinite(seconds) || s.amount <= 0 || s.frequency <= 0) return {};
-    const double t = seconds * double(s.frequency) + double(s.phase);
     auto axis = [&](std::uint32_t index) {
+        const double t = seconds * double(s.frequency) * s.frequencyScale[index] + s.phase + (index == 1 ? s.phaseY : 0);
         float value = noise(t, s.seed, index, s.smoothness);
         if (s.style == 1) { // Twitchy: continuous, short bursts separated by rests.
-            const float gate = std::max(0.f, noise(t * .25, s.seed + 73, 9, 1.f));
-            value *= std::min(1.f, gate * 3.f);
+            if (s.twitchFrequency > 0) {
+                const double pulse = seconds * s.twitchFrequency + s.phase;
+                const float active = std::max(0.0001f, 1.f - s.stillness);
+                const float progress = std::clamp(static_cast<float>(pulse - std::floor(pulse)) / active, 0.f, 1.f);
+                const float envelope = std::sin(progress * 3.14159265f);
+                value *= envelope * envelope;
+            } else {
+                const float gate = std::max(0.f, noise(t * .25, s.seed + 73, 9, 1.f));
+                value *= std::min(1.f, gate * 3.f);
+            }
         } else if (s.style == 2) { // Jumpy: fast transition followed by a slow drift.
             const double cell = std::floor(t);
             const double f = t-cell;
             const double jump = std::min(1.0, f / .12);
-            value = noise(cell + jump, s.seed, index, 1.f) * .85f
-                  + noise(t*.35, s.seed+37, index, 1.f) * .15f;
+            float jumpValue = noise(cell + jump, s.seed, index, 1.f);
+            if (s.centerBias > 0) {
+                const auto target = [&](double step) {
+                    const auto id = static_cast<std::int64_t>(std::clamp(step, -1e12, 1e12));
+                    return (random(s.seed, id, 13) + 1.f) * .5f < s.centerBias ? 0.f : random(s.seed, id, index);
+                };
+                const float p = static_cast<float>(jump);
+                jumpValue = std::lerp(target(cell), target(cell + 1), p*p*(3.f - 2.f*p));
+            }
+            value = jumpValue * (1.f - s.drift) + noise(t*.35, s.seed+37, index, 1.f) * s.drift;
         }
         const float wave = std::sin(float(std::remainder(t, 1.0) * 6.283185307179586 + index * 1.618));
         return (value * (1.f-s.wave) + wave*s.wave) * s.amount;

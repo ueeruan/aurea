@@ -416,4 +416,6 @@ AUREA_TEST(EditorReferenceGpu, GroupMaskCutsCompositeAlphaOnceForOverlappingCont
         engine.shutdown();
     }
 }
+// Ferramenta do projeto aurea-pindown (só roda com AUREA_PINDOWN_*).
+#include "AureaPindownBuild.inl"
 #endif

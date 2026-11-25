@@ -14,6 +14,14 @@ layout(push_constant) uniform Push {
 } pc;
 
 layout(location = 0) in vec3 a_position;
+#ifdef CUTOUT
+layout(location = 3) in vec2 a_uv0;
+layout(location = 4) in vec2 a_uv1;
+layout(location = 5) in vec4 a_color;
+layout(location = 0) out vec2 v_uv0;
+layout(location = 1) out vec2 v_uv1;
+layout(location = 2) out float v_alpha;
+#endif
 #ifdef SKINNED
 layout(location = 6) in uvec4 a_joints;
 layout(location = 7) in vec4 a_weights;
@@ -27,6 +35,11 @@ layout(set = 0, binding = AUREA_DATA, std430) readonly buffer Instances {
 #endif
 
 void main() {
+#ifdef CUTOUT
+    v_uv0 = a_uv0;
+    v_uv1 = a_uv1;
+    v_alpha = a_color.a;
+#endif
     vec4 p = vec4(a_position, 1.0);
 #ifdef SKINNED
     uint base = uint(pc.extra.x + 0.5);

@@ -46,6 +46,9 @@ need(re.search(r"\[\.image, \.movie, \.audio\]", browser) is not None, "OmegaPic
 need("case .mediaFiles: return OmegaPickedMedia.types" in editor, "seletor de arquivos da mídia sem os tipos de áudio")
 need("case .mediaFiles: model.importMediaBatch" in editor, "escolha de .mediaFiles não vai para o lote")
 need("audio ? importer.importAudio(" in model, "importMediaBatch não cria camada de áudio")
+media_picks = model.split("func importMediaPicks(", 1)[1].split("\n    func ", 1)[0]
+need("OmegaPickedMedia.kind(pick.url) == .audio" in media_picks and "audio ? importer.importAudio(" in media_picks,
+     "o lote do navegador de mídia precisa importar áudio pelo decoder de áudio")
 for ext in ("mp3", "m4a", "wav"):
     need(f'"{ext}"' in browser, f"OmegaPickedMedia sem a extensão {ext}")
 

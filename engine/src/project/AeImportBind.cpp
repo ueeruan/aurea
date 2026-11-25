@@ -487,7 +487,7 @@ void write_static(WriteCtx& w, const Binding& b, const std::vector<f64>& v, bool
 u32 write_keys(WriteCtx& w, const Binding& b, const std::vector<Key>& keys, bool fromFile) {
     if (!w.layer || !b.ok() || keys.empty()) return 0;
     Layer& l = *w.layer;
-    if (keys.size() == 1) {
+    if (keys.size() == 1 && !w.compTime) {
         write_static(w, b, keys.front().value, fromFile);
         return 0;
     }
@@ -1253,7 +1253,13 @@ std::string rewrite_expression(std::string_view src, const std::vector<EffectAli
                         for (const EffectAlias* h : hits) {
                             if (!h->rule) continue;
                             u16 ae = 0;
-                            if (byName) ae = effect_param_number(*h->rule, trim_name(pname));
+                            if (byName) {
+                                const std::string param = trim_name(pname);
+                                for (const auto& [original, mapped] : h->importedParams) {
+                                    if (iequals(original, param)) { ae = mapped; break; }
+                                }
+                                if (!ae) ae = effect_param_number(*h->rule, param);
+                            }
                             else if (!h->uiOrder.empty()) ae = num >= 1 && num <= h->uiOrder.size() ? h->uiOrder[num - 1] : 0;
                             else if (hits.size() == 1) ae = effect_param_by_position(*h->rule, num);
                             const char* id = ae ? aurea_param_for(*h->rule, ae) : nullptr;

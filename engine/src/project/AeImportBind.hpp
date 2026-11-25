@@ -185,6 +185,7 @@ struct ERule {
     const FixedValue* fixed = nullptr;
     u32 fixedCount = 0;
     PostFn post = nullptr;
+    bool paramsByNameOnly = false;  ///< Plugin revisions without a verified numeric schema.
 };
 
 /// Valores parados do AE (unidades do scripting) por número de parâmetro.
@@ -237,6 +238,7 @@ struct EffectAlias {
     /// = Scale Height). Aqui, o número do parâmetro (-NNNN) de cada posição;
     /// vazio = a ordem das regras da tabela.
     std::vector<u16> uiOrder;
+    std::vector<std::pair<std::string, u16>> importedParams;
 };
 [[nodiscard]] std::string rewrite_expression(std::string_view src, const std::vector<EffectAlias>& aliases);
 [[nodiscard]] bool iequals(std::string_view a, std::string_view b) noexcept;

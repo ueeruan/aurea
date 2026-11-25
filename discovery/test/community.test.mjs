@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { communityRoute } from '../community.js';
 import { sha256hex } from '../contas.js';
 import { d1Falso, kvFalso, pedido } from './falsos.mjs';
@@ -72,6 +74,83 @@ test('follow, like and unlike are idempotent; comments and deletions enforce own
   await call(`/posts/${id}`, 1, 'DELETE');
   assert.equal((await call(`/posts/${id}/like`, 2, 'PUT')).status, 404);
   assert.equal((await call(`/profiles/${users[1].uid}/follow`, 1, 'PUT')).status, 400);
+});
+
+test('feed categories preserve old attachments and only admins can publish an announcement', async () => {
+  const { env, call, users } = await fixture();
+  const db = env.AUREA_DB.sqlite;
+  const insertAsset = db.prepare('INSERT INTO community_assets(id,uid,kind,name,mime,bytes,created_at) VALUES(?,?,?,?,?,?,?)');
+  const project = crypto.randomUUID(), preset = crypto.randomUUID();
+  insertAsset.run(project, users[1].uid, 'project', 'edit.aureaproj', 'application/octet-stream', 50, 1);
+  insertAsset.run(preset, users[1].uid, 'preset', 'preset.json', 'application/json', 30, 1);
+  const legacy = crypto.randomUUID();
+  db.prepare('INSERT INTO community_posts(id,uid,body,asset,created_at) VALUES(?,?,?,?,?)').run(legacy, users[1].uid, '', project, 1);
+  const create = async (body, user = 1) => {
+    const result = await call('/posts', user, 'POST', body);
+    assert.equal(result.status, 201);
+    return result.data.id;
+  };
+  assert.equal((await call('/me')).data.feedFilters, true);
+  const text = await create({ body: 'Plain post' });
+  const showcase = await create({ body: 'My edit', category: 'showcase', asset: project });
+  const projectPost = await create({ body: '', asset: project });
+  const presetPost = await create({ body: '', asset: preset });
+  const announcement = await create({ body: 'Release notes', category: 'announcement' }, 0);
+  const otherAdminPost = await create({ body: 'Personal post' }, 0);
+  assert.equal((await call('/posts', 1, 'POST', { body: 'Fake notice', category: 'announcement' })).status, 403);
+  assert.equal((await call('/posts', 2, 'POST', { body: 'Fake notice', category: 'announcement' })).status, 403);
+  assert.equal((await call('/posts', 1, 'POST', { body: 'Fake attachment', category: 'project' })).status, 400);
+  for (const [category, ids] of Object.entries({
+    text: [text, otherAdminPost], showcase: [showcase], project: [legacy, projectPost], preset: [presetPost], announcement: [announcement],
+  })) {
+    const result = await call(`/posts?category=${category}`, 2);
+    assert.equal(result.status, 200);
+    assert.ok(result.data.items.every(p => p.category === category));
+    assert.deepEqual(result.data.items.map(p => p.id).sort(), ids.sort());
+  }
+  assert.equal((await call('/posts?sort=unknown')).status, 400);
+  assert.equal((await call('/posts?category=unknown')).status, 400);
+});
+
+test('feed migration backfills the category and popularity of existing posts', () => {
+  const db = new DatabaseSync(':memory:');
+  const migrate = name => db.exec(readFileSync(new URL(`../migrations/${name}.sql`, import.meta.url), 'utf8'));
+  try {
+    migrate('0001_contas');
+    migrate('0004_comunidade');
+    db.exec(`INSERT INTO users(id,email,password_hash,created_at) VALUES('u','legacy@example.com','fixture',1);
+      INSERT INTO community_profiles(uid,created_at,updated_at) VALUES('u',1,1);
+      INSERT INTO community_assets(id,uid,kind,name,mime,bytes,created_at)
+      VALUES('a','u','project','archive.aureaproj','application/octet-stream',100,1);
+      INSERT INTO community_posts(id,uid,body,asset,created_at) VALUES('p','u','Legacy edit','a',1);
+      INSERT INTO community_likes(post,uid) VALUES('p','u');
+      INSERT INTO community_comments(id,post,uid,body,created_at) VALUES('c','p','u','Comment',2);`);
+    migrate('0016_community_feed');
+    const row = db.prepare("SELECT category, popularity FROM community_posts WHERE id='p'").get();
+    assert.deepEqual({ ...row }, { category: 'project', popularity: 2 });
+  } finally { db.close(); }
+});
+
+test('every feed sort paginates across ties and popular tracks likes and comments', async () => {
+  const { env, call, users } = await fixture();
+  const insert = env.AUREA_DB.sqlite.prepare('INSERT INTO community_posts(id,uid,body,created_at) VALUES(?,?,?,?)');
+  const ids = Array.from({ length: 34 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
+  ids.forEach(id => insert.run(id, users[1].uid, 'Tie', 123));
+  await call(`/posts/${ids[1]}/like`, 2, 'PUT');
+  await call(`/posts/${ids[1]}/like`, 2, 'PUT');
+  const comment = await call(`/posts/${ids[0]}/comments`, 2, 'POST', { body: 'Nice edit' });
+  const desc = [...ids].reverse();
+  for (const [sort, expected] of Object.entries({ newest: desc, oldest: ids, popular: [ids[1], ids[0], ...desc.slice(0, -2)] })) {
+    const page = await call(`/posts?sort=${sort}&category=text`);
+    assert.equal(page.data.items.length, 30);
+    const more = await call(`/posts?sort=${sort}&category=text&cursor=${encodeURIComponent(page.data.cursor)}`);
+    assert.equal(more.data.cursor, null);
+    assert.deepEqual([...page.data.items, ...more.data.items].map(p => p.id), expected);
+  }
+  await call(`/posts/${ids[1]}/like`, 2, 'DELETE');
+  assert.equal((await call('/posts?sort=popular')).data.items[0].id, ids[0]);
+  await call(`/comments/${comment.data.id}`, 2, 'DELETE');
+  assert.equal((await call('/posts?sort=popular')).data.items[0].id, desc[0]);
 });
 test('stable pagination across equal timestamps does not repeat or drop posts/comments', async () => {
   const { call, env, users } = await fixture();

@@ -14,6 +14,8 @@ function cursor(value) {
   return m ? [Number(m[1]), m[2]] : null;
 }
 const nextCursor = (items) => items.length === 30 ? `${items.at(-1).createdAt}:${items.at(-1).id}` : null;
+const POST_CATEGORIES = new Set(['text', 'showcase', 'project', 'preset', 'announcement']);
+const POST_SORTS = new Set(['newest', 'oldest', 'popular']);
 // Moderação (Google Play: conteúdo gerado pelo usuário e IA generativa).
 // Denunciado por HIDE_AFTER pessoas diferentes, o conteúdo sai do feed de todos
 // (menos do autor) até o admin decidir; bloqueio esconde nos dois sentidos.
@@ -68,11 +70,27 @@ async function profile(env, uid, viewer) {
     blocked: !!row.blocked };
 }
 async function posts(env, url, viewer) {
-  const before = cursor(url.searchParams.get('cursor'));
+  const sort = url.searchParams.get('sort') ?? 'newest';
+  const category = url.searchParams.get('category');
+  if (!POST_SORTS.has(sort) || (category !== null && !POST_CATEGORIES.has(category))) return problem('invalid_feed_filter');
+  const page = url.searchParams.get('cursor');
   const uid = url.searchParams.get('user');
   const following = url.searchParams.get('following') === '1';
+  const popular = sort === 'popular', ascending = sort === 'oldest';
+  const order = ascending ? 'ASC' : 'DESC', compare = ascending ? '>' : '<';
   const conditions = [notBlocked('p.uid'), notHidden('post', 'p.id', 'p.uid')], params = [viewer, viewer, viewer, viewer];
-  if (before) { conditions.push('(p.created_at < ? OR (p.created_at = ? AND p.id < ?))'); params.push(before[0], ...before); }
+  if (category !== null) { conditions.push('p.category=?'); params.push(category); }
+  if (page && popular) {
+    const split = page.indexOf(':');
+    const score = split > 0 ? page.slice(0, split) : '';
+    const after = cursor(page.slice(split + 1));
+    if (!/^\d{1,16}$/.test(score) || !after) return problem('invalid_feed_cursor');
+    conditions.push('(p.popularity, p.created_at, p.id) < (?, ?, ?)'); params.push(Number(score), ...after);
+  } else if (page) {
+    const after = cursor(page);
+    if (!after) return problem('invalid_feed_cursor');
+    conditions.push(`(p.created_at, p.id) ${compare} (?, ?)`); params.push(...after);
+  }
   if (uid) { conditions.push('p.uid=?'); params.push(uid); }
   if (following) { conditions.push('EXISTS(SELECT 1 FROM community_follows f WHERE f.follower=? AND f.followed=p.uid)'); params.push(viewer); }
   const rows = await stmt(env, `SELECT p.*, a.username, a.name, a.avatar, a.verification,
@@ -82,12 +100,13 @@ async function posts(env, url, viewer) {
     EXISTS(SELECT 1 FROM community_likes WHERE post=p.id AND uid=?) AS liked
     FROM community_posts p JOIN community_profiles a ON a.uid=p.uid
     LEFT JOIN community_assets f ON f.id=p.asset
-    ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
-    ORDER BY p.created_at DESC, p.id DESC LIMIT 30`, ...params).all();
-  const items = rows.results.map(r => ({ id: r.id, body: r.body, createdAt: r.created_at, author: author(r),
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY ${popular ? 'p.popularity DESC, ' : ''}p.created_at ${order}, p.id ${order} LIMIT 31`, ...params).all();
+  const items = rows.results.slice(0, 30).map(r => ({ id: r.id, body: r.body, category: r.category, createdAt: r.created_at, author: author(r),
     likes: r.likes, comments: r.comments, liked: !!r.liked,
     asset: r.asset ? { id: r.asset, kind: r.asset_kind, name: r.asset_name, bytes: r.asset_bytes } : null }));
-  return json({ items, cursor: nextCursor(items) });
+  const next = rows.results.length > items.length ? nextCursor(items) : null;
+  return json({ items, cursor: next && popular ? `${rows.results[29].popularity}:${next}` : next });
 }
 async function download(req, env, id) {
   const asset = await stmt(env, `SELECT * FROM community_assets WHERE id=? AND
@@ -211,7 +230,7 @@ export async function communityRoute(req, env, ctx, url) {
     const admin = !!(await stmt(env, "SELECT uid FROM account_roles WHERE uid=? AND role='community_admin'", session.uid).first());
     await ensureProfile(env, session.uid);
     if (req.method !== 'GET' && !(await dentroDoLimite(env, 'community-write', session.uid, { max: 120, janela: 60 }))) return problem('rate_limited', 429);
-    if (path === '/api/community/me' && req.method === 'GET') return json({ profile: await profile(env, session.uid, session.uid), canVerify: admin });
+    if (path === '/api/community/me' && req.method === 'GET') return json({ profile: await profile(env, session.uid, session.uid), canVerify: admin, feedFilters: true });
     if (path === '/api/community/me' && req.method === 'PUT') {
       const { valor: v, erro } = await lerJson(req, 4096); if (erro) return problem(erro);
       const username = text(v.username, 24)?.toLowerCase(), name = text(v.name, 50), bio = text(v.bio, 240);
@@ -270,12 +289,17 @@ export async function communityRoute(req, env, ctx, url) {
     if (path === '/api/community/posts' && req.method === 'GET') return await posts(env, url, session.uid);
     if (path === '/api/community/posts' && req.method === 'POST') {
       const { valor: v, erro } = await lerJson(req, 12000); if (erro) return problem(erro);
-      const body = text(v.body, 2000), asset = v.asset ?? null;
+      const body = text(v?.body, 2000), asset = v?.asset ?? null;
+      const category = v?.category ?? 'standard';
+      if (!['standard', 'showcase', 'announcement'].includes(category)) return problem('invalid_post_category');
+      if (category === 'announcement' && !admin) return problem('forbidden', 403);
       if (body === null || (!body && !asset)) return problem('empty_post');
       const p = await profile(env, session.uid, session.uid); if (!p.username) return problem('profile_required');
-      if (asset && !(await stmt(env, "SELECT id FROM community_assets WHERE id=? AND uid=? AND kind IN ('project','preset')", asset, session.uid).first())) return problem('invalid_attachment');
+      const attachment = asset ? await stmt(env, "SELECT kind FROM community_assets WHERE id=? AND uid=? AND kind IN ('project','preset')", asset, session.uid).first() : null;
+      if (asset && !attachment) return problem('invalid_attachment');
       const id = crypto.randomUUID();
-      await stmt(env, 'INSERT INTO community_posts(id,uid,body,asset,created_at) VALUES(?,?,?,?,?)', id, session.uid, body, asset, Date.now()).run();
+      const storedCategory = category === 'standard' ? attachment?.kind ?? 'text' : category;
+      await stmt(env, 'INSERT INTO community_posts(id,uid,body,asset,created_at,category) VALUES(?,?,?,?,?,?)', id, session.uid, body, asset, Date.now(), storedCategory).run();
       return json({ id }, 201);
     }
     const postMatch = /^\/api\/community\/posts\/([0-9a-f-]{36})(?:\/(like|comments))?$/.exec(path);

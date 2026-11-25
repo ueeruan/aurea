@@ -8211,7 +8211,7 @@ std::shared_ptr<const scene3d::HdriPixels> Engine::hdri_lookup(void* selfPtr, As
     return px ? px : missing;
 }
 
-Result<u64> Engine::import_hdri(const char* path, u64 objectLayer) noexcept {
+Result<u64> Engine::import_hdri(const char* path, u64 objectLayer, bool showAsBackground) noexcept {
     if (!path || !*path) return Status{Errc::InvalidArgument, "sem arquivo"};
     std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
     u64 session = 0;
@@ -8219,6 +8219,7 @@ Result<u64> Engine::import_hdri(const char* path, u64 objectLayer) noexcept {
     CompositionId composition;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        InlineEditScope inlineScope(*this, objectLayer);
         if (!project_ || !current_composition()) return Status{Errc::InvalidState, "nenhum projeto aberto"};
         session = projectSession_; composition = project_->timeline().current();
         room = source_asset_room_locked();
@@ -8233,6 +8234,7 @@ Result<u64> Engine::import_hdri(const char* path, u64 objectLayer) noexcept {
     if (!decoded.pixels) return hdri_failure(decoded.status);
     std::shared_ptr<scene3d::HdriPixels> px = std::move(decoded.pixels);
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, objectLayer, true);
     if (!project_ || session != projectSession_ || composition != project_->timeline().current()
         || state_ == EngineState::ShuttingDown)
         return Status{Errc::Cancelled, "projeto alterado durante a importacao"};
@@ -8256,7 +8258,10 @@ Result<u64> Engine::import_hdri(const char* path, u64 objectLayer) noexcept {
     if (object) {
         object->environmentSource = 1; object->environmentAsset = id.pack();
         object->environmentIntensity = 1; object->environmentRotation = 0; object->environmentExposure = 1;
-    } else { comp->environment().hdri = id; }
+    } else {
+        comp->environment().hdri = id;
+        if (showAsBackground) comp->environment().showBackground = true;
+    }
     project_->mark_dirty();
     request_render();
     AUREA_LOG_INFO("hdri: %ux%u", px->width, px->height);
@@ -10481,7 +10486,11 @@ bool Engine::edit_clip_time_locked(u64 layerId, u32 operation, i64 amount, u64 p
     if (extendOnly && (amount < 0 || (operation == 0 ? amount >= start : amount <= end))) return false;
     const i64 length = end - start;
     if (length <= 0 || length >= limit) return false;
-    const i64 target = operation == 0 ? std::clamp(amount, i64{0}, end - 1)
+    // Magnetic trim keeps the layer anchored. It can restore its trimmed
+    // lead-in even at frame zero while the resulting layer stays in range.
+    const bool magnetic = !extendOnly && !edgeToFrame && (layer->magneticTrack || comp->edit_mode());
+    const i64 trimStartMin = magnetic ? start - std::clamp(layer->offset.value, i64{0}, limit - 1) : 0;
+    const i64 target = operation == 0 ? std::clamp(amount, std::min<i64>(0, trimStartMin), end - 1)
                      : operation == 1 ? std::max(amount, start + 1)
                      : operation == 6 ? std::clamp(amount, i64{0}, limit - 1 - length) : amount;
     if (((operation == 0 || operation == 6) && target == start) || (operation == 1 && target == end) ||
@@ -10527,7 +10536,6 @@ bool Engine::edit_clip_time_locked(u64 layerId, u32 operation, i64 amount, u64 p
     // A LINHA MAGNÉTICA da camada comanda o ripple, e o modo Edição da
     // composição continua valendo como antes para as camadas que não têm a
     // opção ligada (projetos já montados não mudam de comportamento).
-    const bool magnetic = !extendOnly && !edgeToFrame && (layer->magneticTrack || comp->edit_mode());
     i64 ripple = 0;
     const auto trim = [&](Layer& item, i64 s, i64 e) { trim_clip_copy(item, s, e, clip_source_limit(*project_, *comp, item)); };
     if (operation == 7) {
@@ -10635,7 +10643,8 @@ bool Engine::reorder_clip(u64 layerId, i64 targetFrame) noexcept {
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return false;
     Layer* layer = comp->layer(LayerId::unpack(layerId));
-    if (!layer || layer->locked || !layer->magneticTrack || !has_clip_source(*layer)) return false;
+    if (!layer || layer->locked || !layer->magneticTrack) return false;
+    if (!has_clip_source(*layer) && layer->kind != LayerKind::Image) return false;
     const u32 track = layer->trackId;
     const i64 start = layer->start.value;
     const i64 length = layer->end.value - start;
@@ -11475,7 +11484,8 @@ void Engine::sync_audio_locked(const Composition& comp) noexcept {
                 clip.fadeTo = clip.end;
                 snap->endSample = clip.end;
                 snap->clips.push_back(clip);
-                audio_.cache()->register_asset(clip.asset, audio::AudioAssetRef{resolve_media_for_storage(asset->sourcePath), clip.end});
+                snap->revision = audio_.cache()->register_asset_revision(clip.asset,
+                    audio::AudioAssetRef{resolve_media_for_storage(asset->sourcePath), clip.end});
             }
             audio_.set_snapshot(std::move(snap), playback_.playing() ? playback_.current_ns() : -1);
         } else audio_.set_snapshot(audio::build_snapshot(comp, *project_, audio_.cache(), &Engine::audio_path_resolver, this, nullptr, &effectRegistry_),
@@ -15788,7 +15798,10 @@ u32 Engine::local_ai_status() noexcept {
 
 u32 Engine::copy_preview_buffer_ranges(i64* outPairs, u32 capacityRanges) noexcept {
     if (!outPairs || !capacityRanges) return 0;
-    std::lock_guard<std::mutex> lock(modelMutex_);
+    // Both native app UIs poll this for the timeline decoration. Export may
+    // hold the model lock while planning a frame or resolving source media.
+    std::unique_lock<std::mutex> lock(modelMutex_, std::try_to_lock);
+    if (!lock.owns_lock()) return 0;
     if (!project_ || !current_composition()) return 0;
     return renderer_.copy_preview_buffer_ranges(
         preview_cache_revision(),
@@ -16793,6 +16806,42 @@ u32 Engine::query_track_curve(u64 layerId, u32 property, u32 effectIndex, u32 pa
     return sampleCount;
 }
 
+namespace {
+
+constexpr u32 effect_layer_bit(LayerKind kind) noexcept {
+    const u32 index = static_cast<u32>(kind);
+    return index < 32 ? 1u << index : 0;
+}
+
+// The picker and EffectAdd share the same layer-kind restrictions.
+u32 effect_catalog_layer_flags(EffectTypeId type) noexcept {
+    u32 kinds = 0;
+    u32 flags = 0;
+    if (type == effect_type_id(effect_keys::kText3DLayout)) {
+        kinds = effect_layer_bit(LayerKind::Model3D);
+        flags = bridge::kEffectCatalogTextModel;
+    } else if (type == effect_type_id(effect_keys::kShape3DLayout)) {
+        kinds = effect_layer_bit(LayerKind::Model3D);
+        flags = bridge::kEffectCatalogShapeModel;
+    } else if (scene3d::is_part3d_effect(type)) {
+        kinds = effect_layer_bit(LayerKind::Model3D);
+    } else if (type == effect_type_id(effect_keys::kRotobrush) || type == effect_type_id(effect_keys::kBackgroundRemove)) {
+        kinds = effect_layer_bit(LayerKind::Image) | effect_layer_bit(LayerKind::Video);
+    } else if (type == effect_type_id(text::kAnimatorProEffect) || type == effect_type_id(text::kTextPrismEffect)) {
+        kinds = effect_layer_bit(LayerKind::Text);
+    } else if (type == effect_type_id(text::kAnimatorEffect) || type == effect_type_id(text::kTransformEffect)) {
+        kinds = effect_layer_bit(LayerKind::Text) | effect_layer_bit(LayerKind::Model3D);
+        flags = bridge::kEffectCatalogTextModel;
+    } else if (type == effect_type_id(effect_keys::kRasterExtrude)) {
+        for (u32 kind = 1; kind <= static_cast<u32>(LayerKind::Composition); ++kind) {
+            if (raster_extrude::accepts(static_cast<LayerKind>(kind))) kinds |= 1u << kind;
+        }
+    }
+    return (kinds << bridge::kEffectCatalogLayerShift) | flags;
+}
+
+} // namespace
+
 u32 Engine::query_effect_catalog(bridge::EffectCatalogRow* out, u32 capacity, char* blob,
                                  u32 blobCapacity) noexcept {
     if (!out) return 0;
@@ -16866,6 +16915,7 @@ u32 Engine::query_effect_catalog(bridge::EffectCatalogRow* out, u32 capacity, ch
             effect_type_id("aurea.time.time_displacement"),
         };
         row.reserved = std::find(std::begin(newlyAdded), std::end(newlyAdded), e.type_id()) != std::end(newlyAdded) ? 1u : 0u;
+        row.reserved |= effect_catalog_layer_flags(e.type_id());
         (void)put_string(blob, blobCapacity, cursor, e.info().name, row.nameOffset, row.nameLength);
         (void)put_string(blob, blobCapacity, cursor, e.info().category, row.categoryOffset, row.categoryLength);
         out[written++] = row;
@@ -18388,6 +18438,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
             gpu_->memory_budget().largest_device_local_headroom(), ctx->width, ctx->height);
         const bool limitedBacking = (config_.enableTrackedGpuAdmission && trackedBudget < (192ull << 20))
             || limitedDriverBudget
+            || platformMemoryPressure_.load(std::memory_order_relaxed) >= 1.f
             || (exportBudget && exportBudget < compFrameBytes * 6);
         const u32 want = vc.limitedMemory || limitedBacking || config_.exportExecutionProfile == ExportExecutionProfile::HighQuality ? 1u
             : address_space::export_readback_slots(std::clamp<u32>(config_.exportPipelineDepth ? config_.exportPipelineDepth
@@ -19335,8 +19386,10 @@ void Engine::export_thread_main() noexcept {
         // tempo. Resolução, fps, efeitos e amostras NÃO mudam. Morno/quente
         // (Serious, throttling) não serializa mais: o sistema já baixou o clock.
         const bool hot = exportThermalSerial_.load(std::memory_order_acquire);
-        u32 allowed = ctx.scheduler.admission_limit(memory_.pressure(), monotonic_ns() < osMemoryWarningUntilNs_.load(std::memory_order_acquire),
-                                                    hot, monotonic_ns());
+        const f32 pressure = std::max(memory_.pressure(), platformMemoryPressure_.load(std::memory_order_relaxed));
+        const u64 now = monotonic_ns();
+        u32 allowed = ctx.scheduler.admission_limit(pressure, now < osMemoryWarningUntilNs_.load(std::memory_order_acquire),
+                                                    hot, now);
         if (allowed > 1 && ctx.queue && config_.enableTrackedGpuAdmission) {
             // Reclaim completed uploads before admitting another expensive
             // scene. This changes concurrency, never shadows/blur or pixels.
@@ -19369,7 +19422,7 @@ void Engine::export_thread_main() noexcept {
         }
         if (allowed != previousAdmission) {
             AUREA_LOG_INFO("export: scheduler permite %u quadros em voo (pressao %.2f, qualidade igual)",
-                           allowed, static_cast<double>(memory_.pressure()));
+                           allowed, static_cast<double>(pressure));
             previousAdmission = allowed;
             std::lock_guard<std::mutex> pl(ctx.mutex);
             ctx.progress.pipelineDepth = allowed;
@@ -22442,17 +22495,10 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::EffectAdd: {
             Layer* l = need_layer(cmd.effect_add.layer);
             if (!l) return Errc::NotFound;
-            // Mexeu nos efeitos: o modelo 3D passa a aplicá-los (projeto antigo
-            // ficava com eles ignorados até aqui).
-            l->modelEffects = true;
             if (l->effects.size() >= kMaxEffectCount) return Errc::OutOfRange;
             const EffectTypeId type = cmd.effect_add.effectType;
-            if (type == effect_type_id(effect_keys::kRasterExtrude) && !raster_extrude::accepts(l->kind)) return Errc::InvalidArgument;
-            if (type == effect_type_id(effect_keys::kRotobrush) && l->kind != LayerKind::Image && l->kind != LayerKind::Video) return Errc::InvalidArgument;
-            if (type == effect_type_id(effect_keys::kBackgroundRemove) && l->kind != LayerKind::Image && l->kind != LayerKind::Video) return Errc::InvalidArgument;
-            // 0.4.6: o Text Animator Pro e so de texto 2D (a forma 3D usa o Text Animator).
-            if ((type == effect_type_id(text::kAnimatorProEffect) || type == effect_type_id(text::kTextPrismEffect))
-                && l->kind != LayerKind::Text) return Errc::InvalidArgument;
+            const u32 allowedKinds = effect_catalog_layer_flags(type) >> bridge::kEffectCatalogLayerShift;
+            if (allowedKinds && !(allowedKinds & effect_layer_bit(l->kind))) return Errc::InvalidArgument;
             if ((type == effect_type_id(text::kTransformEffect) || type == effect_type_id(text::kAnimatorEffect)) && l->kind != LayerKind::Text) {
                 const Asset* source = project_->asset(l->model.scene);
                 scene3d::Text3DSpec spec;
@@ -22467,7 +22513,6 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 if (!ready.ok()) return ready;
             }
             if (scene3d::is_part3d_effect(type)) {
-                if (l->kind != LayerKind::Model3D) return Errc::InvalidArgument;
                 // Texto 3D: cada letra vira uma parte (o preparo do Text 3D Layout).
                 const Asset* source = project_->asset(l->model.scene);
                 scene3d::Text3DSpec spec;
@@ -22480,6 +22525,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             e.id = l->alloc_effect_id();
             e.type = type;
             initialize_instance(e, *params);
+            // Activate the stored 3D effects only after accepting this add.
+            l->modelEffects = true;
             // Rig 2D de rosto: os pontos saem dos pixels já ao pôr (mesmo passo).
             face_rig_seed_locked(*l, e);
             // One history transaction owns both the effect and3D activation.

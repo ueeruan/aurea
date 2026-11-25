@@ -156,14 +156,39 @@ AUREA_TEST(Hyper, SubscriptionProductForEachPaidEffect) {
 
     // Todo efeito pago tem assinatura avulsa, exceto as 3 ferramentas Hyper.
     const auto ids = subscription_product_ids();
-    AUREA_CHECK(ids.size() == 14);  // 1.0.2.1: anual (à venda) + mensal e 12 avulsos legados
-    AUREA_CHECK(!ids.empty() && ids.front() == "aurea_hyper_anual");
-    AUREA_CHECK(ids.size() > 1 && ids[1] == "aurea_hyper_mensal");
+    AUREA_CHECK(ids.size() == 15);  // 1.0.9: 3 planos do AureaHyper + 12 avulsos legados
+    // Os 3 planos à venda vêm primeiro, na ordem da tela.
+    const auto sale = hyper_plans_on_sale();
+    AUREA_CHECK(sale == (std::vector<std::string>{"aurea_hyper_semanal", "aurea_hyper_mensal", "aurea_hyper_anual"}));
+    AUREA_CHECK(ids.size() >= 3 && std::equal(sale.begin(), sale.end(), ids.begin()));
+    AUREA_CHECK(std::strcmp(kHyperWeeklyId, "aurea_hyper_semanal") == 0);
+    AUREA_CHECK(std::strcmp(kHyperMonthlyId, "aurea_hyper_mensal") == 0);
+    AUREA_CHECK(std::strcmp(kHyperMonthlyLegacyId, kHyperMonthlyId) == 0);
+    AUREA_CHECK(std::strcmp(kHyperSubscriptionId, "aurea_hyper_anual") == 0);
+    // Nada avulso à venda (quem já tem continua reconhecido em `ids`).
+    for (const auto& p : sale) AUREA_CHECK(product_unlocks_everything(p));
     AUREA_CHECK(std::find(ids.begin(), ids.end(), "aurea_texto3d") != ids.end());
     AUREA_CHECK(std::find(ids.begin(), ids.end(), "aureahyper_lifetime") == ids.end());
     for (const auto& row : table) AUREA_CHECK_MSG(std::find(ids.begin(), ids.end(), row.product) != ids.end(), row.product);
     for (usize i = 0; i < ids.size(); ++i)
         for (usize j = i + 1; j < ids.size(); ++j) AUREA_CHECK(ids[i] != ids[j]);
+}
+
+// 1.0.9: o selo "economize N%" do anual (R$ 7/semana, R$ 30/mês, R$ 150/ano).
+AUREA_TEST(Hyper, AnnualSavingsPercent) {
+    const i64 w = 7'000'000, m = 30'000'000, a = 150'000'000;
+    // Um ano do mais barato: min(7×52 = 364, 30×12 = 360) = 360 → 1 − 150/360 = 58,3% → 58.
+    AUREA_CHECK(hyper_annual_savings_percent(w, m, a) == 58);
+    AUREA_CHECK(hyper_annual_savings_percent(w, 0, a) == 58);   // 1 − 150/364 = 58,8%
+    AUREA_CHECK(hyper_annual_savings_percent(0, m, a) == 58);
+    // Preço da Apple (R$ 149,90) também dá 58%.
+    AUREA_CHECK(hyper_annual_savings_percent(w, m, 149'900'000) == 58);
+    // Sem preço do anual, sem comparação, ou anual mais caro: sem selo.
+    AUREA_CHECK(hyper_annual_savings_percent(w, m, 0) == 0);
+    AUREA_CHECK(hyper_annual_savings_percent(0, 0, a) == 0);
+    AUREA_CHECK(hyper_annual_savings_percent(-1, -1, a) == 0);
+    AUREA_CHECK(hyper_annual_savings_percent(w, m, 400'000'000) == 0);
+    AUREA_CHECK(hyper_annual_savings_percent(0, 10'000'000, 120'000'000) == 0);
 }
 
 AUREA_TEST(Hyper, SubscriptionAccessRule) {
@@ -175,10 +200,11 @@ AUREA_TEST(Hyper, SubscriptionAccessRule) {
     const std::vector<std::string> none;
     const std::vector<std::string> onlyTwitch{"aurea_fx_twitch"};
     const std::vector<std::string> onlyText3D{"aurea_texto3d"};
+    const std::vector<std::string> weekly{"aurea_hyper_semanal"};
     const std::vector<std::string> monthly{"aurea_hyper_mensal"};
     const std::vector<std::string> annual{"aurea_hyper_anual"};
     const std::vector<std::string> lifetime{"aureahyper_lifetime"};
-    const std::vector<std::string> unrelated{"aurea_aureaos", "", "aurea_fx_twitch_x"};
+    const std::vector<std::string> unrelated{"aurea_aureaos", "", "aurea_fx_twitch_x", "aurea_hyper_semanal_x"};
 
     // Grátis: sempre.
     AUREA_CHECK(has_effect_access(none, freeFx));
@@ -196,14 +222,15 @@ AUREA_TEST(Hyper, SubscriptionAccessRule) {
     AUREA_CHECK(!has_text3d_access(onlyTwitch));
     AUREA_CHECK(has_text3d_access(onlyText3D));
     AUREA_CHECK(!has_effect_access(onlyText3D, twitch));
-    // AureaHyper mensal e o legado vitalício: tudo.
-    for (const auto* all : {&annual, &monthly, &lifetime}) {
+    // Qualquer plano do AureaHyper (semanal, mensal, anual) e o legado vitalício: tudo.
+    for (const auto* all : {&weekly, &annual, &monthly, &lifetime}) {
         AUREA_CHECK(has_effect_access(*all, twitch));
         AUREA_CHECK(has_effect_access(*all, signal));
         AUREA_CHECK(has_effect_access(*all, upscale));
         AUREA_CHECK(has_text3d_access(*all));
         AUREA_CHECK(has_access(*all, nullptr));
     }
+    AUREA_CHECK(product_unlocks_everything("aurea_hyper_semanal"));
     AUREA_CHECK(product_unlocks_everything("aurea_hyper_anual"));
     AUREA_CHECK(product_unlocks_everything("aurea_hyper_mensal"));
     AUREA_CHECK(product_unlocks_everything("aureahyper_lifetime"));

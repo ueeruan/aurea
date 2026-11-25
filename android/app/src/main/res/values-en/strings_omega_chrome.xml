@@ -19,6 +19,10 @@
     <string name="om_vm_pixel">Actual pixels</string>
     <string name="om_vm_grid">Grid</string>
     <string name="om_vm_grid_spacing">Grid spacing</string>
+    <string name="preview_grid_appearance">Grid appearance</string>
+    <string name="preview_grid_blend">Grid blend mode</string>
+    <string name="preview_grid_color">Grid color</string>
+    <string name="preview_grid_contrast">High contrast</string>
     <string name="om_vm_solo">Selected layer focus</string>
     <string name="om_vm_solo_off">Normal</string>
     <string name="om_vm_solo_only">Selected layer only</string>

@@ -1,7 +1,7 @@
-// Included in Renderer.cpp. This is an offline recovery after whole-graph
-// admission failed; it preserves the same sorted passes, pixels and callbacks.
+// Included in Renderer.cpp. Offline batches preserve dependencies, pixels and
+// callbacks while bounding memory and GPU work per submission.
 Status Renderer::render_segmented_graph(const RenderSettings& settings, FrameBegin& frame,
-    RenderTimings& timings, bool& frameOpen) noexcept {
+    RenderTimings& timings, bool& frameOpen, u32 passesPerSegment) noexcept {
     if (!backend_ || !frameOpen || frame.backbuffer.valid())
         return Status{Errc::InvalidState, "graph recovery requires an offscreen frame"};
     struct ImportedHandleScope {
@@ -45,9 +45,8 @@ Status Renderer::render_segmented_graph(const RenderSettings& settings, FrameBeg
             static_cast<u32>(graph_.order().size()), batches, waitedMs, status.raw());
         return status;
     };
-    // A failed whole compile recorded no graph passes, but source uploads may
-    // exist in its command stream. Preserve their actual submission ownership
-    // before returning any backing. Do not reset the graph or CPU arena.
+    // Source uploads may exist in the initial command stream. Fence their
+    // submission before returning any backing. Keep the graph and CPU arena.
     graph_.release(pool_);
     pool_.end_frame();
     const Status initial = backend_->end_frame();
@@ -60,7 +59,7 @@ Status Renderer::render_segmented_graph(const RenderSettings& settings, FrameBeg
     if (const Status plan = graph_.prepare_segments(); !plan.ok()) return finish(plan);
     const u32 steps = static_cast<u32>(graph_.order().size());
     if (!steps) return finish(Status{Errc::InvalidState, "empty graph recovery"});
-    for (u32 first = 0; first < steps; ++first) {
+    for (u32 first = 0; first < steps; first += passesPerSegment) {
         if (cancelled()) return finish(Errc::Cancelled);
         if (monotonic_ns() >= deadline()) return finish(Errc::Timeout);
         FrameBegin next;
@@ -68,7 +67,7 @@ Status Renderer::render_segmented_graph(const RenderSettings& settings, FrameBeg
         frame = next;
         frameOpen = true;
         pool_.begin_frame(*backend_, frame.frameNumber);
-        if (const Status admitted = graph_.compile_segment(pool_, first, 1); !admitted.ok()) return finish(admitted);
+        if (const Status admitted = graph_.compile_segment(pool_, first, passesPerSegment); !admitted.ok()) return finish(admitted);
         if (!frame.commands) return finish(Errc::InvalidState);
         // Backend queries report the latest submission repeatedly, without a
         // frame identity. A partial timed segment could contaminate a later
@@ -77,7 +76,7 @@ Status Renderer::render_segmented_graph(const RenderSettings& settings, FrameBeg
         ++batches;
         // Leave the final frame open for the original NV12 readback and final
         // end_frame. No intermediate frame acquires or presents a swap image.
-        if (first + 1 == steps) {
+        if (passesPerSegment >= steps - first) {
             timings.sceneExposureWaitMs += waitedMs;
             return finish(OkStatus);
         }

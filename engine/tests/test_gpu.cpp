@@ -1757,12 +1757,19 @@ bool file_exists(const std::string& p) {
 /// Um triângulo glTF de um lado só, virado para +Z (para quem olha do lado
 /// +Z, que é onde o observador do glTF fica) ou para −Z. Buffer em base64
 /// dentro do JSON — o teste não depende de arquivo externo.
-std::string write_triangle_gltf(bool facingViewer, f32 r, f32 g, f32 b, bool unlit = true) {
+std::string write_triangle_gltf(bool facingViewer, f32 r, f32 g, f32 b, bool unlit = true, bool cutout = false) {
     const f32 pos[9] = {-0.5f, -0.5f, 0.0f, 0.5f, -0.5f, 0.0f, 0.0f, 0.5f, 0.0f};
     const u16 idx[3] = {0, static_cast<u16>(facingViewer ? 1 : 2), static_cast<u16>(facingViewer ? 2 : 1)};
     std::vector<u8> bin(36 + 6 + 2);
     std::memcpy(bin.data(), pos, 36);
     std::memcpy(bin.data() + 36, idx, 6);
+    if (cutout) {
+        const f32 uv[6] = {0, 1, 1, 1, 0.5f, 0};
+        const usize offset = bin.size();
+        bin.resize(offset + sizeof(uv));
+        std::memcpy(bin.data() + offset, uv, sizeof(uv));
+        AUREA_CHECK(write_png("cutout-transparent.png", Image8{2, 2, std::vector<u8>(16, 0)}));
+    }
     static const char* b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string enc;
     for (usize i = 0; i < bin.size(); i += 3) {
@@ -1774,7 +1781,11 @@ std::string write_triangle_gltf(bool facingViewer, f32 r, f32 g, f32 b, bool unl
         enc += i + 2 < bin.size() ? b64[v & 63] : '=';
     }
     char material[512];
-    if (unlit) {
+    if (cutout) {
+        std::snprintf(material, sizeof(material),
+            R"({"alphaMode":"MASK","alphaCutoff":0.5,"doubleSided":true,"pbrMetallicRoughness":{"baseColorFactor":[%f,%f,%f,1],"baseColorTexture":{"index":0}}})",
+            r, g, b);
+    } else if (unlit) {
         std::snprintf(material, sizeof(material),
             R"({"pbrMetallicRoughness":{"baseColorFactor":[%f,%f,%f,1],"metallicFactor":0,"roughnessFactor":1},"extensions":{"KHR_materials_unlit":{}}})", r, g, b);
     } else {
@@ -1784,16 +1795,20 @@ std::string write_triangle_gltf(bool facingViewer, f32 r, f32 g, f32 b, bool unl
     char json[2048];
     std::snprintf(json, sizeof(json),
         R"({"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0}],)"
-        R"("meshes":[{"primitives":[{"attributes":{"POSITION":0},"indices":1,"material":0}]}],)"
-        R"("materials":[%s],%s)"
+        R"("meshes":[{"primitives":[{"attributes":{"POSITION":0%s},"indices":1,"material":0}]}],)"
+        R"("materials":[%s],%s%s)"
         R"("buffers":[{"byteLength":%u,"uri":"data:application/octet-stream;base64,%s"}],)"
-        R"("bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":36},{"buffer":0,"byteOffset":36,"byteLength":6}],)"
+        R"("bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":36},{"buffer":0,"byteOffset":36,"byteLength":6}%s],)"
         R"("accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[-0.5,-0.5,0],"max":[0.5,0.5,0]},)"
-        R"({"bufferView":1,"componentType":5123,"count":3,"type":"SCALAR"}]})",
-        material, unlit ? R"("extensionsUsed":["KHR_materials_unlit"],)" : "",
-        static_cast<unsigned>(bin.size()), enc.c_str());
+        R"({"bufferView":1,"componentType":5123,"count":3,"type":"SCALAR"}%s]})",
+        cutout ? R"(,"TEXCOORD_0":2)" : "", material,
+        unlit ? R"("extensionsUsed":["KHR_materials_unlit"],)" : "",
+        cutout ? R"("images":[{"uri":"cutout-transparent.png"}],"textures":[{"source":0}],)" : "",
+        static_cast<unsigned>(bin.size()), enc.c_str(),
+        cutout ? R"(,{"buffer":0,"byteOffset":44,"byteLength":24})" : "",
+        cutout ? R"(,{"bufferView":2,"componentType":5126,"count":3,"type":"VEC2"})" : "");
     const std::string path = std::string("aurea_teste_triangulo_") + (facingViewer ? "frente" : "costas")
-        + (unlit ? "" : "_emissivo") + ".gltf";
+        + (cutout ? "_recorte" : unlit ? "" : "_emissivo") + ".gltf";
     std::FILE* f = std::fopen(path.c_str(), "wb");
     std::fwrite(json, 1, std::strlen(json), f);
     std::fclose(f);
@@ -1816,11 +1831,13 @@ struct Scene3DRig {
         AUREA_CHECK(e.new_project(w, h, 30.0, nullptr).ok());
     }
     ~Scene3DRig() { e.shutdown(); }
-    Image8 capture(u32 maxDim) {
+    Image8 capture(u32 maxDim, bool preview = false) {
         Image8 img;
         std::vector<u8> rgba;
         u32 w = 0, h = 0;
-        AUREA_CHECK(e.capture_frame_rgba(maxDim, rgba, w, h).ok());
+        const auto status = preview ? e.capture_preview_frame_rgba(maxDim, rgba, w, h)
+                                    : e.capture_frame_rgba(maxDim, rgba, w, h);
+        AUREA_CHECK(status.ok());
         img.width = w;
         img.height = h;
         img.rgba = std::move(rgba);
@@ -1863,6 +1880,49 @@ AUREA_TEST(SceneCutsGpu, GroupingCompleteLitScenePreservesStudioFloorAndPixels) 
     }
     std::printf("    grouped studio max difference=%u, changed channels=%u\n", difference, changed);
     AUREA_CHECK(difference <= 3);
+}
+
+AUREA_TEST(SceneRender1082, NeutralStudioPanoramaShowsWithoutAnImportedImage) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(256, 144);
+    const Image8 hidden = rig.capture(256);
+    AUREA_CHECK(coverage(hidden) < 0.001f);
+    AUREA_CHECK(rig.e.set_environment_background(true));
+    const Image8 visible = rig.capture(256);
+    AUREA_CHECK(coverage(visible) > 0.95f);
+    AUREA_CHECK(write_png("build/prompt03/neutral-panorama-1082.png", visible));
+    AUREA_CHECK(rig.e.set_environment_background(false));
+    AUREA_CHECK(coverage(rig.capture(256)) < 0.001f);
+}
+
+AUREA_TEST(SceneRender1082, InvisibleCutoutCannotDarkenTheModelBehindIt) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    const auto cube = rig.e.add_shape3d(0, "Receiver");
+    AUREA_CHECK(cube.ok());
+    if (!cube.ok()) return;
+    ModelImport input;
+    input.path = write_triangle_gltf(true, 0.2f, 0.8f, 0.1f, false, true);
+    const auto triangle = rig.e.import_model(input);
+    AUREA_CHECK(triangle.ok());
+    if (!triangle.ok()) return;
+    auto& timeline = rig.e.project()->timeline();
+    auto* comp = timeline.composition(timeline.current());
+    auto* leaf = comp->layer(LayerId::unpack(*triangle));
+    leaf->transform.position.z = -65.0f;
+    leaf->transform.scale = {0.65f, 0.65f, 0.65f};
+    leaf->visible = false;
+    const Image8 reference = rig.capture(320);
+    leaf->visible = true;
+    const Image8 cutout = rig.capture(320);
+    AUREA_CHECK(coverage(reference) > 0.02f);
+    AUREA_CHECK(reference.rgba.size() == cutout.rgba.size());
+    u32 difference = 0;
+    for (usize i = 0; i < std::min(reference.rgba.size(), cutout.rgba.size()); ++i) {
+        difference = std::max(difference, static_cast<u32>(std::abs(reference.rgba[i] - cutout.rgba[i])));
+    }
+    std::printf("    recorte transparente: diferenca maxima RGBA %u\n", difference);
+    AUREA_CHECK(difference <= 2);
 }
 
 AUREA_TEST(Gpu, Scene3DFrontFaceIsVisibleAndBackFaceIsCulled) {
@@ -12597,11 +12657,20 @@ AUREA_TEST(EnvironmentTexture, PanoramaFollowsCameraRotationNotTranslationAndSur
     for(u32 y=0;y<128;++y) for(u32 x=0;x<256;++x) {
         const usize i=(y*256+x)*4;
         pano.rgba[i]=(x<85?220:20); pano.rgba[i+1]=(x>=85&&x<171?210:15); pano.rgba[i+2]=(x>=171?220:20);
+        if ((x / 8) % 2) for (u32 channel = 0; channel < 3; ++channel) pano.rgba[i + channel] /= 4;
     }
     const std::string png="build/prompt03/environment-panorama.png";
     AUREA_CHECK(write_png(png,Image8{256,128,pano.rgba}));
-    AUREA_CHECK(rig.e.import_hdri(png.c_str()).ok());
-    AUREA_CHECK(rig.e.set_environment_background(true));
+    const auto environment = rig.e.import_hdri(png.c_str(), 0, true);
+    AUREA_CHECK(environment.ok());
+    AUREA_CHECK(rig.e.environment_background());
+    Command undoImport; undoImport.type = CommandType::Undo;
+    AUREA_CHECK(rig.e.apply_command(undoImport).ok());
+    AUREA_CHECK(!rig.e.environment_background());
+    AUREA_CHECK(!current_comp(rig.e)->environment().hdri.valid());
+    Command redoImport; redoImport.type = CommandType::Redo;
+    AUREA_CHECK(rig.e.apply_command(redoImport).ok());
+    AUREA_CHECK(rig.e.environment_background());
     const auto base=rig.capture(320);
     AUREA_CHECK(coverage(base)>.99f);
     const u64 cid=add_test_camera(rig.e,Vec3{160,90,-216},kDefaultFov180);
@@ -12613,6 +12682,22 @@ AUREA_TEST(EnvironmentTexture, PanoramaFollowsCameraRotationNotTranslationAndSur
     const auto rotated=rig.capture(320);
     AUREA_CHECK(max_diff(camera,rotated)>80);
     cam->transform.rotation.y=0;
+    auto* comp = current_comp(rig.e);
+    const auto trackingId = comp->add_layer(LayerKind::Shape, "Tracked source");
+    auto* tracking = comp->layer(trackingId);
+    tracking->visible = false;
+    tracking->transform.position = {160, 90, 0};
+    tracking->transform.anchor = {160, 90, 0};
+    cam = comp->layer(LayerId::unpack(cid));
+    cam->cameraTrackSource = trackingId;
+    cam->camera.trackingSourceSize = {320, 180};
+    const auto unframed = rig.capture(320);
+    tracking->transform.position.x += 96;
+    const auto reframed = rig.capture(320);
+    AUREA_CHECK(max_diff(unframed, reframed) > 60);
+    for (u32 x : {24u, 80u, 160u, 200u}) for (u32 channel = 0; channel < 4; ++channel)
+        AUREA_CHECK_NEAR(unframed.at(x,90)[channel], reframed.at(x + 96,90)[channel], 2);
+    cam->cameraTrackSource = {};
     AUREA_CHECK(rig.e.set_environment_params(1,90));
     const auto spun=rig.capture(320);
     AUREA_CHECK(max_diff(camera,spun)>80);
@@ -12635,6 +12720,17 @@ AUREA_TEST(EnvironmentTexture, PanoramaFollowsCameraRotationNotTranslationAndSur
     const auto composed=rig.capture(320);
     AUREA_CHECK(composed.at(160,90)[2]>240);
     AUREA_CHECK(composed.at(160,90)[0]<10); // panorama never covers foreground layers
+    const auto cube = rig.e.add_shape3d(0, "HDRI isolation");
+    AUREA_CHECK(cube.ok());
+    if (cube.ok()) {
+        const auto object = rig.e.import_hdri(png.c_str(), *cube);
+        AUREA_CHECK(object.ok());
+        const auto* scene = current_comp(rig.e);
+        AUREA_CHECK(environment.ok() && scene->environment().hdri.pack() == *environment);
+        AUREA_CHECK(rig.e.environment_background());
+        const auto* layer = scene->layer(LayerId::unpack(*cube));
+        AUREA_CHECK(layer && object.ok() && layer->environmentAsset == *object);
+    }
 }
 
 AUREA_TEST(GlitchifyGpu, ModulesAreDeterministicInSecondsAndTransitionClearsAlpha) {

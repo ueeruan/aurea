@@ -48,12 +48,16 @@ struct ContentView: View {
             // AureaMCP: conexão com os agentes de IA e as confirmações que eles pedem (Home e editor).
             AureaMcpRoot()
 
-            if model.importingMedia {
-                Color(hex: 0x17191D).opacity(221.0 / 255.0).ignoresSafeArea().contentShape(Rectangle()).onTapGesture {}
-                VStack(spacing: 12) {
-                    AureaActivityIndicator()
-                    Text(model.operationMessage).font(.aurea(size: 13)).foregroundStyle(AureaColors.text)
+            if model.importingMedia || model.openingProject {
+                ZStack {
+                    Color(hex: 0x17191D).opacity(221.0 / 255.0).ignoresSafeArea().contentShape(Rectangle()).onTapGesture {}
+                    VStack(spacing: 12) {
+                        AureaActivityIndicator()
+                        Text(model.openingProject ? AureaText.t("export_service_preparing") : model.operationMessage)
+                            .font(.aurea(size: 13)).foregroundStyle(AureaColors.text)
+                    }
                 }
+                .zIndex(2)
             }
 
             // O motor não subiu: a UI DIZ (nunca uma tela que parece pronta e
@@ -102,10 +106,12 @@ struct ContentView: View {
                             .background(AureaColors.surfaceHigh, in: RoundedRectangle(cornerRadius: 12))
                             .padding(.horizontal, 24)
                             .padding(.bottom, 96)
-                            .onTapGesture { model.toast = nil }
+                            .allowsHitTesting(false)
                     }
                 }
                 .transition(.opacity)
+                .allowsHitTesting(!model.importingMedia && !model.openingProject)
+                .zIndex(3)
             }
         }
         .overlay {
@@ -160,7 +166,7 @@ struct ContentView: View {
         .overlay(alignment: .bottom) { PerformanceTestBadge().padding(.bottom, 6) }
         .onChange(of: model.toast) { value in
             guard value != nil else { model.toastAction = nil; return }
-            // O aviso some sozinho, como o do Android. Tocar nele também fecha.
+            // O aviso passivo some sozinho, como o do Android.
             // Com ação ("Desfazer"), 4 s para dar tempo do toque.
             DispatchQueue.main.asyncAfter(deadline: .now() + (model.toastAction != nil ? 4.0 : 3.2)) {
                 if model.toast == value { model.toast = nil; model.toastAction = nil }

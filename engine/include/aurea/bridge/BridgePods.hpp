@@ -480,9 +480,12 @@ struct EffectCatalogRow {
     u32 nameLength      = 0;   // +16
     u32 categoryOffset  = 0;   // +20
     u32 categoryLength  = 0;   // +24
-    u32 reserved        = 0;   // +28 catalog flags: bit 0 = new in this release
+    u32 reserved        = 0;   // +28 flags, including layer applicability
 };
 static_assert(sizeof(EffectCatalogRow) == 32, "EffectCatalogRow e contrato de ABI");
+inline constexpr u32 kEffectCatalogTextModel = 1u << 1;
+inline constexpr u32 kEffectCatalogShapeModel = 1u << 2;
+inline constexpr u32 kEffectCatalogLayerShift = 8; // LayerKind mask above the flags; 0 means unrestricted.
 
 /// Um efeito aplicado numa layer, na ordem de aplicação.
 struct LayerEffectRow {

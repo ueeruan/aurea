@@ -108,7 +108,7 @@ internal fun Environment3DTab(env: PanelEnv) {
     val store = env.store
     val e by remember(store) { derivedStateOf { store.environment } }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) { store.importHdri(uri); if (store.detail?.kind == 8) store.setEnvironmentBackground(true) }
+        if (uri != null) store.importHdri(uri)
     }
     val (settings, change) = rememberSceneSettings(store)
     val ready = settings.size >= 8

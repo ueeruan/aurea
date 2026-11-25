@@ -159,6 +159,28 @@ struct StagePinchTracker {
 
 /// Tudo é da SESSÃO e só da prévia (par do `ViewModes` do Android): nada vai
 /// para o projeto nem para o export. O espaçamento da grade fica no aparelho.
+enum GridBlend: UInt32, CaseIterable {
+    case normal = 0, difference = 1, highContrast = 2
+    var title: String {
+        switch self {
+        case .normal: return AureaText.t("particular_blend_normal")
+        case .difference: return AureaText.t("pn_blend_difference")
+        case .highContrast: return AureaText.t("preview_grid_contrast")
+        }
+    }
+}
+
+struct GridAppearance: Equatable {
+    var rgb: UInt32 = 0xFFFFFF
+    var blend: GridBlend = .normal
+    var color: [Float] { [Float(rgb >> 16 & 255) / 255, Float(rgb >> 8 & 255) / 255, Float(rgb & 255) / 255, 1] }
+
+    mutating func setColor(_ color: [Float]) {
+        func byte(_ i: Int) -> UInt32 { UInt32((min(1, max(0, color[i])) * 255).rounded()) }
+        rgb = byte(0) << 16 | byte(1) << 8 | byte(2)
+    }
+}
+
 @MainActor final class ViewModeState: ObservableObject {
     static let shared = ViewModeState()
     static let gridMin = 5
@@ -173,6 +195,7 @@ struct StagePinchTracker {
     /// 0.4.1 (mockup "interface 03", o "olho" do palco): esconde contorno, alças e gizmo da seleção.
     @Published var hideOverlay = false
     @Published private(set) var gridSpacing: Int
+    @Published private(set) var gridAppearance: GridAppearance
     /// 0 normal, 1 só a(s) escolhida(s), 2 a(s) escolhida(s) a 50 % (só na prévia).
     @Published var solo = 0
     @Published var camera = false
@@ -181,6 +204,17 @@ struct StagePinchTracker {
     init() {
         let saved = UserDefaults.standard.integer(forKey: Self.spacingKey)
         gridSpacing = saved == 0 ? Self.gridMark : min(Self.gridMax, max(Self.gridMin, saved))
+        let rgb = UserDefaults.standard.object(forKey: "omega.chrome.gridRgb") as? NSNumber
+        let mode = UserDefaults.standard.object(forKey: "omega.chrome.gridBlend") as? NSNumber
+        gridAppearance = GridAppearance(rgb: (rgb?.uint32Value ?? 0xFFFFFF) & 0xFFFFFF,
+                                        blend: GridBlend(rawValue: mode?.uint32Value ?? 0) ?? .normal)
+    }
+
+    func changeGridAppearance(_ appearance: GridAppearance) {
+        guard appearance != gridAppearance else { return }
+        gridAppearance = appearance
+        UserDefaults.standard.set(Int(appearance.rgb), forKey: "omega.chrome.gridRgb")
+        UserDefaults.standard.set(Int(appearance.blend.rawValue), forKey: "omega.chrome.gridBlend")
     }
 
     func changeGridSpacing(_ value: Int) {
@@ -200,6 +234,73 @@ struct StagePinchTracker {
 
     /// Largura da coluna = a de uma célula do transporte de 7 (tela ÷ 7).
     static func columnWidth(_ screenWidth: CGFloat) -> CGFloat { min(72, max(44, screenWidth / 7)) }
+}
+
+@MainActor struct PreviewGridSync: View {
+    @EnvironmentObject private var model: AureaModel
+    @ObservedObject private var modes = ViewModeState.shared
+    let visible: Bool
+    private struct Settings: Equatable {
+        let on: Bool
+        let spacing: Int
+        let appearance: GridAppearance
+        let project: URL?
+    }
+    var body: some View {
+        let settings = Settings(on: visible && modes.grid, spacing: modes.gridSpacing,
+                                appearance: modes.gridAppearance, project: model.projectURL)
+        Color.clear.allowsHitTesting(false).accessibilityHidden(true)
+            .onAppear { apply(settings) }
+            .onChange(of: settings) { apply($0) }
+    }
+    private func apply(_ settings: Settings) {
+        model.engine.setPreviewGuideFlags(settings.on ? 1 : 0, gridSpacing: Float(settings.spacing),
+                                         gridRGB: settings.appearance.rgb, blendMode: settings.appearance.blend.rawValue)
+    }
+}
+
+private struct GridAppearanceButton: View {
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            CupertinoGlyph.text(CupertinoGlyph.Gear, size: 17, color: AureaColors.text)
+                .frame(width: 40, height: 40)
+                .background(AureaColors.editorPanel, in: Circle())
+                .contentShape(Circle())
+        }.buttonStyle(AureaPressStyle())
+            .accessibilityLabel(AureaText.t("preview_grid_appearance"))
+            .accessibilityIdentifier("stage.grid.appearance")
+    }
+}
+
+@MainActor private struct GridAppearanceSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var look = ViewModeState.shared.gridAppearance
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Picker(AureaText.t("preview_grid_blend"), selection: $look.blend) {
+                        ForEach(GridBlend.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }.pickerStyle(.segmented).accessibilityIdentifier("stage.grid.blend")
+                    if look.blend != .highContrast {
+                        Text(AureaText.t("preview_grid_color")).font(.aurea(size: 13, weight: .semibold))
+                        EmbeddedColorPicker(color: look.color, withAlpha: false, onChange: { look.setColor($0) })
+                            .frame(height: 200)
+                    }
+                }.frame(maxWidth: 440).padding(20).frame(maxWidth: .infinity)
+            }
+            .background(AureaColors.editorPanel)
+            .navigationTitle(AureaText.t("preview_grid_appearance"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(AureaText.t("common_cancel")) { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(AureaText.t("common_save")) { ViewModeState.shared.changeGridAppearance(look); dismiss() }
+                }
+            }
+        }.tint(AureaColors.accent).presentationDetents([.medium, .large])
+    }
 }
 
 /// Pedidos que nascem fora do editor (o painel de Ajustes mora na raiz do app)
@@ -223,6 +324,7 @@ struct ViewModeColumn: View {
     @State private var shown = false
     @State private var progress: CGFloat = 0
     @State private var gridAnchor: CGRect = .zero
+    @State private var gridAppearanceOpen = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -245,6 +347,7 @@ struct ViewModeColumn: View {
         .onChange(of: modes.spacingOpen) { open in
             if open { presentSpacing() } else { OmegaPopup.dismiss(Self.spacingOwner) }
         }
+        .sheet(isPresented: $gridAppearanceOpen) { GridAppearanceSheet().environmentObject(model) }
     }
 
     /// 1.0.2: o estado da célula do Pre Render & Pre Export (chave de AureaText).
@@ -367,7 +470,10 @@ struct ViewModeColumn: View {
     private func presentSpacing() {
         OmegaPopup.present(anchor: gridAnchor, placement: .leftCentered, owner: Self.spacingOwner,
                            onDismiss: { ViewModeState.shared.spacingOpen = false }) {
-            GridSpacingSpinner()
+            HStack(spacing: 6) {
+                GridAppearanceButton { modes.spacingOpen = false; gridAppearanceOpen = true }
+                GridSpacingSpinner()
+            }
         }
     }
 }
@@ -490,6 +596,7 @@ struct CanvasZoomMode: View {
 struct StageFloatPills: View {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject private var modes = ViewModeState.shared
+    @State private var gridAppearanceOpen = false
     @ObservedObject private var view = StageViewZoom.shared
 
     var body: some View {
@@ -497,9 +604,12 @@ struct StageFloatPills: View {
             let on = AureaText.t("common_on"), off = AureaText.t("common_off")
             let percent = AureaText.t("common_percent", StageZoomMath.percent(view.zoom))
             VStack(alignment: .trailing, spacing: 6) {
-                pill("stage.pill.grid", label: AureaText.t("om_vm_grid"), state: modes.grid ? on : off, active: modes.grid,
-                     action: { modes.grid.toggle() }) { tint in
-                    CupertinoGlyph.text(CupertinoGlyph.Grid, size: 16, color: tint)
+                HStack(spacing: 6) {
+                    if modes.grid { GridAppearanceButton { gridAppearanceOpen = true } }
+                    pill("stage.pill.grid", label: AureaText.t("om_vm_grid"), state: modes.grid ? on : off, active: modes.grid,
+                         action: { modes.grid.toggle() }) { tint in
+                        CupertinoGlyph.text(CupertinoGlyph.Grid, size: 16, color: tint)
+                    }
                 }
                 // 0.4.1 (mockup "interface 03"): o "olho" esconde o contorno e as alças da seleção (aceso = escondido).
                 pill("stage.pill.overlay", label: AureaText.t("om_vm_overlay"), state: modes.hideOverlay ? on : off, active: modes.hideOverlay,
@@ -521,6 +631,7 @@ struct StageFloatPills: View {
                 }
             }
             .padding(.top, 12).padding(.trailing, 10)
+            .sheet(isPresented: $gridAppearanceOpen) { GridAppearanceSheet().environmentObject(model) }
         }
     }
 

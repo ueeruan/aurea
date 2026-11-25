@@ -56,13 +56,18 @@ func fxMakesSound(_ entry: EffectCatalogItem) -> Bool {
     fxSoundGeneratorIds.contains(entry.typeId) || fxSoundGeneratorNames.contains(fxNormalizeSearch(entry.name))
 }
 
+private let fxHiddenCatalogEffects = Set([
+    "aurea.motion.oscillate", "aurea.layout.grid_builder", "aurea.layout.grid_item", "aurea.light.scene_flare",
+].map(fxEffectTypeId))
+
 /// O que o catálogo oferece para ESTA camada: sem som, some o que só mexe no som.
-func fxPickableEffects(_ catalog: [EffectCatalogItem], layerHasAudio: Bool, layerKind: UInt32 = 0) -> [EffectCatalogItem] {
+func fxPickableEffects(_ catalog: [EffectCatalogItem], layerHasAudio: Bool, layerKind: UInt32 = 0,
+                       textModel: Bool? = nil, shapeModel: Bool? = nil) -> [EffectCatalogItem] {
     catalog.filter {
-        !["aurea.motion.oscillate", "aurea.layout.grid_builder", "aurea.layout.grid_item", "aurea.light.scene_flare"].map(fxEffectTypeId).contains($0.typeId) &&
+        !fxHiddenCatalogEffects.contains($0.typeId) &&
         (layerHasAudio || !fxIsAudioCategory($0.category) || fxMakesSound($0)) &&
         (layerKind != 12 || !FxPluginTexts.isAudio($0.typeId)) &&
-        ($0.typeId != fxEffectTypeId("aurea.generate.raster_extrude") || [1, 2, 4, 5, 12].contains(layerKind))
+        $0.supportsLayer(layerKind, textModel: textModel, shapeModel: shapeModel)
     }
 }
 
@@ -635,9 +640,13 @@ func fxAfterOnly(_ image: UIImage?, size: CGSize) -> UIImage? {
 /// (som só com som, letras só em texto) e as ferramentas, na ordem do navegador.
 @MainActor
 func fxPickerEntries(_ model: AureaModel, layerHasAudio: Bool) -> [EffectCatalogItem] {
-    let text3D = !(model.engine.text3D(forLayer: model.primarySelection ?? 0) ?? [:]).isEmpty
-    let textLayer = model.selectedLayer?.kind == 4
-    let effects = fxPickableEffects(model.effectCatalog, layerHasAudio: layerHasAudio, layerKind: model.selectedLayer?.kind ?? 0).filter {
+    let layer = model.primarySelection ?? 0
+    let kind = model.selectedLayer?.kind ?? 0
+    let text3D = kind == 10 && !(model.engine.text3D(forLayer: layer) ?? [:]).isEmpty
+    let shape3D = kind == 10 && model.shape3DInfo(layer) != nil
+    let textLayer = kind == 4
+    let effects = fxPickableEffects(model.effectCatalog, layerHasAudio: layerHasAudio, layerKind: kind,
+                                    textModel: text3D, shapeModel: shape3D).filter {
         (textLayer || text3D || $0.typeId != fxEffectTypeId("aurea.text.transform")) &&
         (textLayer || $0.typeId != fxEffectTypeId("aurea.text.progress")) &&
         (textLayer || $0.typeId != fxEffectTypeId("aurea.text.randomizer")) &&

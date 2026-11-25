@@ -719,10 +719,10 @@ private:
     [[nodiscard]] bool build_dof(FrameGraph& graph, const SceneFrame& frame, u32 width, u32 height,
                                  FGTexture& display, FGTexture& scene, FGTexture depth) noexcept;
     u32 dofTaps_ = 32;
-    [[nodiscard]] PipelineKey shadow_key(bool skinned) const noexcept;
+    [[nodiscard]] PipelineKey shadow_key(bool skinned, bool cutout = false) const noexcept;
     /// 0.4.6: pré-passe de profundidade da oclusão ambiente (GTAO), câmera da cena.
-    [[nodiscard]] PipelineKey ao_depth_key(bool skinned) const noexcept;
-    [[nodiscard]] PipelineKey ssr_material_key(bool skinned) const noexcept;
+    [[nodiscard]] PipelineKey ao_depth_key(bool skinned, bool cutout = false) const noexcept;
+    [[nodiscard]] PipelineKey ssr_material_key(bool skinned, bool cutout = false) const noexcept;
     u32 shadowSize_ = 2048;
     u32 shadowCap_ = 4096;      ///< set_shadow_map_cap
     u32 shadowFilter_ = 2;

@@ -795,8 +795,19 @@ void Backend::fill_capabilities() noexcept {
     caps_.maxPerStageStorageImages = l.maxPerStageDescriptorStorageImages;
     caps_.maxColorAttachments = l.maxColorAttachments;
     caps_.minUniformBufferOffsetAlignment = static_cast<u32>(std::max<VkDeviceSize>(16, l.minUniformBufferOffsetAlignment));
-    caps_.colorSampleCountMask = l.framebufferColorSampleCounts;
-    caps_.depthSampleCountMask = l.framebufferDepthSampleCounts;
+    // A framebuffer limit is the union of supported formats. 3D specifically
+    // uses RGBA16F and D32F transient attachments for multisampling.
+    const auto attachment_samples = [&](VkFormat format, VkImageUsageFlags usage) {
+        VkImageFormatProperties props{};
+        const VkResult result = instanceFunctions_.vkGetPhysicalDeviceImageFormatProperties(
+            physical_, format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
+            usage | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT, 0, &props);
+        return result == VK_SUCCESS ? static_cast<u32>(props.sampleCounts) : 0u;
+    };
+    caps_.colorSampleCountMask = 1u | (l.framebufferColorSampleCounts
+        & attachment_samples(VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT));
+    caps_.depthSampleCountMask = 1u | (l.framebufferDepthSampleCounts
+        & attachment_samples(VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT));
     caps_.depthResolveSampleZero = depthResolve_;
     caps_.alphaToOne = alphaToOne_;
 

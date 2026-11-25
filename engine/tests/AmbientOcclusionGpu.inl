@@ -16,10 +16,11 @@ f64 mean_luma(const Image8& img, u32 x0, u32 y0, u32 x1, u32 y1) {
     return n ? sum / n : 0.0;
 }
 
-Image8 two_cubes(bool ao, bool touching) {
+Image8 two_cubes(bool ao, bool touching, bool lowPreview = false) {
     using aurea::scene3d::Shape3DKind;
     Scene3DRig rig(320, 180);
     rig.e.renderer().scene_renderer().set_ambient_occlusion(ao);
+    if (lowPreview) AUREA_CHECK(rig.e.set_scene3d_quality(static_cast<u32>(Scene3DQuality::Low)));
     const Result<u64> big = rig.e.add_shape3d(static_cast<u32>(Shape3DKind::Cube), "Grande");
     const Result<u64> small = rig.e.add_shape3d(static_cast<u32>(Shape3DKind::Cube), "Pequeno");
     AUREA_CHECK(big.ok() && small.ok());
@@ -35,13 +36,24 @@ Image8 two_cubes(bool ao, bool touching) {
     s->transform.scale = Vec3{0.55f, 0.55f, 0.55f};
     s->transform.rotation = Vec3{30, 45, 0};
     seek_frame(rig.e, 0);
-    Image8 img = rig.capture(320);
+    Image8 img = rig.capture(320, lowPreview);
     (void)write_png(std::string("tests/build/ao_") + (ao ? "on" : "off") + (touching ? "_junto" : "_longe") + ".png", img);
     std::printf("\n    [ao=%d] gtao rodou: %d", ao ? 1 : 0, rig.e.renderer().scene_renderer().stats().ambientOcclusion ? 1 : 0);
     return img;
 }
 
 } // namespace ao_test
+
+AUREA_TEST(SceneRender1082, LowPreviewKeepsContactOcclusion) {
+    AUREA_REQUIRE_GPU();
+    const auto off = ao_test::two_cubes(false, true, true);
+    const auto on = ao_test::two_cubes(true, true, true);
+    const auto diff = ao_test::mean_luma(off, 100, 30, 220, 150)
+                    - ao_test::mean_luma(on, 100, 30, 220, 150);
+    std::printf("    contato no modo Baixo: reducao de luminancia media %.2f\n", diff);
+    AUREA_CHECK(diff > 0.3);
+    AUREA_CHECK(std::fabs(ao_test::mean_luma(off, 0, 0, 16, 16) - ao_test::mean_luma(on, 0, 0, 16, 16)) < 0.5);
+}
 
 AUREA_TEST(Scene3DAmbientOcclusionGpu, ContactDarkensAmbientLightOnly) {
     AUREA_REQUIRE_GPU();

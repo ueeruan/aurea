@@ -230,6 +230,7 @@ struct TimelineView: View {
     @State private var showAllLayers = false
     /// Estilo do relógio sobre o cabeçote (o mesmo parâmetro do Android).
     var timecodeStyle: TimecodeStyle = .underline
+    var floatingCurve = false
     /// O cabeçote a cada quadro da tela durante o play (ver `PlayheadClock`).
     @EnvironmentObject private var clock: PlayheadClock
     @State private var pps = Zoom.defaultPPS
@@ -390,7 +391,7 @@ struct TimelineView: View {
     /// sem trilhas de propriedade abertas e fora do modo de escolher keyframes —
     /// senão a timeline volta inteira e dá para mexer (par do Timeline.kt).
     private var compact: Bool {
-        !showAllLayers && timelineCompact(panel: model.sheetContent == .panel || model.sheetContent == .curve,
+        !floatingCurve && !showAllLayers && timelineCompact(panel: model.sheetContent == .panel || model.sheetContent == .curve,
                         dock: compactDock && model.sheetContent == .dock,
                         tracksOpen: tracksOpen,
                         selectingKeys: model.timelineKeySelectMode || model.timelineLayerSelectMode)
@@ -546,7 +547,7 @@ struct TimelineView: View {
             .overlay(alignment: .topLeading) {
                 // 0.3.3 recursos: o botão "Todas/Seleção" da 0.3.2 volta: com camada escolhida
                 // (foco de uma linha), mostra todas as camadas e volta só à escolhida.
-                if !model.selection.isEmpty && (EditorTimelineRefresh.enabled
+                if !floatingCurve && !model.selection.isEmpty && (EditorTimelineRefresh.enabled
                     ? (model.sheetContent == .dock || model.sheetContent == .panel || model.sheetContent == .curve)
                     : (compactDock || model.sheetContent == .panel || model.sheetContent == .curve)) {
                     // 0.3.4 presets: pílula pequena (24) centrada na faixa da régua; estilo
@@ -2160,6 +2161,9 @@ struct TimelineView: View {
             else if let row, row.inner, horizontal, touched.kind == .trimStart || touched.kind == .trimEnd {
                 mode = innerRefused(row) ? .blocked : (touched.kind == .trimStart ? .trimStart : .trimEnd)
             }
+            else if compact, horizontal, !model.speedHandlesActive, touched.kind == .trimStart || touched.kind == .trimEnd {
+                mode = touched.kind == .trimStart ? .trimStart : .trimEnd
+            }
             else if model.timelineLayerSelectMode && touched.kind == .header && row?.track == nil && !compact && !horizontal { mode = .sweep }
             // Trilha de propriedade aberta (só do AUREA): o losango anda direto, como antes.
             else if row?.track != nil && touched.kind == .key && TimelinePress.timeEdit(dx, dy) { mode = .key }
@@ -2376,19 +2380,21 @@ struct TimelineView: View {
             let origin = g.mode == .trimStart ? row.start : row.end
             let desired = Double(origin) + delta
             let snapped = model.snapping ? Snap.nearest(g.snapTargets, desired, extra: timelineFrame(viewFrame), tol: Double(m.snapClip / ppf)) : Snap.none
-            let target = GestureLimit.clampFrame(max(0, snapped == Snap.none ? timelineFrame(desired) : snapped), limit: g.limit)
+            let magneticStart = g.mode == .trimStart && (model.editMode || row.magnetic)
+            let proposed = snapped == Snap.none ? timelineFrame(desired) : snapped
+            let target = GestureLimit.clampFrame(magneticStart ? proposed : max(0, proposed), limit: g.limit)
             let change = Int32(clamping: Int64(target) - Int64(origin))
             if change != g.sentDelta {
                 openUndo(&g)
                 if g.mode == .trimStart {
-                    if model.editMode || row.magnetic, let current = model.layers.first(where: { $0.id == row.id }) {
+                    if magneticStart, let current = model.layers.first(where: { $0.id == row.id }) {
                         model.trimStart(row.id, at: Int64(current.startFrame) + Int64(change) - Int64(g.sentDelta))
                         if let changed = model.layers.first(where: { $0.id == row.id }) {
                             g.sentDelta += current.duration - changed.duration
                         }
                     } else { model.trimStart(row.id, at: Int64(target)) }
                 } else { model.trimEnd(row.id, at: Int64(target)) }
-                if g.mode != .trimStart || !(model.editMode || row.magnetic) { g.sentDelta = change }
+                if !magneticStart { g.sentDelta = change }
                 // Omega (P1-7): a barra de info com os seis campos do corte.
                 if EditorTimelineRefresh.enabled { omegaTrimInfo(row.id, originalDuration: g.originalDuration) }
             }
@@ -2499,7 +2505,7 @@ struct TimelineView: View {
         return d0 <= d1 ? -1 : 1
     }
     private func openUndo(_ g: inout Interaction) {
-        if !g.undoOpen { model.engine.run { $0.beginUndoGroup() }; g.undoOpen = true }
+        if !g.undoOpen { model.beginGesture("timeline"); g.undoOpen = true }
     }
     private func holdView(_ desired: Double) {
         let target = min(TimeAxis.clampView(desired, durationFrames: Int32(clamping: model.compositionDuration)), Double(model.navigationEnd))
@@ -2547,7 +2553,7 @@ struct TimelineView: View {
             if let held = heldView { model.optimisticPlayhead(Int64(timelineFrame(held))) }
             autoScrubbing = false
         }
-        if g.undoOpen { model.engine.run { $0.endUndoGroup() } }
+        if g.undoOpen { model.endGesture() }
         model.timelineKeyDragActive = false
         gesture = nil; guide = Snap.none; reorderSource = -1; reorderTarget = -1; boxRect = nil
         if !flinging { heldView = nil; scrubFlinging = false; scrubVelocity = 0 }

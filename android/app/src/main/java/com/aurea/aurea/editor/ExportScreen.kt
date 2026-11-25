@@ -205,6 +205,7 @@ internal fun ExportScreen(store: EditorStore, onOpenProjectSettings: (() -> Unit
     var sourceIssues by remember { mutableStateOf<List<ExportSourceNotice>?>(null) }
     LaunchedEffect(store, store.projectGeneration) { exporter.reset() }
     LaunchedEffect(store.projectGeneration, comp?.id) {
+        sourceIssues = null
         sourceIssues = withContext(Dispatchers.IO) {
             store.exportSourceIssues().asList().chunked(4).mapNotNull { row ->
                 if (row.size != 4) return@mapNotNull null
@@ -337,7 +338,8 @@ internal fun ExportScreen(store: EditorStore, onOpenProjectSettings: (() -> Unit
                         }
                     }
                 }
-                ExportButton(enabled = !exporter.busy && (item == ExportItem.Package || sourceIssues != null), onClick = ::go)
+                val checkingSources = item != ExportItem.Package && sourceIssues == null
+                ExportButton(enabled = !exporter.busy && !checkingSources, checkingSources = checkingSources, onClick = ::go)
             }
         }
         precheck?.let { check ->
@@ -927,8 +929,8 @@ private fun Notice(text: String, danger: Boolean) {
 
 /** O botão "Exportar": faixa branca na base, azul-marinho com texto de destaque de 20 sp. */
 @Composable
-private fun ExportButton(enabled: Boolean, onClick: () -> Unit) {
-    val label = stringResource(R.string.om_exp_go)
+private fun ExportButton(enabled: Boolean, checkingSources: Boolean, onClick: () -> Unit) {
+    val label = stringResource(if (checkingSources) R.string.motion_export_checking_media else R.string.om_exp_go)
     Column(Modifier.fillMaxWidth().background(AureaColors.ExportCard)) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(AureaColors.ExportLine))
         Row(
@@ -941,7 +943,8 @@ private fun ExportButton(enabled: Boolean, onClick: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
         ) {
             val ink = if (enabled) AureaColors.ExportOnPrimary else AureaColors.ExportHint
-            CupertinoIcon(CupertinoGlyph.SquareArrowUp, 18.dp, ink)
+            if (checkingSources) ActivityIndicator(size = 18.dp, color = ink)
+            else CupertinoIcon(CupertinoGlyph.SquareArrowUp, 18.dp, ink)
             Text(label, style = AureaType.of(16f, FontWeight.SemiBold, color = ink))
         }
     }

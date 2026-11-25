@@ -31,18 +31,27 @@ import { verifyGooglePurchase, verifyApplePurchase, verifyGoogleSubscription, ve
 /** AureaOS no AureaMCP: compra ÚNICA (não consumível, vale para sempre na conta). */
 export const AUREAOS_PRODUCT = "aurea_aureaos";
 /**
- * ASSINATURAS mensais (16/11/2026, decisão do dono; docs/release/assinaturas.md).
- * O AureaHyper libera tudo o que é pago; cada efeito pago e o Texto 3D têm a sua.
+ * ASSINATURAS (16/11/2026, decisão do dono; docs/release/assinaturas.md).
+ * O AureaHyper libera tudo o que é pago; os efeitos pagos e o Texto 3D tiveram a sua.
  * Quem decide o que cada produto libera é o motor (hyper::has_access, Hyper.cpp):
- * esta lista só diz o que o servidor aceita vender. Mesma lista de
- * hyper::subscription_product_ids (test_hyper.cpp confere a contagem: 12).
+ * esta lista só diz o que o servidor aceita conferir. Mesma lista de
+ * hyper::subscription_product_ids (test_hyper.cpp confere a contagem: 15).
  */
-// 1.0.2.1 (19/11/2026, pedido do dono): só se vende o AureaHyper ANUAL (R$ 100/ano).
-// O mensal e os avulsos ficam aqui para renovar/restaurar quem já assinou.
+// 1.0.9 (25/11/2026, decisão do dono): o AureaHyper tem três planos à venda, todos
+// liberam tudo: SEMANAL (R$ 7), MENSAL (R$ 30) e ANUAL (R$ 150). Os avulsos não se
+// vendem desde a 1.0.2.1 e ficam aqui para renovar/restaurar quem já assinou.
+// O vencimento vem da loja (expiryTime/expiresDate), então o período (semana, mês,
+// ano) não muda nada aqui.
 export const HYPER_SUBSCRIPTION = "aurea_hyper_anual";
-export const HYPER_MENSAL_LEGADO = "aurea_hyper_mensal";
+export const HYPER_ANUAL = HYPER_SUBSCRIPTION;
+export const HYPER_MENSAL = "aurea_hyper_mensal";
+/** Nome antigo (de quando o mensal era só legado). */
+export const HYPER_MENSAL_LEGADO = HYPER_MENSAL;
+export const HYPER_SEMANAL = "aurea_hyper_semanal";
+/** Os planos do AureaHyper à venda, na ordem das telas (hyper::hyper_plans_on_sale). */
+export const HYPER_PLANOS = Object.freeze([HYPER_SEMANAL, HYPER_MENSAL, HYPER_ANUAL]);
 export const ASSINATURAS = Object.freeze([
-  HYPER_SUBSCRIPTION, HYPER_MENSAL_LEGADO,
+  ...HYPER_PLANOS,
   "aurea_fx_cartoon_moblur", "aurea_fx_twitch", "aurea_fx_signal", "aurea_fx_glitchify", "aurea_fx_extrude",
   "aurea_fx_sharpen", "aurea_fx_find_edges", "aurea_fx_wave_warp", "aurea_fx_block_dissolve",
   "aurea_fx_radial_wipe", "aurea_texto3d", "aurea_fx_headbop",

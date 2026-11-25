@@ -2005,7 +2005,11 @@ struct EffectsView: View {
     /// Adiciona ao fim da pilha das camadas selecionadas.
     private func pick(_ entry: EffectCatalogItem) {
         let targets = model.editingLayers.filter { model.editingSelection.contains($0.id) && !$0.locked }
-        guard model.started, !targets.isEmpty, pendingPick == nil else { return }
+        guard model.started, pendingPick != entry.typeId else { return }
+        guard !targets.isEmpty else {
+            model.toast = AureaText.t(model.editingSelection.isEmpty ? "edt_cmd_select_layer" : "sh_layers_locked_unlock_to_edit")
+            return
+        }
         if let layer = model.primarySelection { model.seenEffectIds[layer] = Set(shown.map(\.effectId)) }
         pendingPick = entry.typeId
         prefs.addRecent(entry.typeId)

@@ -2234,10 +2234,30 @@ struct AureaSlider: View {
     }
 }
 
-/// Uma régua por vez arremessa; enquanto isso, o toque numa outra é ignorado
-/// (referência `K52.Rw`). Só a thread principal mexe aqui.
+/// Fecha a edição da régua anterior quando outra assume o arrasto.
+@MainActor
 enum FxRulerFling {
-    static var owner: UUID?
+    private static var owner: UUID?
+    private static var onStop: (() -> Void)?
+
+    static func start(_ token: UUID, stop: @escaping () -> Void) {
+        interrupt()
+        owner = token
+        onStop = stop
+    }
+
+    static func clear(_ token: UUID) {
+        guard owner == token else { return }
+        owner = nil
+        onStop = nil
+    }
+
+    static func interrupt() {
+        guard let owner else { return }
+        let stop = onStop
+        clear(owner)
+        stop?()
+    }
 }
 
 /// A RÉGUA (`ValueSpinner`). 1.0.8 visual minimalista: risco a cada 5,5 pt, 1,5 de
@@ -2253,7 +2273,7 @@ enum FxRulerFling {
 /// com a desaceleração do `UIScrollView` (0,998/ms), parando na ponta da faixa;
 /// prende na faixa (estendida até o valor de partida); vibração leve ao cruzar um
 /// encaixe; dois dedos = 1/10 (controle fino do AUREA). Tocar na régua em movimento
-/// para a inércia. Enquanto outra régua arremessa, só o arrasto vertical passa para a lista.
+/// para a inércia. Um arrasto horizontal em outra régua interrompe a anterior.
 /// Um passo de desfazer por gesto, incluindo a inércia.
 /// Mesmo comportamento do `FxRuler` do EffectsControls.kt.
 struct FxRuler: View {
@@ -2308,12 +2328,13 @@ struct FxRuler: View {
                 // cancelamento (a rolagem levou o toque), depois dele.
                 if !down {
                     DispatchQueue.main.async {
+                        guard !held else { return }
                         phase = 0
                         if fling == nil { finish() }
                     }
                 }
             }
-            .onChange(of: enabled) { on in if !on { stopFling(); finish() } }
+            .onChange(of: enabled) { on in if !on { phase = 0; stopFling(); finish() } }
             .onAppear { FxTouchCounter.shared.install() }
             .onDisappear { stopFling(); finish() }
             .accessibilityElement()
@@ -2323,6 +2344,7 @@ struct FxRuler: View {
                 let unit = tickStep * Float(FxParamMath.MAJOR_EVERY)
                 let delta: Float = move == .increment ? unit : move == .decrement ? -unit : 0
                 guard enabled, delta != 0 else { return }
+                FxRulerFling.interrupt()
                 let a = Swift.min(min, max, value), b = Swift.max(min, max, value)
                 onBegin(); onValue(Swift.min(Swift.max(value + delta, a), b)); onEnd()
             }
@@ -2406,9 +2428,8 @@ struct FxRuler: View {
         if phase == 0 {
             // Rolagem vertical continua no ScrollView, mesmo com a régua em movimento.
             if abs(dx) <= abs(dy) * FxParamMath.HORIZONTAL_DOMINANCE { phase = -1; return }
-            if let owner = FxRulerFling.owner, owner != token { phase = -1; return }
             let resumedValue = shown
-            stopFling()
+            FxRulerFling.interrupt()
             phase = 1
             lastX = dx
             walked = 0
@@ -2465,7 +2486,7 @@ struct FxRuler: View {
     }
 
     private func startFling(_ speed: CGFloat) {
-        FxRulerFling.owner = token
+        FxRulerFling.start(token, stop: stopFling)
         fling = Task { @MainActor in
             // UIScrollView.DecelerationRate.normal: a velocidade cai 0,2 % por ms.
             let rate = 0.998
@@ -2492,7 +2513,7 @@ struct FxRuler: View {
             }
             if !Task.isCancelled {
                 fling = nil
-                if FxRulerFling.owner == token { FxRulerFling.owner = nil }
+                FxRulerFling.clear(token)
                 finish()
             }
         }
@@ -2503,7 +2524,7 @@ struct FxRuler: View {
         guard let task = fling else { return }
         task.cancel()
         fling = nil
-        if FxRulerFling.owner == token { FxRulerFling.owner = nil }
+        FxRulerFling.clear(token)
         finish()
     }
 }

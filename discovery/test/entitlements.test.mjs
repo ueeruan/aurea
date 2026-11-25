@@ -28,8 +28,9 @@ const admin = (env, corpo, token = SEGREDO, ip) =>
 
 test("entitlements: lista de produtos conhecidos", () => {
   assert.deepEqual([...PRODUTOS], [HYPER, "aurea_aureaos", ...ASSINATURAS]);
-  assert.equal(ASSINATURAS.length, 14, "a mesma contagem de hyper::subscription_product_ids (1.0.2.1: anual + mensal e avulsos legados)");
-  assert.equal(ASSINATURAS[0], "aurea_hyper_anual", "o anual é o que se vende");
+  assert.equal(ASSINATURAS.length, 15, "a mesma contagem de hyper::subscription_product_ids (1.0.9: 3 planos + avulsos legados)");
+  assert.deepEqual(ASSINATURAS.slice(0, 3), ["aurea_hyper_semanal", "aurea_hyper_mensal", "aurea_hyper_anual"],
+    "os 3 planos à venda primeiro, na ordem de hyper::hyper_plans_on_sale");
   assert.ok(Object.isFrozen(PRODUTOS));
 });
 

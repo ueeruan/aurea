@@ -178,6 +178,7 @@ public:
     AudioBlockCache& operator=(const AudioBlockCache&) = delete;
 
     void register_asset(u64 key, AudioAssetRef ref);
+    u64 register_asset_revision(u64 key, AudioAssetRef ref);
     [[nodiscard]] bool knows(u64 key) const;
     /// Decoders abertos daqui em diante usam o de SOFTWARE da plataforma
     /// (export compatível, VideoSourceFactory::open_audio_software).
@@ -294,6 +295,7 @@ private:
 struct AudioSend {
     u32 kind = 0; // 0 reverb, 1 flanger, 2 echo
     f32 wet = .3f, seconds = .12f, rate = .3f, decay = .5f;
+    bool operator==(const AudioSend&) const = default;
 };
 struct AudioClip {
     std::vector<AudioSend> sends; // independent parallel sends; dry signal retained
@@ -344,6 +346,7 @@ struct AudioClip {
     /// o hash do que ele toca: o fluxo continua enquanto os dois batem.
     u64 streamKey = 0;
     u64 fxHash = 0;
+    bool operator==(const AudioClip&) const = default;
 };
 
 class MixState;
@@ -352,7 +355,7 @@ struct AudioMixSnapshot {
     Errc dspError = Errc::Ok;
     std::vector<AudioClip> clips;
     i64 endSample = 0;      ///< fim da composição
-    u64 revision = 0;
+    u64 revision = 0;      ///< Identifica as versões das fontes registradas no cache.
     [[nodiscard]] bool audible() const noexcept { return !clips.empty(); }
 };
 

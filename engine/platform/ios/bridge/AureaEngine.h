@@ -500,6 +500,7 @@ NS_SWIFT_NAME(AureaEngine)
 /// Zoom/pan da VISTA da prévia (pan em px do drawable). Só o passe de saída:
 /// sem desfazer, nunca no render/export.
 - (void)setViewportZoom:(float)zoom panX:(float)panX panY:(float)panY;
+- (void)setPreviewGuideFlags:(uint32_t)flags gridSpacing:(float)spacing gridRGB:(uint32_t)rgb blendMode:(uint32_t)mode;
 
 // --- Camadas ----------------------------------------------------------------
 - (void)setLayer:(long long)layerId name:(NSString*)name;
@@ -896,6 +897,7 @@ NS_SWIFT_NAME(AureaEngine)
 /// (motivo em lastImportError). Bloqueia: chamar fora da thread principal.
 - (int)reloadModelTextures:(long long)layerId;
 - (long long)importHdri:(NSString*)path;
+- (long long)importHdri:(NSString*)path showAsBackground:(BOOL)visible;
 - (long long)importObjectHDRI:(NSString*)path layer:(long long)layer;
 - (void)clearHdri;
 - (long long)addShape:(uint32_t)preset;
@@ -1898,8 +1900,14 @@ NS_SWIFT_NAME(AureaEngine)
 + (NSString*)text3DProductId NS_SWIFT_NAME(text3DProductId());
 /// A assinatura que libera tudo (hyper::kHyperSubscriptionId).
 + (NSString*)hyperSubscriptionId NS_SWIFT_NAME(hyperSubscriptionId());
-/// O que as lojas vendem: AureaHyper primeiro, depois cada avulso (hyper::subscription_product_ids).
+/// Tudo o que o app reconhece (restaurar): os 3 planos do AureaHyper, depois cada avulso legado (hyper::subscription_product_ids).
 + (NSArray<NSString*>*)subscriptionProductIds NS_SWIFT_NAME(subscriptionProductIds());
+/// 1.0.9: os planos do AureaHyper à venda, na ordem da tela: semanal, mensal, anual (hyper::hyper_plans_on_sale).
++ (NSArray<NSString*>*)hyperPlansOnSale NS_SWIFT_NAME(hyperPlansOnSale());
+/// 1.0.9: "economize N%" do anual contra um ano do plano curto mais barato
+/// (preços da loja em micros, mesma moeda; 0 = sem selo). hyper::hyper_annual_savings_percent.
++ (int32_t)hyperAnnualSavingsPercentWeekly:(int64_t)weeklyMicros monthly:(int64_t)monthlyMicros annual:(int64_t)annualMicros
+    NS_SWIFT_NAME(hyperAnnualSavingsPercent(weekly:monthly:annual:));
 /// A regra única de acesso (hyper::has_access); `item` nil = item só do AureaHyper.
 + (BOOL)hasPaidAccess:(NSArray<NSString*>*)owned item:(nullable NSString*)item NS_SWIFT_NAME(hasPaidAccess(_:item:));
 /// O detector de rostos da plataforma (Vision, HyperPlatform.swift) para a

@@ -177,6 +177,19 @@ Mat4 layer_matrix_3d_frac(const Layer& l, f64 local, f64 fps, const Vec3* camera
                    (s(TrackProperty::RotationZ, l.transform.rotation.z) + an.rotation.z) * kDeg2Rad};
     const Vec3 anchor{s(TrackProperty::AnchorX, l.transform.anchor.x), s(TrackProperty::AnchorY, l.transform.anchor.y),
                       s(TrackProperty::AnchorZ, l.transform.anchor.z)};
+    const f32 kx = s(TrackProperty::SkewX, l.transform.skewX), ky = s(TrackProperty::SkewY, l.transform.skewY);
+    const bool skewed = has_skew(kx, ky);
+    if (rot.x == 0.0f && rot.y == 0.0f && rot.z == 0.0f && followAngle == 0.0f
+        && !skewed && l.autoOrient == 0 && !(l.kind == LayerKind::Camera && l.camera.twoNode)) {
+        // T(position) * S(scale) * T(-anchor) is diagonal plus translation.
+        // Keep scale mirroring and nonzero anchors in the direct form.
+        const Vec3 translation{scale.x * -anchor.x + pos.x, scale.y * -anchor.y + pos.y, scale.z * -anchor.z + pos.z};
+        if (std::isfinite(translation.x) && std::isfinite(translation.y) && std::isfinite(translation.z)) {
+            Mat4 result = Mat4::scale(scale);
+            result.col[3] = Vec4{translation, 1.0f};
+            return result;
+        }
+    }
     Mat4 orientation = Mat4::from_quat(Quat::from_euler_zyx(rot.x, rot.y, rot.z));
     if (followAngle != 0.0f) orientation = Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, followAngle)) * orientation;
     // AE animation (v68): a orientação automática vem ANTES da rotação da
@@ -196,8 +209,7 @@ Mat4 layer_matrix_3d_frac(const Layer& l, f64 local, f64 fps, const Vec3* camera
         orientation = aim_z(pos - *cameraInParent) * orientation;
     }
     // Omega aparência (P0-6): a mesma inclinação no 3D (no plano XY da camada).
-    const f32 kx = s(TrackProperty::SkewX, l.transform.skewX), ky = s(TrackProperty::SkewY, l.transform.skewY);
-    if (has_skew(kx, ky))
+    if (skewed)
         return Mat4::translation(pos) * orientation * Mat4::scale(scale)
              * skew_matrix(kx, ky) * Mat4::translation(-anchor);
     return Mat4::translation(pos) * orientation * Mat4::scale(scale)
@@ -239,11 +251,17 @@ bool wants_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept
         const FrameIndex local = p->local_time(time);
         auto s = [&](TrackProperty prop, f32 fallback) noexcept {
             const Track* tr = p->tracks.find(prop);
-            return tr ? tr->value_or(local, fallback) : fallback;
+            if (!tr) return fallback != 0.0f;
+            if (tr->value_or(local, fallback) != 0.0f) return true;
+            // Keep a spatial animation in the same render path at its neutral
+            // keyframes, including descendants attached to a null.
+            return std::any_of(tr->keys.begin(), tr->keys.end(), [](const Keyframe& key) {
+                return std::isfinite(key.value) && key.value != 0.0f;
+            });
         };
-        if (s(TrackProperty::RotationX, p->transform.rotation.x) != 0.0f
-            || s(TrackProperty::RotationY, p->transform.rotation.y) != 0.0f
-            || s(TrackProperty::PositionZ, p->transform.position.z) != 0.0f) {
+        if (s(TrackProperty::RotationX, p->transform.rotation.x)
+            || s(TrackProperty::RotationY, p->transform.rotation.y)
+            || s(TrackProperty::PositionZ, p->transform.position.z)) {
             return true;
         }
         // Animador de camada girando em X/Y (entrada "de pé", "virando"): 3D.

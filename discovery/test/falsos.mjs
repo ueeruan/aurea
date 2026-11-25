@@ -53,6 +53,8 @@ export function d1Falso() {
   db.exec(readFileSync(new URL("../migrations/0012_entitlement_subscriptions.sql", import.meta.url), "utf8"));
   db.exec(readFileSync(new URL("../migrations/0013_password_resets.sql", import.meta.url), "utf8"));
   db.exec(readFileSync(new URL("../migrations/0014_crash_reports.sql", import.meta.url), "utf8"));
+  db.exec(readFileSync(new URL("../migrations/0015_community_asset_indexes.sql", import.meta.url), "utf8"));
+  db.exec(readFileSync(new URL("../migrations/0016_community_feed.sql", import.meta.url), "utf8"));
   const limpar = (r) => (r === undefined ? null : { ...r });
   const declaracao = (sql, params = []) => ({
     bind: (...p) => declaracao(sql, p),

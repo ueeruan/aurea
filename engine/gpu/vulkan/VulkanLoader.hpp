@@ -54,6 +54,7 @@ namespace aurea::vk {
     X(vkGetPhysicalDeviceMemoryProperties2)             \
     X(vkGetPhysicalDeviceQueueFamilyProperties)         \
     X(vkGetPhysicalDeviceFormatProperties)              \
+    X(vkGetPhysicalDeviceImageFormatProperties)         \
     X(vkEnumerateDeviceExtensionProperties)             \
     X(vkCreateDevice)                                   \
     X(vkGetDeviceProcAddr)                              \

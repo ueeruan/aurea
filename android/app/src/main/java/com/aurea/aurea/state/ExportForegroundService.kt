@@ -108,17 +108,19 @@ class ExportForegroundService : Service() {
      * se o processo for encerrado a próxima exportação continua de onde parou.
      */
     override fun onTimeout(startId: Int, fgsType: Int) {
-        Log.w(TAG, "foreground service timeout (type $fgsType); leaving foreground and warning the user")
+        // Meet the system deadline before touching the wake lock or composing
+        // the notification. Native export owns its checkpoint independently.
         timedOut = true
-        release()
-        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
         running = false
         foreground = false
+        stopSelf()
+        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+        release()
+        Log.w(TAG, "foreground service timeout (type $fgsType)")
         runCatching {
             (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
                 .notify(TIMEOUT_NOTIFICATION_ID, timeoutNotification(this))
         }
-        stopSelf()
     }
 
     override fun onDestroy() {

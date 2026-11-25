@@ -33,6 +33,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.aurea.aurea.diagnostics.ExitDiagnostics
 import com.aurea.aurea.diagnostics.ExitDiagnostics.Phase
+import com.aurea.aurea.diagnostics.ProblemReport
 import com.aurea.aurea.diagnostics.ProjectGuard
 import com.aurea.aurea.effects.EffectPreviewStore
 import com.aurea.aurea.effects.EffectPrefs
@@ -970,9 +971,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * pedido espera e roda sozinho quando o motor fica pronto (o último vale).
      */
     private var pendingWhenReady: (() -> Unit)? = null
+    private var slowStartupMessage: String? = null
 
     /** true = pode seguir agora; false = guardado para quando o motor ficar pronto (ou o motor falhou). */
-    private fun whenEngineReady(action: () -> Unit): Boolean {
+    internal fun whenEngineReady(action: () -> Unit): Boolean {
         if (ready) return true
         if (destroyed) return false
         if (engineStartFailed) {
@@ -1045,29 +1047,42 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 // textura/preview/export a partir dela e da GPU real.
                 val probe = runCatching { com.aurea.aurea.engine.DeviceProfile.probe(app) }.getOrNull()
                 ExitDiagnostics.mark(app, Phase.ENGINE_START)
+                val initializeStarted = android.os.SystemClock.elapsedRealtime()
                 // 1.0.8: motor que não fica pronto não pode virar silêncio na Home.
-                main.postDelayed({
-                    if (!destroyed && !engineReady && !engineStartFailed && errorMessage == null) {
-                        errorMessage = appText(R.string.engine_slow_start) +
+                val showSlowStartup = Runnable {
+                    if (!destroyed && !ready && !engineStartFailed && errorMessage == null) {
+                        val message = appText(R.string.engine_slow_start) +
                             "\n\n${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE}"
+                        slowStartupMessage = message
+                        errorMessage = message
+                        ProblemReport.noteSlowEngineStart(app, android.os.SystemClock.elapsedRealtime() - initializeStarted, null)
                     }
-                }, ENGINE_SLOW_START_MS)
+                }
+                main.postDelayed(showSlowStartup, ENGINE_SLOW_START_MS)
                 val ok = engine.initialize(
                     displayRefreshRate(), dirs.cache.absolutePath, dirs.projects.absolutePath, debug,
                     probe?.memory, probe?.codecs,
                 )
                 ready = ok && !destroyed
                 engineStartFailed = !ok
+                val initializeMs = android.os.SystemClock.elapsedRealtime() - initializeStarted
+                android.util.Log.i("AureaEngine", "Engine startup completed: ready=$ok, elapsedMs=$initializeMs")
                 // Fechou por crash nativo com vídeo aberto na sessão anterior:
                 // sem zero-copy daqui em diante neste aparelho (qualquer marca).
                 if (ok && ExitDiagnostics.safeVideoMode(app)) engine.useReadableVideoPlanes()
                 // O modo de "Otimizar vídeos pesados" vale antes do primeiro projeto abrir.
                 if (ok) proxies.pushModeToEngine()
-                if (ok) ExitDiagnostics.mark(app, Phase.ENGINE_READY)
+                if (ok) ExitDiagnostics.mark(app, Phase.ENGINE_READY, "init_ms=$initializeMs")
                 if (ok) pendingSurface?.let { (s, w, h) -> engine.attachSurface(s, w, h) }
                 pendingSurface = null
                 main.post {
+                    main.removeCallbacks(showSlowStartup)
                     if (destroyed) return@post
+                    if (initializeMs >= ENGINE_SLOW_START_MS || slowStartupMessage != null) {
+                        ProblemReport.noteSlowEngineStart(app, initializeMs, ok)
+                    }
+                    if (slowStartupMessage != null && errorMessage == slowStartupMessage) errorMessage = null
+                    slowStartupMessage = null
                     if (ok) {
                         deviceReport = engine.deviceReport()
                         deviceName = engine.deviceSummary()
@@ -4753,10 +4768,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var previewGuides by mutableIntStateOf(0)
         private set
 
-    fun setPreviewGuides(flags: Int, gridSpacing: Float) {
+    fun setPreviewGuides(flags: Int, gridSpacing: Float, rgb: Int, blend: Int) {
         if (!ready) return
         previewGuides = flags and 7
-        engine.setPreviewGuides(flags and 7, gridSpacing)
+        engine.setPreviewGuides(flags and 7, gridSpacing, rgb, blend)
     }
 
     // --- AE animation (EngineAeAnimation.cpp): texto-fonte, auto-orientar, dois nós ---
@@ -5359,7 +5374,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (typeId == com.aurea.aurea.editor.panels.effectTypeId("aurea.key.rotobrush")) {
             if (busyMessage != null) return
             val targets = ids.toList()
-            if (targets.any { id -> layers.none { it.id == id && it.kind in 1..2 } }) {
+            if (targets.any { id -> editingLayers.none { it.id == id && it.kind in 1..2 } }) {
                 showToast(appText(R.string.roto_select_media)); return
             }
             group("Rotobrush IA") { targets.forEach { addEffect(it, typeId) } }
@@ -6088,6 +6103,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             try {
                 for ((index, pick) in picks.withIndex()) {
                     if (picks.size > 1) busyMessage = "${appText(R.string.ios_importing_media)} ${index + 1}/${picks.size}"
+                    var audio = false
                     try {
                         val id = withContext(Dispatchers.IO) {
                             val uri = pick.uri
@@ -6100,8 +6116,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                             val name = display.ifEmpty { appText(if (pick.video) R.string.target_video else R.string.target_image) }
                             val ext = display.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
                             val mime = app.contentResolver.getType(uri)
+                            audio = !pick.video && com.aurea.aurea.editor.PickedMedia.kind(mime, display) == com.aurea.aurea.editor.PickedMedia.Kind.Audio
                             val layered = !pick.video && (mime == "image/gif" || ext == "gif" || ext == "psd" || mime == "image/vnd.adobe.photoshop")
                             val created = when {
+                                audio -> engine.importAudio(source, display.substringBeforeLast('.').ifEmpty { appText(R.string.target_audio) })
                                 layered -> importLayeredNow(uri, mime == "image/gif" || ext == "gif")
                                 pick.video -> engine.importVideoWindow(source, name, media.windowStartUs, media.originRef)
                                 else -> {
@@ -6115,12 +6133,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                                 }
                             }
                             // Duração e corte entram no MESMO passo (o lote está aberto).
-                            if (created >= 0 && !layered && (pick.durationFrames > 0 || pick.trimOutUs > pick.trimInUs))
+                            if (created >= 0 && !audio && !layered && (pick.durationFrames > 0 || pick.trimOutUs > pick.trimInUs))
                                 engine.applyImportTiming(created, if (pick.video) 0 else pick.durationFrames,
                                     if (pick.video) pick.trimInUs else 0, if (pick.video) pick.trimOutUs else 0)
                             created
                         }
-                        if (id >= 0) imported.add(id) else errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
+                        if (id >= 0) imported.add(id)
+                        else errorMessage = when {
+                            audio && -id == ERRC_UNSUPPORTED_FORMAT -> appText(R.string.app_audio_unreadable)
+                            audio -> appText(R.string.app_audio_import_failed, humanError((-id).toInt()))
+                            else -> appText(R.string.msg_nao_consegui_ler_esse_arquivo)
+                        }
                     } catch (cancelled: CancellationException) { throw cancelled }
                     catch (failure: Exception) {
                         Log.w(TAG, "omega media item failed", failure)
@@ -6890,7 +6913,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         launchImport launch@{
             val id = withContext(Dispatchers.IO) {
                 val file = copyModelToSandbox(uri, ext) ?: return@withContext -1_000L
-                engine.importHdri(file.absolutePath)
+                engine.importHdri(file.absolutePath, showAsBackground = true)
             }
             busyMessage = null
             if (id < 0) errorMessage = hdriErrorText(if (id == -1_000L) id else -id)
@@ -6946,13 +6969,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         launchImport launch@{
             val asset = withContext(Dispatchers.IO) {
                 val file = copyModelToSandbox(uri, ext) ?: return@withContext -1_000L
-                engine.importHdri(file.absolutePath)
+                engine.importHdri(file.absolutePath, objectLayer = id)
             }
             busyMessage = null
             if (asset < 0) {
                 errorMessage = hdriErrorText(if (asset == -1_000L) asset else -asset)
             } else {
-                engine.setObjectEnvironment(id, 1, asset, 1f, 0f, 1f)
                 refreshNow()
                 refreshObjectEnvironment()
             }
@@ -8803,37 +8825,32 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * variação [preset] (índice em [effectPresets]) no efeito NOVO de cada uma,
      * tudo num passo de desfazer. [preset] < 0 = só o efeito ([addEffect]).
      *
-     * O motor aplica o "adicionar" no próximo quadro dele; o grupo de desfazer
-     * fica aberto até o efeito novo aparecer (≤ ~1 s) e o preset entrar.
+     * A consulta dos efeitos esvazia a fila do motor antes de ler a pilha.
      */
     fun addEffectWithPreset(typeId: Int, preset: Int) {
-        val ids = selection.filter { id -> layers.firstOrNull { it.id == id }?.locked != true }
-        if (preset < 0 || ids.isEmpty() || com.aurea.aurea.effects.HyperEffectGate.locked(typeId)) {
-            addEffect(typeId, ids.ifEmpty { selection })
+        val selected = editingSelection
+        val ids = editingLayers.filter { it.id in selected && !it.locked }.map { it.id }
+        if (ids.isEmpty()) {
+            showToast(appText(if (selected.isEmpty()) R.string.edt_cmd_select_layer else R.string.sh_layers_locked_unlock_to_edit))
+            return
+        }
+        if (preset < 0 || com.aurea.aurea.effects.HyperEffectGate.locked(typeId)) {
+            addEffect(typeId, ids)
             return
         }
         if (destroyed || !ready) return
         val before = ids.associateWith { omegaEffectIdsOfType(it, typeId) }
-        val waitMs = 16L
-        val maxTries = 60
         beginGesture("adicionar efeito")
-        addEffect(typeId, ids)
-        var tries = 0
-        lateinit var poll: Runnable
-        poll = Runnable {
-            if (destroyed) return@Runnable
-            val fresh = ids.mapNotNull { layer ->
-                (omegaEffectIdsOfType(layer, typeId) - before[layer].orEmpty()).lastOrNull()?.let { layer to it }
+        try {
+            addEffect(typeId, ids)
+            ids.forEach { layer ->
+                val added = (omegaEffectIdsOfType(layer, typeId) - before[layer].orEmpty()).lastOrNull()
+                if (added != null) engine.applyEffectPreset(layer, added, preset)
             }
-            if (fresh.size < ids.size && tries++ < maxTries) {
-                main.postDelayed(poll, waitMs)
-                return@Runnable
-            }
-            fresh.forEach { (layer, effectId) -> engine.applyEffectPreset(layer, effectId, preset) }
+        } finally {
             endGesture()
-            refreshDetail()
         }
-        main.postDelayed(poll, waitMs)
+        refreshDetail()
     }
 
     /** Os efeitos do tipo [typeId] na camada [layer], na ordem da pilha (leitura direta do motor). */
@@ -9540,6 +9557,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var editPlacement by mutableIntStateOf(0)
 
     fun editTrackClip(op: Int, layer: Long, frame: Long, track: Int): Boolean {
+        if (toastAction != null) toastAction = null
         val ok = engine.editTrackClip(op, layer, frame, track)
         if (!ok) showToast(appText(R.string.edit_track_blocked))
         refreshNow()
@@ -11356,28 +11374,31 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Cópia de um arquivo único para `projetos/modelos/<hash>.<ext>` (o HDRI usa; o modelo passa por [stageModel]). */
     private fun copyModelToSandbox(uri: Uri, ext: String): File? = try {
         val dir = File(File(getApplication<Application>().filesDir, "projetos"), "modelos").apply { mkdirs() }
-        val tmp = File(dir, "importando.$ext")
-        val digest = java.security.MessageDigest.getInstance("SHA-1")
-        getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
-            FileOutputStream(tmp).use { out ->
-                val buf = ByteArray(1 shl 16)
-                while (true) {
-                    val n = input.read(buf)
-                    if (n <= 0) break
-                    digest.update(buf, 0, n)
-                    out.write(buf, 0, n)
+        val tmp = File.createTempFile(".hdri-", ".tmp", dir)
+        try {
+            val digest = java.security.MessageDigest.getInstance("SHA-1")
+            getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(tmp).use { out ->
+                    val buf = ByteArray(1 shl 16)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n <= 0) break
+                        digest.update(buf, 0, n)
+                        out.write(buf, 0, n)
+                    }
                 }
-            }
-        } ?: throw IllegalStateException("sem stream")
-        check(tmp.length() > 0) { "Empty environment file" }
-        val hash = digest.digest().joinToString("") { "%02x".format(it) }
-        val dst = File(dir, "$hash.$ext")
-        if (dst.exists()) tmp.delete() else check(tmp.renameTo(dst)) { "Could not store environment" }
-        dst
+            } ?: throw IllegalStateException("sem stream")
+            check(tmp.length() > 0) { "Empty environment file" }
+            val hash = digest.digest().joinToString("") { "%02x".format(it) }
+            val dst = File(dir, "$hash.$ext")
+            check(dst.exists() || tmp.renameTo(dst)) { "Could not store environment" }
+            dst
+        } finally {
+            tmp.delete()
+        }
     } catch (e: Exception) {
         // Temporário tem dono (§52): a cópia pela metade (disco cheio, stream cortado) sai.
         Log.w(TAG, "copia do modelo 3D para o app falhou: ${e.javaClass.simpleName}: ${e.message}")
-        File(File(File(getApplication<Application>().filesDir, "projetos"), "modelos"), "importando.$ext").delete()
         null
     }
 

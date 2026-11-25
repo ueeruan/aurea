@@ -35,10 +35,13 @@ import kotlin.coroutines.resume
 // =============================================================================
 //  ASSINATURAS (16/11/2026, decisão do dono; docs/release/assinaturas.md).
 //
-//  AureaHyper (R$ 59,90/mês) libera tudo o que é pago; cada efeito pago e o
-//  Texto 3D são uma assinatura avulsa (R$ 5,00/mês). Os preços vivem na Play:
-//  a tela mostra o preço localizado da loja (ProductDetails) e, sem ele, o texto
-//  padrão. Os ids vêm do motor (hyper::subscription_product_ids).
+//  1.0.9 (decisão do dono, 25/11/2026): o AureaHyper tem três planos à venda —
+//  SEMANAL (R$ 7), MENSAL (R$ 30) e ANUAL (R$ 150) — e todos liberam tudo o que é
+//  pago. As assinaturas avulsas (efeitos, Texto 3D) não se vendem mais; quem já
+//  tem continua com o acesso e o preço até renovar (coisa da loja). Os preços
+//  vivem na Play: a tela mostra o preço localizado da loja (ProductDetails) e,
+//  sem ele, o texto padrão. Os ids vêm do motor (hyper::hyper_plans_on_sale para
+//  vender, hyper::subscription_product_ids para restaurar).
 //
 //  Compra: Play Billing SUBS (oferta do plano base) → o token vai ao Worker
 //  (POST /api/entitlements/purchase, que confere na Play) → só depois do OK do
@@ -72,6 +75,8 @@ object AureaSubscriptions {
     /** Preço localizado da Play por produto (só a fase recorrente do plano base). */
     var prices by mutableStateOf<Map<String, String>>(emptyMap())
         private set
+    /** O mesmo preço em micros + a moeda (para o "economize N%" do anual). */
+    private var priceMicros by mutableStateOf<Map<String, Pair<Long, String>>>(emptyMap())
     /** O produto em compra, ou [RESTORING]; null = nada em andamento. */
     var busy by mutableStateOf<String?>(null)
         private set
@@ -81,11 +86,26 @@ object AureaSubscriptions {
 
     const val RESTORING = "restore"
 
-    /** A assinatura que libera tudo (hyper::kHyperSubscriptionId). */
+    /** O AureaHyper ANUAL, o plano destacado (hyper::kHyperSubscriptionId). */
     fun hyperProduct(): String? = runCatching { AureaEngine.nativeHyperSubscriptionId() }.getOrNull()
 
-    /** Tudo o que se vende (hyper::subscription_product_ids). */
+    /** Tudo o que o app reconhece, para restaurar (hyper::subscription_product_ids). */
     fun productIds(): List<String> = runCatching { AureaEngine.nativeSubscriptionProductIds()?.toList() }.getOrNull().orEmpty()
+
+    /** 1.0.9: os planos à venda na ordem da tela — semanal, mensal, anual (hyper::hyper_plans_on_sale). */
+    fun plansOnSale(): List<String> = runCatching { AureaEngine.nativeHyperPlansOnSale()?.toList() }.getOrNull().orEmpty()
+
+    /**
+     * "Economize N%" do anual contra um ano do plano curto mais barato, só com os
+     * preços da loja carregados e na mesma moeda (a conta é do motor). 0 = sem selo.
+     */
+    fun annualSavingsPercent(weekly: String?, monthly: String?, annual: String?): Int {
+        val a = annual?.let { priceMicros[it] } ?: return 0
+        val w = weekly?.let { priceMicros[it] }?.takeIf { it.second == a.second }
+        val m = monthly?.let { priceMicros[it] }?.takeIf { it.second == a.second }
+        if (w == null && m == null) return 0
+        return runCatching { AureaEngine.nativeHyperAnnualSavingsPercent(w?.first ?: 0L, m?.first ?: 0L, a.first) }.getOrDefault(0)
+    }
 
     fun clearNotice() { notice = null }
 
@@ -98,8 +118,12 @@ object AureaSubscriptions {
         scope.launch {
             val billing = SubscriptionBilling(context)
             try {
-                val found = billing.details(ids).mapNotNull { d -> SubscriptionBilling.recurringPrice(d)?.let { d.productId to it } }.toMap()
-                if (found.isNotEmpty()) prices = found
+                val details = billing.details(ids)
+                val found = details.mapNotNull { d -> SubscriptionBilling.recurringPrice(d)?.let { d.productId to it } }.toMap()
+                if (found.isNotEmpty()) {
+                    priceMicros = details.mapNotNull { d -> SubscriptionBilling.recurringMicros(d)?.let { d.productId to it } }.toMap()
+                    prices = found
+                }
             } finally {
                 billing.close()
                 pricesLoading = false
@@ -280,14 +304,26 @@ internal class SubscriptionBilling(context: Context) : PurchasesUpdatedListener 
     fun close() = client.endConnection()
 
     companion object {
-        /** A oferta do plano base mensal (sem oferta promocional); senão a primeira. */
+        /**
+         * A oferta do plano base (sem oferta promocional). Cada plano do AureaHyper é
+         * um produto próprio na Play; o plano base dele se chama como o fim do id
+         * ("aurea_hyper_semanal" → "semanal", "mensal", "anual"). Sem esse nome,
+         * qualquer plano base; senão a primeira oferta.
+         */
         fun baseOffer(details: ProductDetails): ProductDetails.SubscriptionOfferDetails? {
             val offers = details.subscriptionOfferDetails.orEmpty()
-            return offers.firstOrNull { it.offerId == null } ?: offers.firstOrNull()
+            val named = details.productId.substringAfterLast('_')
+            return offers.firstOrNull { it.offerId == null && it.basePlanId == named }
+                ?: offers.firstOrNull { it.offerId == null } ?: offers.firstOrNull()
         }
 
-        /** O preço que se repete todo mês (a última fase do plano base), já localizado pela Play. */
+        /** O preço que se repete a cada período (a última fase do plano base), já localizado pela Play. */
         fun recurringPrice(details: ProductDetails): String? =
             baseOffer(details)?.pricingPhases?.pricingPhaseList?.lastOrNull()?.formattedPrice?.ifBlank { null }
+
+        /** O mesmo preço em micros + o código da moeda. */
+        fun recurringMicros(details: ProductDetails): Pair<Long, String>? =
+            baseOffer(details)?.pricingPhases?.pricingPhaseList?.lastOrNull()
+                ?.takeIf { it.priceAmountMicros > 0 }?.let { it.priceAmountMicros to it.priceCurrencyCode }
     }
 }

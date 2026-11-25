@@ -733,8 +733,7 @@ struct AureaMcpHost {
             if model.screen == .editor, model.projectURL == e.file.url { return .done("Already open.") }
             if model.screen == .editor { model.closeProject() }
             guard await wait(15, { model.screen == .home }) else { return .fail("Aurea is busy; try again later.") }
-            model.open(e.file)
-            return await wait(30, { model.screen == .editor && model.projectURL == e.file.url })
+            return await model.open(e.file)
                 ? .done(["ok": true, "title": e.title, "id": id]) : .fail(model.toast ?? "Could not open the project.")
         case "create_project":
             let title = String(((a["title"] as? String) ?? "").trimmingCharacters(in: .whitespaces).prefix(120))

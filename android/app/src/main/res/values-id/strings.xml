@@ -1127,7 +1127,7 @@ untuk mengedit kurvanya.</string>
     <string name="consent_title">Persetujuan dan Tanggung Jawab</string>
     <string name="consent_accept">Setuju dan lanjutkan</string>
     <string name="consent_body">Aurea adalah alat profesional untuk mengedit, membuat, dan memproduksi konten digital. Dengan menggunakan aplikasi ini, pengguna mengakui bahwa mereka bertanggung jawab penuh atas konten yang mereka buat, edit, impor, ekspor, publikasikan, atau bagikan melalui platform.\n\nAurea tidak mengendalikan, mendorong, mendukung, atau mengizinkan penggunaan alat ini untuk kegiatan ilegal, abusif, curang, merugikan, atau yang melanggar hak pihak ketiga.\n\nPengguna bertanggung jawab memastikan bahwa mereka memiliki izin, lisensi, dan hak yang diperlukan atas materi yang digunakan, termasuk gambar, video, musik, merek, model, berkas, dan konten terlindungi lainnya.\n\nKebebasan kreatif yang ditawarkan Aurea tidak berarti persetujuan, keterlibatan, atau tanggung jawab aplikasi atas apa yang dipilih setiap pengguna untuk dibuat atau dilakukan dengan alat ini.\n\nPengguna setuju untuk menggunakan Aurea sesuai hukum yang berlaku dan bertanggung jawab atas tindakan mereka sendiri serta konten yang diproduksi atau didistribusikan melalui aplikasi.\n\nSejauh diizinkan oleh hukum yang berlaku, Aurea dan pihak yang bertanggung jawab atasnya tidak bertanggung jawab atas tindakan yang dilakukan semata-mata oleh pengguna, penyalahgunaan alat, atau akibat dari konten yang dibuat, dipublikasikan, atau dibagikan oleh pengguna sendiri.\n\nAurea menyediakan alatnya. Pengguna bertanggung jawab atas cara mereka memilih untuk menggunakannya.\n\nDengan melanjutkan, pengguna menyatakan bahwa mereka telah membaca, memahami, dan menyetujui ketentuan ini.</string>
-    <string name="release_notes_body">Aurea 1.0.8 (2231)\n\n• Edit otomatis: memotong jeda, kata pengisi dan pengulangan, lalu menambah zoom, efek suara, musik dan teks yang tidak menutupi wajah\n• Rig wajah 2D: animasikan foto atau gambar (menoleh, mengangguk, berkedip, bicara) dan pisahkan karakter menjadi bagian dengan fisika rambut\n• Efek Ledakan baru untuk model, objek dan teks 3D\n• Partikel berbentuk: kupu-kupu, daun, kelopak, hati, bintang, kunang-kunang, konfeti dan kepingan salju\n• Preset teks klasik kembali, termasuk lompatan halus klasik\n• Impor proyek After Effects (.aep, .zip, .rar) kini lebih lengkap dan andal\n• Media tidak lagi hilang dari proyek saat file asli dihapus\n• Perbaikan: membuat proyek di ponsel lambat, gulir daftar dan ekspor</string>
+    <string name="release_notes_body">Aurea 1.0.9 (2234)\n\n• Paket AureaHyper baru: mingguan, bulanan, dan tahunan — semuanya membuka semua fitur\n• Panel kontrol lebih ringkas, dengan penggaris sebagai ganti slider\n• Editor kurva dengan tampilan baru\n• Gulir pengaturan diperbaiki: di akhir daftar ketukan langsung merespons\n• Edit titik vektor 3D langsung di panggung\n• Edit otomatis, rig wajah 2D, efek Ledakan, dan partikel berbentuk\n• Media tidak lagi hilang dari proyek saat file asli dihapus\n• Perbaikan ekspor, impor After Effects, dan stabilitas</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Isi</string>
@@ -3255,6 +3255,22 @@ untuk mengedit kurvanya.</string>
     <string name="social_intro">Bagikan karyamu. Temukan orang yang menginspirasimu.</string>
     <string name="social_all">Untukmu</string>
     <string name="social_following">Mengikuti</string>
+    <string name="social_official_tab">Aurea Resmi</string>
+    <string name="social_sort">Urutkan menurut</string>
+    <string name="social_sort_newest">Terbaru</string>
+    <string name="social_sort_popular">Populer</string>
+    <string name="social_sort_oldest">Terlama</string>
+    <string name="social_filter">Filter menurut</string>
+    <string name="social_all_categories">Semua jenis</string>
+    <string name="social_category_text">Teks</string>
+    <string name="social_category_showcase">Pameran proyek</string>
+    <string name="social_category_project">Berkas proyek</string>
+    <string name="social_category_preset">Preset</string>
+    <string name="social_category_announcement">Pengumuman resmi</string>
+    <string name="social_empty_announcements">Belum ada pengumuman.</string>
+    <string name="social_create_announcement">Buat pengumuman</string>
+    <string name="social_post_type">Jenis postingan</string>
+    <string name="social_standard_post">Postingan biasa</string>
     <string name="social_followers">Pengikut</string>
     <string name="social_follow">Ikuti</string>
     <string name="social_unfollow">Berhenti mengikuti</string>

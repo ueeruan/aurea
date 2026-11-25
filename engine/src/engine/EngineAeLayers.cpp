@@ -89,14 +89,19 @@ std::vector<std::string> Engine::model_animation_clips(u64 layerId) noexcept {
     return names;
 }
 
-void Engine::set_preview_guides(u32 flags, f32 gridSpacing) noexcept {
+void Engine::set_preview_guides(u32 flags, f32 gridSpacing, u32 gridRgb, u32 gridBlend) noexcept {
     const u32 f = flags & 7u;
     const f32 spacing = std::isfinite(gridSpacing) && gridSpacing > 0.0f ? std::clamp(gridSpacing, 4.0f, 4096.0f) : 100.0f;
+    const u32 rgb = gridRgb & 0xFFFFFFu;
+    const auto blend = gridBlend <= static_cast<u32>(PreviewGridBlend::HighContrast)
+        ? static_cast<PreviewGridBlend>(gridBlend) : PreviewGridBlend::Normal;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
-        if (previewGuides_ == f && previewGridSpacing_ == spacing) return;
+        if (previewGuides_ == f && previewGridSpacing_ == spacing && previewGridRgb_ == rgb && previewGridBlend_ == blend) return;
         previewGuides_ = f;
         previewGridSpacing_ = spacing;
+        previewGridRgb_ = rgb;
+        previewGridBlend_ = blend;
     }
     // Só a saída na tela muda: o quadro guardado (e o pré-render) continua valendo.
     request_render();

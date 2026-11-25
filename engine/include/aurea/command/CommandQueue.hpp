@@ -50,6 +50,7 @@ public:
         head_.store(0, std::memory_order_relaxed);
         tail_.store(0, std::memory_order_relaxed);
         stringWrite_.store(0, std::memory_order_relaxed);
+        draining_.store(false, std::memory_order_relaxed);
         dropped_.store(0, std::memory_order_relaxed);
     }
 
@@ -78,13 +79,16 @@ public:
     /// Reserva espaço no blob de strings e devolve o offset. A UI escreve
     /// direto no buffer devolvido. Devolve nullptr se o blob encheu.
     ///
-    /// ANEL: quando não cabe no fim, volta ao início. Cada string é lida no
-    /// próximo quadro (a drenagem copia na hora); para uma ser sobrescrita
-    /// antes de lida, a UI teria de escrever o blob inteiro num único quadro.
+    /// Volta ao início só entre lotes já consumidos. Um comando cujo slot já
+    /// saiu da fila ainda pode estar lendo os bytes durante a drenagem.
     [[nodiscard]] char* alloc_string(u32 bytes) noexcept {
         if (bytes == 0 || bytes >= kStringBlobSize) return nullptr;
         u32 off = stringWrite_.load(std::memory_order_relaxed);
-        if (off + bytes >= kStringBlobSize) off = 0;
+        if (off + bytes >= kStringBlobSize) {
+            if (head_.load(std::memory_order_acquire) != tail_.load(std::memory_order_relaxed)
+                || draining_.load(std::memory_order_acquire)) return nullptr;
+            off = 0;
+        }
         stringWrite_.store(off + bytes, std::memory_order_relaxed);
         return stringBlob_ + off;
     }
@@ -135,6 +139,7 @@ public:
     /// escreveu. Uma única travessia por frame.
     template <typename Sink>
     u32 drain(Sink&& sink, u32 maxCount = kCapacity) noexcept {
+        draining_.store(true, std::memory_order_release);
         u32 n = 0;
         Command c;
         u64 outer = 0, group = 0, inner = 0;
@@ -143,6 +148,7 @@ public:
             else sink(c);
             ++n;
         }
+        draining_.store(false, std::memory_order_release);
         return n;
     }
 
@@ -174,6 +180,7 @@ private:
     alignas(64) std::atomic<u32> head_{0};
     alignas(64) std::atomic<u32> tail_{0};
     alignas(64) std::atomic<u32> stringWrite_{0};
+    alignas(64) std::atomic<bool> draining_{false};
     alignas(64) std::atomic<u64> dropped_{0};
 };
 

@@ -106,6 +106,24 @@ struct SkinVertex {
 };
 static_assert(sizeof(SkinVertex) == kMeshSkinStride, "fluxo de skin");
 
+const GpuMaterial* cutout_material(const GpuMaterial* material) noexcept {
+    return material && material->factors.alphaMode == AlphaMode::Mask ? material : nullptr;
+}
+
+void bind_cutout(CommandList& cmd, const GpuMaterial& material, TextureHandle white,
+                 SamplerHandle linearClamp, BufferHandle shading, usize offset) noexcept {
+    const auto& m = material.factors;
+    const TextureRef& tex = m.baseColorTex;
+    const Vec4 uniforms[] = {
+        {m.baseColor.w, m.alphaCutoff, tex.texCoord == 1 ? 1.0f : 0.0f, tex.rotation},
+        {tex.offset.x, tex.offset.y, tex.scale.x, tex.scale.y},
+    };
+    cmd.set_uniforms(uniforms, sizeof(uniforms));
+    cmd.bind_texture(0, material.tex[0].valid() ? material.tex[0] : white,
+                     material.samp[0].valid() ? material.samp[0] : linearClamp);
+    cmd.bind_vertex_buffer(1, shading, offset);
+}
+
 u32 mip_count(u32 w, u32 h) noexcept {
     u32 n = 1;
     while ((w | h) >> n) ++n;
@@ -134,17 +152,18 @@ void normal_matrix(const Mat4& m, Vec4 out[3]) noexcept {
 /// Caixa totalmente fora do frustum (clip com Z reverso e far infinito).
 bool outside_frustum(const Mat4& clipFromLocal, const Aabb& b, f32 nearZ) noexcept {
     if (!b.valid()) return false;
-    u32 outL = 0, outR = 0, outT = 0, outB = 0, outN = 0;
-    for (int i = 0; i < 8; ++i) {
+    // Reject only when the same plane excludes every corner. Test opposite
+    // corners first so visible and intersecting boxes can finish early.
+    u32 outside = 31u;
+    for (int i : {0, 7, 1, 6, 2, 5, 3, 4}) {
         const Vec3 p{(i & 1) ? b.max.x : b.min.x, (i & 2) ? b.max.y : b.min.y, (i & 4) ? b.max.z : b.min.z};
         const Vec4 c = clipFromLocal * Vec4{p, 1.0f};
-        outL += c.x < -c.w;
-        outR += c.x > c.w;
-        outT += c.y < -c.w;
-        outB += c.y > c.w;
-        outN += c.w < nearZ;
+        outside &= static_cast<u32>(c.x < -c.w) | (static_cast<u32>(c.x > c.w) << 1)
+                | (static_cast<u32>(c.y < -c.w) << 2) | (static_cast<u32>(c.y > c.w) << 3)
+                | (static_cast<u32>(c.w < nearZ) << 4);
+        if (!outside) return false;
     }
-    return outL == 8 || outR == 8 || outT == 8 || outB == 8 || outN == 8;
+    return true;
 }
 
 } // namespace
@@ -329,20 +348,25 @@ Status GpuModel::upload(GPUBackend& gpu, const SceneAsset& asset) noexcept {
         if (Status s = make(idx32.size() * 4, BufferUsage::Index, idx32.data(), "3d-indices", indices); !s.ok()) return s;
     }
 
-    // --- Texturas: uma por (imagem, espaço de cor) --------------------------
+    // --- Texturas: uma por (imagem, espaço de cor, mipmaps) -----------------
     Errc resourceFailure = Errc::Ok;
     std::unordered_map<u64, TextureHandle> byImage;
+    const auto authored_sampler = [&](const TextureRef& ref) {
+        return ref.sampler >= 0 && ref.sampler < static_cast<i32>(asset.samplers.size())
+            ? asset.samplers[ref.sampler] : Sampler{};
+    };
     auto texture_for = [&](const TextureRef& ref, bool srgb) -> TextureHandle {
         if (!ref.valid() || ref.image >= static_cast<i32>(asset.images.size())) return {};
         const Image& img = asset.images[ref.image];
         const auto& pixels = img.pixels();
         if (pixels.empty() || img.width == 0) return {};
-        const u64 key = (static_cast<u64>(ref.image) << 1) | (srgb ? 1u : 0u);
+        const bool mipmaps = authored_sampler(ref).mipmaps;
+        const u64 key = (static_cast<u64>(ref.image) << 2) | (srgb ? 2u : 0u) | (mipmaps ? 1u : 0u);
         if (auto it = byImage.find(key); it != byImage.end()) return it->second;
         TextureDesc d;
         d.width = img.width;
         d.height = img.height;
-        d.mipLevels = mip_count(img.width, img.height);
+        d.mipLevels = mipmaps ? mip_count(img.width, img.height) : 1u;
         d.format = srgb ? SurfaceFormat::RGBA8_sRGB : SurfaceFormat::RGBA8;
         d.sampled = true;
         d.transferDst = true;
@@ -355,8 +379,21 @@ Status GpuModel::upload(GPUBackend& gpu, const SceneAsset& asset) noexcept {
             gpu.destroy_texture(*t);
             return {};
         }
-        // Sem blit linear no formato: fica sem mips (correto, só mais serrilhado).
-        if (!gpu.generate_mipmaps(*t).ok()) AUREA_LOG_WARN("3D: mips nao gerados para uma textura");
+        const Status mipStatus = d.mipLevels > 1 ? gpu.generate_mipmaps(*t) : OkStatus;
+        if (!mipStatus.ok()) {
+            gpu.destroy_texture(*t);
+            if (mipStatus.code() != Errc::NotSupported) {
+                resourceFailure = mipStatus.code();
+                return {};
+            }
+            // Do not expose undefined mip levels to the sampler, including
+            // alpha-tested materials at a distance.
+            d.mipLevels = 1;
+            t = gpu.create_texture(d);
+            if (!t.ok()) { resourceFailure = t.code(); return {}; }
+            const Status base = gpu.upload_texture_level(*t, 0, 0, pixels.data(), pixels.size());
+            if (!base.ok()) { resourceFailure = base.code(); gpu.destroy_texture(*t); return {}; }
+        }
         ownedTextures_.push_back(*t);
         textureBytes += d.estimated_bytes();
         byImage.emplace(key, *t);
@@ -366,14 +403,14 @@ Status GpuModel::upload(GPUBackend& gpu, const SceneAsset& asset) noexcept {
     std::unordered_map<i32, SamplerHandle> bySampler;
     auto sampler_for = [&](const TextureRef& ref) -> SamplerHandle {
         if (auto it = bySampler.find(ref.sampler); it != bySampler.end()) return it->second;
-        Sampler s = ref.sampler >= 0 && ref.sampler < static_cast<i32>(asset.samplers.size()) ? asset.samplers[ref.sampler] : Sampler{};
+        const Sampler s = authored_sampler(ref);
         SamplerDesc d;
         d.magFilter = s.mag == Filter::Nearest ? SamplerDesc::Filter::Nearest : SamplerDesc::Filter::Linear;
         d.minFilter = s.min == Filter::Nearest ? SamplerDesc::Filter::Nearest : SamplerDesc::Filter::Linear;
         d.mipmap = SamplerDesc::Mipmap::Linear;
         d.wrapU = to_desc(s.wrapS);
         d.wrapV = to_desc(s.wrapT);
-        d.maxAnisotropy = aniso;
+        d.maxAnisotropy = s.mipmaps && s.min == Filter::Linear ? aniso : 1.0f;
         auto h = gpu.create_sampler(d);
         if (!h.ok()) resourceFailure = h.code();
         const SamplerHandle out = h.ok() ? *h : SamplerHandle{};
@@ -1141,11 +1178,14 @@ u64 SceneRenderer::resident_bytes() const noexcept {
     return b;
 }
 
-PipelineKey SceneRenderer::shadow_key(bool skinned) const noexcept {
-    PipelineKey k = PipelineKey::graphics(skinned ? ShaderId::scene3d_shadow_shadow_skinned_vert : ShaderId::scene3d_shadow_shadow_vert,
-                                          ShaderId::scene3d_shadow_shadow_frag, SurfaceFormat::RGBA16F, false,
-                                          BlendMode::Normal);
-    k.mesh = skinned ? MeshLayout::SkinnedPosition : MeshLayout::PositionOnly;
+PipelineKey SceneRenderer::shadow_key(bool skinned, bool cutout) const noexcept {
+    const ShaderId vertex = cutout
+        ? (skinned ? ShaderId::scene3d_shadow_cutout_skinned_vert : ShaderId::scene3d_shadow_cutout_vert)
+        : (skinned ? ShaderId::scene3d_shadow_shadow_skinned_vert : ShaderId::scene3d_shadow_shadow_vert);
+    const ShaderId fragment = cutout ? ShaderId::scene3d_shadow_cutout_frag : ShaderId::scene3d_shadow_shadow_frag;
+    PipelineKey k = PipelineKey::graphics(vertex, fragment, SurfaceFormat::RGBA16F, false, BlendMode::Normal);
+    k.mesh = cutout ? (skinned ? MeshLayout::Skinned : MeshLayout::Static)
+                    : (skinned ? MeshLayout::SkinnedPosition : MeshLayout::PositionOnly);
     k.hasDepth = true;
     k.depthOnly = true;
     k.depthTest = true;
@@ -1161,8 +1201,8 @@ PipelineKey SceneRenderer::shadow_key(bool skinned) const noexcept {
 // 0.4.6: a profundidade da oclusão ambiente — os vértices da sombra (só
 // posição, skin e morph prontos), com a câmera da cena: Z reverso como o
 // passe principal (limpa em 0), sem o viés da sombra.
-PipelineKey SceneRenderer::ao_depth_key(bool skinned) const noexcept {
-    PipelineKey k = shadow_key(skinned);
+PipelineKey SceneRenderer::ao_depth_key(bool skinned, bool cutout) const noexcept {
+    PipelineKey k = shadow_key(skinned, cutout);
     k.depthCompare = CompareOp::GreaterOrEqual;
     k.depthBiasConstant = 0.0f;
     k.depthBiasSlope = 0.0f;
@@ -1170,9 +1210,9 @@ PipelineKey SceneRenderer::ao_depth_key(bool skinned) const noexcept {
 }
 
 // 0.4.6: o mesmo pré-passe com cor — os fatores do material para o SSR.
-PipelineKey SceneRenderer::ssr_material_key(bool skinned) const noexcept {
-    PipelineKey k = ao_depth_key(skinned);
-    k.fragment = ShaderId::scene3d_shadow_material_frag;
+PipelineKey SceneRenderer::ssr_material_key(bool skinned, bool cutout) const noexcept {
+    PipelineKey k = ao_depth_key(skinned, cutout);
+    k.fragment = cutout ? ShaderId::scene3d_shadow_cutout_material_frag : ShaderId::scene3d_shadow_material_frag;
     k.format = SurfaceFormat::RGBA8;
     k.depthOnly = false;
     return k;
@@ -1248,14 +1288,15 @@ void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
             }
         }
         collect_ground_pipelines(out, groundFirst, out.size(), passSamples_);
-        out.push_back(shadow_key(false));
-        out.push_back(shadow_key(true));
+        for (bool skinned : {false, true}) {
+            for (bool cutout : {false, true}) {
+                out.push_back(shadow_key(skinned, cutout));
+                out.push_back(ao_depth_key(skinned, cutout));
+                out.push_back(ssr_material_key(skinned, cutout));
+            }
+        }
         // Sempre no aquecimento: ligar o AO depois não pode compilar no meio da cena.
         {
-            out.push_back(ao_depth_key(false));
-            out.push_back(ao_depth_key(true));
-            out.push_back(ssr_material_key(false));
-            out.push_back(ssr_material_key(true));
             out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_ssr_frag, SurfaceFormat::RGBA16F));
             out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_ssr_apply_frag, SurfaceFormat::RGBA16F));
             out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_gtao_frag, SurfaceFormat::RG8));
@@ -1426,7 +1467,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // 0.4.6 GTAO: decidida AQUI, antes de qualquer bloco por desenho/ambiente
     // (todos copiam o cabeçalho). Sem a textura no fim (pipeline faltando), o
     // slot recebe branco = sem AO.
-    const bool aoOn = ambientOcclusion_ && frame.post.ao && (frame.post.quality != 1u || !lodHysteresis_) && passMrt_;   // o export nunca herda o BAIXO
+    const bool aoOn = ambientOcclusion_ && frame.post.ao && passMrt_;
     // 0.4.6 SSR: só com algum opaco liso (decidido de novo no pré-passe).
     bool ssrOn = screenReflections_ && frame.post.quality != 1u && passMrt_;
     header.aoParams = Vec4{aoOn ? 1.0f : 0.0f, 0.0f, 1.0f / static_cast<f32>(width), 1.0f / static_cast<f32>(height)};
@@ -2031,11 +2072,13 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     struct ShadowDraw {
         const GpuModel* model;
         const GpuPrimitive* prim;
+        const GpuMaterial* cutout;
         MeshPush push;   // model = luz ← local; normalCol[0].x = início das juntas
         PipelineHandle pipeline;
         bool skinned;
         bool morph;
         usize morphPos;
+        usize morphShade;
         u32 instanceCount;
     };
     std::vector<ShadowDraw> shadowDraws;
@@ -2061,6 +2104,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     Vec4 shadowParams2{};
     f32 shadowBiasDepth = 0.0f;
     if (shadowLight >= 0) {
+        PipelineHandle shadowPipelines[2][2]{};
         const SceneLight& sl = frame.lights[static_cast<usize>(shadowLight)];
         const Vec3 fwd = sl.direction.normalized();
         const Vec3 upRef = std::fabs(fwd.y) > 0.95f ? Vec3{1, 0, 0} : Vec3{0, -1, 0};
@@ -2094,21 +2138,28 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     const MorphJob* mj = morph_for(instIndex, n, primIndex);
                     const auto& primitive = inst.asset->meshes[mi].primitives[primIndex];
                     const GpuMaterial* mat = material_for(inst, *gm, nodes[n].material_for(primitive));
-                    if (mat->factors.alphaMode == AlphaMode::Blend) continue;   // transparente não projeta
+                    if (mat->factors.alphaMode == AlphaMode::Blend || mat->factors.transmission > 0.0f) continue;
                     if (mat->factors.toon == 2) continue;   // contorno do Cartoon: só no passe de cor
                     const bool sk = skinnedNode && p.skinned;
-                    auto pipe = shaders_->pipeline(shadow_key(sk));
-                    if (!pipe.ok()) { mark_incomplete(__FILE__, __LINE__); continue; }
+                    const auto* cutout = cutout_material(mat);
+                    auto& pipe = shadowPipelines[sk][cutout != nullptr];
+                    if (!pipe.valid()) {
+                        const auto found = shaders_->pipeline(shadow_key(sk, cutout != nullptr));
+                        if (!found.ok()) { mark_incomplete(__FILE__, __LINE__); continue; }
+                        pipe = *found;
+                    }
                     ShadowDraw sd{};
                     sd.model = gm;
                     sd.prim = &p;
+                    sd.cutout = cutout;
                     sd.push.model = world;   // × luz depois do ajuste
                     sd.push.normalCol[0].x = sk ? static_cast<f32>(instJointBase[instIndex]
                                                                     + inst.pose().skinJointOffset[static_cast<usize>(skinIndex)]) : 0.0f;
-                    sd.pipeline = *pipe;
+                    sd.pipeline = pipe;
                     sd.skinned = sk;
                     sd.morph = mj != nullptr;
                     sd.morphPos = mj ? mj->posOffset : 0;
+                    sd.morphShade = mj ? mj->shadeOffset : 0;
                     sd.instanceCount = 1;
                     shadowDraws.push_back(sd);
                     const Aabb& box = mj && mj->bounds.valid() ? mj->bounds : p.bounds;
@@ -2208,7 +2259,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     std::vector<VelocityDraw> velocityDraws;
     const f32 velocityLimit = velocity_max_length(width, height);
     const SamplerHandle velocitySampler = shaders_->sampler(CommonSampler::LinearRepeat);
-
+    PipelineKey lastColorKey{};
+    PipelineHandle lastColorPipeline{};
 
     for (usize instIndex = 0; instIndex < frame.instances.size(); ++instIndex) {
         const SceneInstance& inst = frame.instances[instIndex];
@@ -2230,11 +2282,9 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             const Mat4 world = skinnedNode ? inst.world
                                            : inst.world * (n < inst.pose().nodeWorld.size() ? inst.pose().nodeWorld[n] : Mat4::identity());
             const Mat4 clipFromLocal = (inst.cameraOverride ? inst.sampleViewProj : viewProj) * world;
-            const Mat4 viewFromLocal = (inst.cameraOverride ? inst.sampleView : frame.camera.view) * world;
-            const Vec3 worldX{world.col[0].x, world.col[0].y, world.col[0].z};
-            const Vec3 worldY{world.col[1].x, world.col[1].y, world.col[1].z};
-            const Vec3 worldZ{world.col[2].x, world.col[2].y, world.col[2].z};
-            const bool mirrored = worldX.dot(worldY.cross(worldZ)) < 0.0f;
+            Mat4 viewFromLocal;
+            bool viewReady = false;
+            bool mirrored = false;
             Vec4 normalCols[3]{};
             bool normalReady = false;
             for (usize primIndex = 0; primIndex < gm->meshes[mi].size(); ++primIndex) {
@@ -2264,6 +2314,14 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 // o vidro físico manteria o reflexo e a peça "invisível" ainda
                 // apareceria como uma caixa clara.
                 if (mat->factors.alphaMode == AlphaMode::Blend && mat->factors.baseColor.w <= 0.001f) continue;
+                if (!viewReady) {
+                    viewFromLocal = (inst.cameraOverride ? inst.sampleView : frame.camera.view) * world;
+                    const Vec3 worldX{world.col[0].x, world.col[0].y, world.col[0].z};
+                    const Vec3 worldY{world.col[1].x, world.col[1].y, world.col[1].z};
+                    const Vec3 worldZ{world.col[2].x, world.col[2].y, world.col[2].z};
+                    mirrored = worldX.dot(worldY.cross(worldZ)) < 0.0f;
+                    viewReady = true;
+                }
                 const bool skinDraw = skinnedNode && p.skinned;
                 // Vidro (KHR_materials_transmission) mistura como transparente:
                 // o que está atrás aparece e o reflexo continua inteiro.
@@ -2280,8 +2338,12 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 // A reflected node/parent reverses winding without changing
                 // which authored surface is its front face.
                 if (mirrored && (cloud || !mat->factors.doubleSided)) key.frontFaceCCW = false;
-                auto pipe = shaders_->pipeline(key);
-                if (!pipe.ok()) { mark_incomplete(__FILE__, __LINE__); continue; }
+                if (!lastColorPipeline.valid() || !(key == lastColorKey)) {
+                    const auto pipe = shaders_->pipeline(key);
+                    if (!pipe.ok()) { mark_incomplete(__FILE__, __LINE__); continue; }
+                    lastColorKey = key;
+                    lastColorPipeline = *pipe;
+                }
                 const EnvSlot* env = env_of(inst);
                 const SceneBlock* blk = block_for(mat, env);
                 if (!blk) { mark_incomplete(__FILE__, __LINE__); continue; }
@@ -2307,7 +2369,10 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 if (!normalReady) { normal_matrix(world, normalCols); normalReady = true; }
                 std::copy(std::begin(normalCols), std::end(normalCols), std::begin(d.push.normalCol));
                 if (cloud) {
-                    d.push.normalCol[0].w = lodHysteresis_ ? static_cast<f32>(volumetricSteps_) + 10.0f : 48.0f;
+                    // Each cloud step also evaluates three density samples for
+                    // lighting. Follow the preview budget without an added floor.
+                    d.push.normalCol[0].w = lodHysteresis_
+                        ? static_cast<f32>(std::clamp(volumetricSteps_, 16u, 32u)) : 48.0f;
                     d.push.normalCol[1].w = frame.camera.orthographic ? 1.0f : 0.0f;
                     d.push.normalCol[2].w = passMrt_ ? 1.0f : 0.0f;
                 }
@@ -2321,7 +2386,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     d.push.normalCol[0].w = static_cast<f32>(instJointBase[instIndex]
                                                              + inst.pose().skinJointOffset[static_cast<usize>(skinIndex)]);
                 }
-                d.pipeline = *pipe;
+                d.pipeline = lastColorPipeline;
                 d.instanceCount = 1;
                 if (skinDraw || d.morph) { d.firstIndex = p.firstIndex; d.indexCount = p.indexCount; }
                 else {
@@ -2377,9 +2442,11 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // Coplanar depth ties need a deterministic material order even when a
     // model is imported again or GPU/material addresses change. Preserve the
     // authored instance/node/primitive order within each pipeline/index pair.
-    std::stable_sort(opaque.begin(), opaque.end(), [](const Draw& a, const Draw& b) {
+    const auto opaqueOrder = [](const Draw& a, const Draw& b) {
         return std::tie(a.pipeline.id, a.materialIndex) < std::tie(b.pipeline.id, b.materialIndex);
-    });
+    };
+    if (!std::is_sorted(opaque.begin(), opaque.end(), opaqueOrder))
+        std::stable_sort(opaque.begin(), opaque.end(), opaqueOrder);
     std::stable_sort(blended.begin(), blended.end(), [](const Draw& a, const Draw& b) { return a.viewDepth > b.viewDepth; });
 
     // 0.4.6: o pré-passe de profundidade (AO/neblina) desenha cada objeto com
@@ -2415,7 +2482,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         };
         const auto sameShadow = [](const ShadowDraw& a, const ShadowDraw& b) {
             return !a.skinned && !b.skinned && a.model == b.model && a.prim == b.prim
-                && a.pipeline.id == b.pipeline.id && a.morph == b.morph && (!a.morph || a.morphPos == b.morphPos);
+                && a.cutout == b.cutout && a.pipeline.id == b.pipeline.id && a.morph == b.morph
+                && (!a.morph || (a.morphPos == b.morphPos && a.morphShade == b.morphShade));
         };
         const auto forRuns = [](const auto& draws, const auto& equal, const auto& visit) {
             for (usize first = 0; first < draws.size();) {
@@ -2492,8 +2560,9 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             BufferHandle inst;
             BufferHandle morph;
         } scap{sl, n, joints, instBuf, morphBuf};
+        const SamplerHandle cutoutSampler = shaders_->sampler(CommonSampler::LinearClamp);
         graph.add_raster_pass_depth("3d-sombra", PassStage::Scene3D, FGTexture{}, LoadOp::DontCare, Vec4{}, shadowTex,
-                                    LoadOp::Clear, true, 1.0f, [scap](PassContext& pc) {
+                                    LoadOp::Clear, true, 1.0f, [scap, white = white_, cutoutSampler](PassContext& pc) {
             CommandList& c = pc.cmds;
             PipelineHandle bound{};
             for (u32 i = 0; i < scap.count; ++i) {
@@ -2505,6 +2574,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 if (d.skinned) c.bind_storage_buffer(scap.joints);
                 else if (d.instanceCount > 1) c.bind_storage_buffer(scap.inst);
                 c.bind_vertex_buffer(0, d.morph ? scap.morph : d.model->positions, d.morph ? d.morphPos : 0);
+                if (d.cutout) bind_cutout(c, *d.cutout, white, cutoutSampler,
+                    d.morph ? scap.morph : d.model->shading, d.morph ? d.morphShade : 0);
                 if (d.skinned) c.bind_vertex_buffer(2, d.model->skin, d.morph ? static_cast<u64>(d.prim->vertexOffset) * sizeof(SkinVertex) : 0);
                 c.bind_index_buffer(d.model->indices, 0, d.model->indexType);
                 c.push_constants(&d.push, sizeof(MeshPush));
@@ -2533,8 +2604,9 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         localAtlas = graph.create_texture("3d-sombra-local", ad);
     }
     {
-        struct FaceDraw { const GpuModel* model; const GpuPrimitive* prim; MeshPush push; PipelineHandle pipeline;
-                          bool skinned, morph; usize morphPos; u32 firstIndex, indexCount; u32 tile; };
+        struct FaceDraw { const GpuModel* model; const GpuPrimitive* prim; const GpuMaterial* cutout;
+                          MeshPush push; PipelineHandle pipeline;
+                          bool skinned, morph; usize morphPos, morphShade; u32 firstIndex, indexCount, tile; };
         std::vector<FaceDraw> faceDraws;
         auto staticPipe = localTiles ? shaders_->pipeline(shadow_key(false)) : Result<PipelineHandle>{Status{Errc::NotFound}};
         auto skinPipe = localTiles ? shaders_->pipeline(shadow_key(true)) : Result<PipelineHandle>{Status{Errc::NotFound}};
@@ -2572,8 +2644,16 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                         fd.model = d.model; fd.prim = d.prim;
                         fd.push.model = face * d.push.model;
                         fd.push.normalCol[0] = Vec4{d.skinned ? d.push.normalCol[0].w : 0.0f, 0, 0, 0};
-                        fd.pipeline = d.skinned ? *skinPipe : *staticPipe;
+                        fd.cutout = cutout_material(d.material);
+                        if (fd.cutout) {
+                            const auto pipe = shaders_->pipeline(shadow_key(d.skinned, true));
+                            if (!pipe.ok()) { mark_incomplete(__FILE__, __LINE__); continue; }
+                            fd.pipeline = *pipe;
+                        } else {
+                            fd.pipeline = d.skinned ? *skinPipe : *staticPipe;
+                        }
                         fd.skinned = d.skinned; fd.morph = d.morph; fd.morphPos = d.morphPos;
+                        fd.morphShade = d.morphShade;
                         fd.firstIndex = d.firstIndex; fd.indexCount = d.indexCount;
                         fd.tile = ls.firstTile + f;
                         faceDraws.push_back(fd);
@@ -2585,8 +2665,9 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         FaceDraw* list = n ? arena.alloc_array<FaceDraw>(n) : nullptr;
         if (n && list) std::copy(faceDraws.begin(), faceDraws.end(), list);
         struct LCap { FaceDraw* draws; u32 count; BufferHandle joints, morph; u32 tilePx, cols; } lcap{list, list ? n : 0u, joints, morphBuf, localTile, localCols};
+        const SamplerHandle cutoutSampler = shaders_->sampler(CommonSampler::LinearClamp);
         graph.add_raster_pass_depth("3d-sombra-local", PassStage::Scene3D, FGTexture{}, LoadOp::DontCare, Vec4{}, localAtlas,
-                                    LoadOp::Clear, true, 1.0f, [lcap](PassContext& pc) {
+                                    LoadOp::Clear, true, 1.0f, [lcap, white = white_, cutoutSampler](PassContext& pc) {
             CommandList& c = pc.cmds;
             PipelineHandle bound{};
             u32 tile = ~0u;
@@ -2600,6 +2681,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 if (!(d.pipeline == bound)) { c.bind_pipeline(d.pipeline); bound = d.pipeline; }
                 if (d.skinned) c.bind_storage_buffer(lcap.joints);
                 c.bind_vertex_buffer(0, d.morph ? lcap.morph : d.model->positions, d.morph ? d.morphPos : 0);
+                if (d.cutout) bind_cutout(c, *d.cutout, white, cutoutSampler,
+                    d.morph ? lcap.morph : d.model->shading, d.morph ? d.morphShade : 0);
                 if (d.skinned) c.bind_vertex_buffer(2, d.model->skin, d.morph ? static_cast<u64>(d.prim->vertexOffset) * sizeof(SkinVertex) : 0);
                 c.bind_index_buffer(d.model->indices, 0, d.model->indexType);
                 c.push_constants(&d.push, sizeof(MeshPush));
@@ -2631,11 +2714,13 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         struct AoDraw {
             const GpuModel* model;
             const GpuPrimitive* prim;
+            const GpuMaterial* cutout;
             MeshPush push;
             PipelineHandle pipeline;
             bool skinned;
             bool morph;
             usize morphPos;
+            usize morphShade;
             u32 firstIndex, indexCount;
         };
         AoDraw* aoDraws = arena.alloc_array<AoDraw>(depthPrepass.size());
@@ -2653,10 +2738,18 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                                            // Recorte: o reflexo dele sai no grupo em que ele aparece.
                                            d.material && !d.material->factors.holdout ? d.material->factors.roughness : 1.0f,
                                            d.material ? d.material->factors.metallic : 0.0f};
-                a.pipeline = d.skinned ? *depthSkinned : *depthStatic;
+                a.cutout = cutout_material(d.material);
+                if (a.cutout) {
+                    const auto pipe = shaders_->pipeline(ssrOn ? ssr_material_key(d.skinned, true) : ao_depth_key(d.skinned, true));
+                    if (!pipe.ok()) { mark_incomplete(__FILE__, __LINE__); continue; }
+                    a.pipeline = *pipe;
+                } else {
+                    a.pipeline = d.skinned ? *depthSkinned : *depthStatic;
+                }
                 a.skinned = d.skinned;
                 a.morph = d.morph;
                 a.morphPos = d.morphPos;
+                a.morphShade = d.morphShade;
                 a.firstIndex = d.firstIndex;
                 a.indexCount = d.indexCount;
                 aoDraws[aoCount++] = a;
@@ -2679,8 +2772,9 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     materialTex = graph.create_texture("3d-ssr-material", md);
                 }
                 struct DCap { AoDraw* draws; u32 count; BufferHandle joints; BufferHandle morph; } dcap{aoDraws, aoCount, joints, morphBuf};
+                const SamplerHandle cutoutSampler = shaders_->sampler(CommonSampler::LinearClamp);
                 graph.add_raster_pass_depth("3d-ao-prof", PassStage::Scene3D, materialTex, LoadOp::Clear, Vec4{1.0f, 0.0f, 0.0f, 0.0f}, aoDepth,
-                                            LoadOp::Clear, true, 0.0f, [dcap](PassContext& pc) {
+                                            LoadOp::Clear, true, 0.0f, [dcap, white = white_, cutoutSampler](PassContext& pc) {
                     CommandList& c = pc.cmds;
                     PipelineHandle bound{};
                     for (u32 i = 0; i < dcap.count; ++i) {
@@ -2688,6 +2782,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                         if (!(d.pipeline == bound)) { c.bind_pipeline(d.pipeline); bound = d.pipeline; }
                         if (d.skinned) c.bind_storage_buffer(dcap.joints);
                         c.bind_vertex_buffer(0, d.morph ? dcap.morph : d.model->positions, d.morph ? d.morphPos : 0);
+                        if (d.cutout) bind_cutout(c, *d.cutout, white, cutoutSampler,
+                            d.morph ? dcap.morph : d.model->shading, d.morph ? d.morphShade : 0);
                         if (d.skinned) c.bind_vertex_buffer(2, d.model->skin, d.morph ? static_cast<u64>(d.prim->vertexOffset) * sizeof(SkinVertex) : 0);
                         c.bind_index_buffer(d.model->indices, 0, d.model->indexType);
                         c.push_constants(&d.push, sizeof(MeshPush));
@@ -2920,14 +3016,19 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         auto pipe = shaders_->pipeline(key); if (pipe.ok()) skyPipe = *pipe;
         else mark_incomplete(__FILE__, __LINE__);
     }
-    struct SkyBlock { Mat4 view; Vec4 projection; Vec4 light; Vec4 post; };
+    struct SkyBlock { Mat4 view; Vec4 projection; Vec4 light; Vec4 post; Vec4 unframeX; Vec4 unframeY; };
     // Fundo: LOD pela pegada do pixel (textureGrad no shader) × o desfoque;
     // desfoque forte mistura o especular pré-filtrado (liso, GGX).
     const BackgroundSampling bgs = background_sampling(frame.environment.backgroundBlur, frame.camera.fovY, height,
                                                        backgroundSize_, prefilteredMips_);
+    Mat4 unframe = Mat4::identity();
+    Mat4 inverseImage;
+    if (skyReady && rig::inverse(frame.camera.imageTransform, inverseImage)) unframe = inverseImage;
     const SkyBlock sky{frame.camera.view, Vec4{aspect, std::tan(frame.camera.fovY*.5f), bgs.gradScale, bgs.specLod},
         // Exposição do grupo = 1 aqui: ela é aplicada no pós, junto dos modelos.
-        Vec4{frame.environment.rotation, frame.environment.intensity, 1.0f, bgs.specBlend}, Vec4{}};
+        Vec4{frame.environment.rotation, frame.environment.intensity, 1.0f, bgs.specBlend}, Vec4{},
+        Vec4{unframe.col[0].x, unframe.col[1].x, unframe.col[3].x, 0},
+        Vec4{unframe.col[0].y, unframe.col[1].y, unframe.col[3].y, 0}};
     const TextureHandle skyTexture = background_;
     // Grupo SÓ de fundo (o panorama no fundo da pilha, sem modelo, plano,
     // partícula nem chão): um passe de tela cheia de 1 amostra, sem

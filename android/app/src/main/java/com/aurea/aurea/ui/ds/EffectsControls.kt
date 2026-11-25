@@ -380,9 +380,31 @@ class FxRulerState {
 @Composable
 fun rememberFxRulerState(): FxRulerState = remember { FxRulerState() }
 
-/** A régua que está arremessando agora: toque noutra régua é ignorado (referência). */
+/** Fecha o passo da régua anterior antes de outro controle iniciar um arrasto. */
 internal object FxRulerFling {
-    var owner: FxRulerState? = null
+    private var owner: FxRulerState? = null
+    private var onStop: (() -> Unit)? = null
+
+    fun start(state: FxRulerState, stop: () -> Unit) {
+        interrupt()
+        owner = state
+        onStop = stop
+    }
+
+    fun clear(state: FxRulerState) {
+        if (owner === state) {
+            owner = null
+            onStop = null
+        }
+    }
+
+    fun interrupt(state: FxRulerState? = null) {
+        val current = owner ?: return
+        if (state != null && current !== state) return
+        val stop = onStop
+        clear(current)
+        stop?.invoke()
+    }
 }
 
 /**
@@ -428,16 +450,17 @@ fun FxRuler(
     val snapList by rememberUpdatedState(snaps)
     val stepNow = if (step > 0f && step.isFinite()) step else 1f
     val stepRef by rememberUpdatedState(stepNow)
-    DisposableEffect(state) {
+    fun finishEditing() {
+        state.live = null
+        if (state.open) {
+            state.open = false
+            finish()
+        }
+    }
+    DisposableEffect(state, enabled, min, max) {
         onDispose {
-            state.fling?.cancel()
-            state.fling = null
-            if (FxRulerFling.owner === state) FxRulerFling.owner = null
-            if (state.open) {
-                state.open = false
-                state.live = null
-                finish()
-            }
+            FxRulerFling.interrupt(state)
+            finishEditing()
         }
     }
     Canvas(
@@ -445,21 +468,10 @@ fun FxRuler(
             if (!enabled) return@pointerInput
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
-                val other = FxRulerFling.owner
-                if (other != null && other !== state) return@awaitEachGesture
                 var inGesture = false
                 // Um toque pode parar a inércia sem tomar o gesto vertical da lista.
                 val interrupted = state.live
-                if (state.fling?.isActive == true) {
-                    state.fling?.cancel()
-                    state.fling = null
-                    if (FxRulerFling.owner === state) FxRulerFling.owner = null
-                    state.live = null
-                    if (state.open) {
-                        state.open = false
-                        finish()
-                    }
-                }
+                FxRulerFling.interrupt(state)
                 val tracker = VelocityTracker()
                 tracker.addPosition(down.uptimeMillis, down.position)
                 var start = interrupted ?: current
@@ -496,6 +508,7 @@ fun FxRuler(
                         if (abs(dy) > touchSlop && abs(dy) > abs(dx)) return@awaitEachGesture
                         if (abs(dx) <= abs(dy) * FxParamMath.HORIZONTAL_DOMINANCE ||
                             abs(dx) <= touchSlop * FxParamMath.RULER_SLOP_FRACTION) continue
+                        FxRulerFling.interrupt()
                         inGesture = true
                         lastX = main.position.x
                         main.consume()
@@ -519,40 +532,35 @@ fun FxRuler(
                 if (!inGesture) return@awaitEachGesture
                 val velocity = tracker.calculateVelocity().x
                 if (abs(velocity) > FxParamMath.FLING_MIN_PX_S) {
-                    FxRulerFling.owner = state
+                    FxRulerFling.start(state) {
+                        state.fling?.cancel()
+                        state.fling = null
+                        finishEditing()
+                    }
                     state.fling = scope.launch {
                         var last = 0f
                         val anim = AnimationState(initialValue = 0f, initialVelocity = -velocity * gain)
-                        var finished = false
-                        try {
-                            anim.animateDecay(decay) {
-                                val delta = this.value - last
-                                last = this.value
-                                walked += delta
-                                val before = state.live
-                                applyRaw(FxParamMath.rulerValueAfter(start, walked, spacing, stepRef))
-                                // Chegou ao limite da faixa: para (limitRange).
-                                if (state.live == before && delta != 0f) {
-                                    val (lo, hi) = dragBounds(min, max, start)
-                                    val v = state.live ?: start
-                                    if (v <= lo || v >= hi) cancelAnimation()
-                                }
+                        anim.animateDecay(decay) {
+                            val delta = this.value - last
+                            last = this.value
+                            walked += delta
+                            val before = state.live
+                            applyRaw(FxParamMath.rulerValueAfter(start, walked, spacing, stepRef))
+                            // Chegou ao limite da faixa: para (limitRange).
+                            if (state.live == before && delta != 0f) {
+                                val (lo, hi) = dragBounds(min, max, start)
+                                val v = state.live ?: start
+                                if (v <= lo || v >= hi) cancelAnimation()
                             }
-                            finished = isActive
-                        } finally {
-                            if (FxRulerFling.owner === state) FxRulerFling.owner = null
                         }
-                        if (finished) {
+                        if (isActive) {
+                            FxRulerFling.clear(state)
                             state.fling = null
-                            state.live = null
-                            state.open = false
-                            finish()
+                            finishEditing()
                         }
                     }
                 } else {
-                    state.live = null
-                    state.open = false
-                    finish()
+                    finishEditing()
                 }
             }
         },

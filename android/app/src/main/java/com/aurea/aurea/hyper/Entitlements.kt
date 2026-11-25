@@ -18,9 +18,9 @@ import java.security.MessageDigest
 // =============================================================================
 //  O PORTÃO do conteúdo pago (AureaHyper, efeitos pagos, Texto 3D).
 //
-//  16/11/2026 (decisão do dono): ASSINATURAS mensais. O AureaHyper
-//  (`aurea_hyper_mensal`) libera tudo; cada efeito pago e o Texto 3D têm a sua
-//  assinatura avulsa; o legado `aureahyper_lifetime` (concedido pelo dono)
+//  16/11/2026 (decisão do dono): ASSINATURAS. O AureaHyper (1.0.9: semanal,
+//  mensal ou anual) libera tudo; os efeitos pagos e o Texto 3D tiveram a sua
+//  assinatura avulsa (fora de venda, reconhecida para quem tem); o legado `aureahyper_lifetime` (concedido pelo dono)
 //  segue liberando tudo. A Play cobra (hyper/Subscriptions.kt), o servidor
 //  confere com a loja e diz o que a conta tem AGORA (GET /api/entitlements:
 //  produtos + vencimento de cada assinatura). QUAL produto libera QUAL item é

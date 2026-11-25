@@ -60,12 +60,17 @@ import com.aurea.aurea.ui.theme.tocavel
 
 // =============================================================================
 //  O PAYWALL das assinaturas (16/11/2026). Abre ao tocar num efeito pago sem o
-//  acesso e ao criar Texto 3D sem o acesso. 1.0.2.1 (19/11/2026): uma escolha só,
-//    · "AureaHyper" — R$ 100,00/ano · libera tudo (o preço da loja quando carrega);
+//  acesso e ao criar Texto 3D sem o acesso. 1.0.9 (decisão do dono, 25/11/2026):
+//  três planos do AureaHyper, todos liberam tudo (preço da loja quando carrega):
+//    · Semanal — R$ 7,00/semana
+//    · Mensal  — R$ 30,00/mês
+//    · Anual   — R$ 150,00/ano, destacado ("Melhor valor" e, com os preços da
+//      loja carregados, "Economize N%" contra um ano do plano curto mais barato)
 //  e "Restaurar compras". Sem conta: entrar primeiro (a assinatura fica ligada à
 //  conta Aurea). As mesmas tags no iOS (AureaSubscriptions.swift, PaywallSheet):
-//    assinatura · assinatura.fechar · assinatura.avulso · assinatura.hyper ·
-//    assinatura.restaurar · assinatura.entrar · assinatura.aviso
+//    assinatura · assinatura.fechar · assinatura.semanal · assinatura.mensal ·
+//    assinatura.hyper (o anual) · assinatura.economia · assinatura.restaurar ·
+//    assinatura.entrar · assinatura.aviso
 // =============================================================================
 
 /** A folha do paywall para [item]. [itemName] = o nome do efeito (null = o nome do tipo). */
@@ -148,29 +153,53 @@ private fun PaywallContent(item: PaidItem, itemName: String?, access: HyperAcces
     }
 }
 
+/** Como a tela mostra um plano do AureaHyper (o id vem do motor). */
+private data class HyperPlan(val id: String, val title: Int, val per: Int, val fallback: Int, val tag: String, val best: Boolean)
+
+private fun hyperPlan(id: String, annual: String?): HyperPlan = when {
+    id == annual -> HyperPlan(id, R.string.assinatura_plano_anual, R.string.assinatura_por_ano, R.string.assinatura_preco_hyper,
+        "assinatura.hyper", best = true)
+    id.endsWith("_semanal") -> HyperPlan(id, R.string.assinatura_plano_semanal, R.string.assinatura_por_semana,
+        R.string.assinatura_preco_semanal, "assinatura.semanal", best = false)
+    else -> HyperPlan(id, R.string.assinatura_plano_mensal, R.string.assinatura_por_mes, R.string.assinatura_preco_mensal,
+        "assinatura.mensal", best = false)
+}
+
 /**
- * As escolhas de assinatura para [item] (avulso + AureaHyper) e "Restaurar
- * compras". Também aparece no painel bloqueado do AureaHyper (só o AureaHyper).
+ * Os planos do AureaHyper à venda (semanal, mensal, anual; todos liberam tudo) e
+ * "Restaurar compras". Também aparece no painel bloqueado do AureaHyper.
  */
 @Composable
 fun SubscriptionOptions(item: PaidItem) {
     val context = LocalContext.current
     val activity = context.findActivity()
     LaunchedEffect(Unit) { AureaSubscriptions.loadPrices(context) }
-    val hyper = AureaSubscriptions.hyperProduct()
+    val annual = AureaSubscriptions.hyperProduct()
+    val plans = remember(annual) { AureaSubscriptions.plansOnSale().map { hyperPlan(it, annual) } }
     val purchasable = HyperEntitlements.purchasable
     val busy = AureaSubscriptions.busy
     val prices = AureaSubscriptions.prices
-    // 1.0.2.1 (19/11/2026): só o AureaHyper ANUAL se vende; acabaram os avulsos
-    // (quem já tinha um continua com ele: hyper::has_access).
-    if (hyper != null) {
-        val price = prices[hyper] ?: stringResource(R.string.assinatura_preco_hyper)
+    // 1.0.9: semanal, mensal e anual; os avulsos não se vendem mais (quem já
+    // tinha um continua com ele: hyper::has_access). O selo só com os preços da loja.
+    val savings = AureaSubscriptions.annualSavingsPercent(
+        plans.firstOrNull { it.tag == "assinatura.semanal" }?.id,
+        plans.firstOrNull { it.tag == "assinatura.mensal" }?.id,
+        plans.firstOrNull { it.best }?.id)
+    if (plans.isNotEmpty()) {
+        Text(stringResource(R.string.assinatura_escolha_plano), style = AureaType.of(13f, FontWeight.W600, color = AureaColors.Muted))
+        Spacer(Modifier.height(10.dp))
+    }
+    plans.forEachIndexed { i, plan ->
+        if (i > 0) Spacer(Modifier.height(10.dp))
+        val price = stringResource(plan.per, prices[plan.id] ?: stringResource(plan.fallback))
         OptionCard(
-            title = stringResource(R.string.hyper_title),
-            price = stringResource(R.string.assinatura_por_ano, price) + " · " + stringResource(R.string.assinatura_libera_tudo),
-            tag = "assinatura.hyper", highlighted = true, busy = busy == hyper,
-            enabled = busy == null && activity != null && hyper in purchasable,
-        ) { activity?.let { AureaSubscriptions.buy(it, hyper) } }
+            title = stringResource(plan.title),
+            price = price,
+            badge = if (plan.best) stringResource(R.string.assinatura_melhor_valor) else null,
+            savings = if (plan.best && savings > 0) stringResource(R.string.assinatura_economize, savings) else null,
+            tag = plan.tag, highlighted = plan.best, busy = busy == plan.id,
+            enabled = busy == null && activity != null && plan.id in purchasable,
+        ) { activity?.let { AureaSubscriptions.buy(it, plan.id) } }
     }
     if (purchasable.isEmpty()) {
         Spacer(Modifier.height(12.dp))
@@ -191,10 +220,11 @@ fun SubscriptionOptions(item: PaidItem) {
 }
 
 @Composable
-private fun OptionCard(title: String, price: String, tag: String, highlighted: Boolean, busy: Boolean, enabled: Boolean,
-                       onClick: () -> Unit) {
+private fun OptionCard(title: String, price: String, badge: String?, savings: String?, tag: String, highlighted: Boolean,
+                       busy: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val processing = stringResource(R.string.assinatura_processando)
     val shape = RoundedCornerShape(14.dp)
+    val spoken = listOfNotNull(title, badge, price, savings).joinToString(", ")
     Row(
         Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(shape)
             .background(if (highlighted) AureaColors.Accent.copy(alpha = 0.14f) else AureaColors.Surface)
@@ -202,7 +232,7 @@ private fun OptionCard(title: String, price: String, tag: String, highlighted: B
             .testTag(tag)
             .semantics(mergeDescendants = true) {
                 role = Role.Button
-                contentDescription = "$title, $price"
+                contentDescription = spoken
                 if (busy) stateDescription = processing
             }
             .tocavel(enabled = enabled, haptic = true, onClick = onClick)
@@ -210,10 +240,23 @@ private fun OptionCard(title: String, price: String, tag: String, highlighted: B
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, style = AureaType.of(16f, FontWeight.W700, color = if (enabled || busy) AureaColors.Text else AureaColors.Disabled))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, style = AureaType.of(16f, FontWeight.W700, color = if (enabled || busy) AureaColors.Text else AureaColors.Disabled))
+                if (badge != null) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(badge, style = AureaType.of(11f, FontWeight.W700, color = AureaColors.OnAccent),
+                        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(AureaColors.Accent)
+                            .padding(horizontal = 6.dp, vertical = 2.dp))
+                }
+            }
             Spacer(Modifier.height(2.dp))
             Text(price, style = AureaType.of(14f, FontWeight.W600,
                 color = if (!enabled && !busy) AureaColors.Disabled else if (highlighted) AureaColors.Accent else AureaColors.Muted))
+            if (savings != null) {
+                Spacer(Modifier.height(2.dp))
+                Text(savings, style = AureaType.of(13f, FontWeight.W700, color = AureaColors.Accent),
+                    modifier = Modifier.testTag("assinatura.economia"))
+            }
         }
         if (busy) CircularProgressIndicator(Modifier.size(20.dp), color = AureaColors.Accent, strokeWidth = 2.dp)
         else CupertinoIcon(if (highlighted) CupertinoGlyph.StarFill else CupertinoGlyph.CheckmarkAlt, 18.dp,

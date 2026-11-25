@@ -88,7 +88,8 @@ internal enum class EditDockLevel { Root, Audio, Text, VideoClip, TextClip, Audi
 internal class EditDockItem(val id: String, val icon: EditIcon, val label: Int, val action: () -> Unit)
 
 @Composable
-internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable (Modifier) -> Unit) {
+internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable (Modifier) -> Unit,
+    floatingCurve: Boolean = false, floatingText: Boolean = false) {
     var level by remember { mutableStateOf(EditDockLevel.Root) }
     LaunchedEffect(Unit) { ViewModes.columnOpen = false }
     // O corte cujas transições estão abertas (saída, entrada).
@@ -114,9 +115,9 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
     }
     BoxWithConstraints(Modifier.fillMaxSize().background(EditColors.Canvas)) {
         val total = maxHeight
-        val wide = maxWidth >= 600.dp && maxWidth > maxHeight && !ui.fullscreen && store.textEditLayer == null
         val texting = store.textEditLayer != null && !ui.fullscreen
-        val panel = ui.panel
+        val wide = maxWidth >= 600.dp && maxWidth > maxHeight && !ui.fullscreen && (!texting || floatingText)
+        val panel = if (floatingCurve) ui.curveReturnPanel?.takeIf { wide && it == EditorPanel.TextLayout } else ui.panel
         val inspector: @Composable () -> Unit = {
             if (panel != null) {
                 PanelContent(store, panel, onClose = { ui.panel = null }, onOpenPanel = { openPanel(store, ui, it) },
@@ -145,7 +146,7 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
                         EditPlayBar(store, ui)
                     }
                     Column(Modifier.weight(1f).fillMaxHeight().background(EditColors.Canvas)) {
-                        KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().weight(1f), compact = panel != null,
+                        KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().weight(1f), compact = panel != null && !floatingCurve,
                             onAddMedia = actions.addMedia, onTransition = { a, b -> cut = a to b }, onAddAudio = actions.addAudio, onAddText = actions.addText) }
                         if (panel != null) {
                             Box(Modifier.fillMaxWidth().height((total * .58f).coerceAtMost(320.dp)).testTag("edit.inspector")) { inspector() }
@@ -163,7 +164,7 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
                     stage(Modifier.fillMaxSize().testTag("edit.preview"))
                 }
             }
-            if (texting) {
+            if (texting && !floatingText) {
                 TextEditPanel(store, Modifier.fillMaxWidth().weight(1f))
             } else {
             EditPlayBar(store, ui)

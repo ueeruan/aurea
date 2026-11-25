@@ -36,6 +36,7 @@
 #include <cstdio>
 #include <deque>
 #include <span>
+#include <unordered_map>
 
 namespace aurea::ae {
 using namespace detail;
@@ -111,7 +112,7 @@ struct Applier {
             rep.skip(kind,n.name.empty() ? b.label : n.name + " (" + b.label + ")", b.unsupported);
             return;
         }
-        if (n.keys.size() > 1) write_keys(w, b, n.keys, true);
+        if (n.keys.size() > 1 || (w.compTime && !n.keys.empty())) write_keys(w, b, n.keys, true);
         else if (n.hasValue) write_static(w, b, n.value, true);
         if (!n.expression.empty()) exprs.push_back(PendingExpr{b, n.expression});
         ++applied;
@@ -232,21 +233,40 @@ struct Applier {
         in.layerH = layerH;
         in.fps = w.fps;
         std::vector<std::string> missing;
-        for (const Node& c : n.children) {
-            if (c.kind != Node::Kind::Property) continue;
-            const u16 ae = suffix(c.match, n.match);
-            if (ae == 0 || (onlyAe >= 0 && ae != onlyAe)) continue;
+        std::unordered_map<std::string_view, const EffectParamDef*> definitions;
+        for (const EffectParamDef& def : n.params) definitions.try_emplace(def.match, &def);
+        const auto resolve_param = [&](u16 raw, const EffectParamDef* def, std::string_view name) -> u16 {
+            if (!rule->paramsByNameOnly && (aurea_param_for(*rule, raw) || onlyAe >= 0)) return raw;
+            if (def) {
+                if (const u16 labeled = effect_param_number(*rule, def->name)) return labeled;
+            }
+            if (const u16 labeled = effect_param_number(*rule, name)) return labeled;
+            return rule->paramsByNameOnly ? 0 : raw;
+        };
+        std::vector<const Node*> values;
+        const auto collect = [&](const auto& self, const Node& group) -> void {
+            for (const Node& c : group.children) {
+                if (c.kind == Node::Kind::Property) values.push_back(&c);
+                else if (c.kind == Node::Kind::Group) self(self, c);
+            }
+        };
+        collect(collect, n);
+        std::vector<std::pair<std::string, u16>> importedParams;
+        for (const Node* value : values) {
+            const Node& c = *value;
+            const u16 raw = suffix(c.match, n.match);
+            if (raw == 0 || (onlyAe >= 0 && raw != onlyAe)) continue;
+            const auto found = definitions.find(c.match);
+            const EffectParamDef* def = found == definitions.end() ? nullptr : found->second;
+            // Group markers, embedded UI data and buttons are not render inputs.
+            if (def && (def->type == 13 || def->type == 14 || def->type == 9 || def->type == 15)) continue;
+            const u16 ae = resolve_param(raw, def, c.name);
             in.values.push_back(PostIn::V{ae, c.hasValue ? c.value : std::vector<f64>{}, animated(c)});
             const Binding b = bind_effect_param(*rule, id, ae, std::max<u32>(1, c.dims), host.registry(), layerW, layerH, w.fps);
             if (!b.ok()) {
                 if (b.unsupported == "~") continue;
-                // Marcadores de grupo da interface (13 início, 14 fim) e o bloco
-                // embutido (9) guardam um valor fictício: nunca são parâmetro.
-                const EffectParamDef* def = nullptr;
-                for (const EffectParamDef& d : n.params) if (d.match == c.match) def = &d;
-                if (def && (def->type == 13 || def->type == 14 || def->type == 9)) continue;
                 // Sem equivalente: só relata se o valor sai do padrão do AE.
-                bool report = animated(c);
+                bool report = animated(c) || (w.compTime && !c.keys.empty());
                 bool known = false;
                 for (u32 i = 0; i < rule->paramCount; ++i) {
                     const PRule& p = rule->params[i];
@@ -264,6 +284,7 @@ struct Applier {
                 if (report) {
                     // Caixas de seleção guardam o rótulo no menu (pdnm), não no nome.
                     std::string pn = def ? def->name : std::string();
+                    if (pn.empty()) pn = c.name;
                     if (pn.empty() && def && !def->popup.empty()) pn = def->popup.front();
                     missing.push_back(pn.empty() ? c.match : pn);
                 }
@@ -271,6 +292,7 @@ struct Applier {
             }
             refresh();
             apply_prop(b, c, "parametro");
+            if (ae != raw || !iequals(n.match, rule->ae)) importedParams.emplace_back(c.match, ae);
         }
         refresh();
         fx = w.layer ? w.layer->find_effect(EffectId{id, 0}) : nullptr;
@@ -292,10 +314,10 @@ struct Applier {
         // sem a entrada (-0000) e o bloco embutido, com os marcadores de grupo.
         std::vector<u16> order;
         for (const EffectParamDef& d : n.params)
-            if (const u16 num = suffix(d.match, n.match); num > 0) order.push_back(num);
+            if (const u16 num = suffix(d.match, n.match); num > 0) order.push_back(resolve_param(num, &d, {}));
         for (const std::string* nm : {&n.name, &n.effectName, &n.match})
-            if (!nm->empty()) aliases.push_back(EffectAlias{*nm, ref, rule, order});
-        aliases.push_back(EffectAlias{rule->aeName, ref, rule, order});
+            if (!nm->empty()) aliases.push_back(EffectAlias{*nm, ref, rule, order, importedParams});
+        aliases.push_back(EffectAlias{rule->aeName, ref, rule, order, importedParams});
         ++rep.effects;
         ++applied;
     }

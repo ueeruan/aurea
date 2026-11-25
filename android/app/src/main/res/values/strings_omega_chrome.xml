@@ -19,6 +19,10 @@
     <string name="om_vm_pixel">Pixels reais</string>
     <string name="om_vm_grid">Grade</string>
     <string name="om_vm_grid_spacing">Espaçamento da grade</string>
+    <string name="preview_grid_appearance">Aparência da grade</string>
+    <string name="preview_grid_blend">Mesclagem da grade</string>
+    <string name="preview_grid_color">Cor da grade</string>
+    <string name="preview_grid_contrast">Alto contraste</string>
     <string name="om_vm_solo">Destaque da camada escolhida</string>
     <string name="om_vm_solo_off">Normal</string>
     <string name="om_vm_solo_only">Só a camada escolhida</string>

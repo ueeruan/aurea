@@ -122,6 +122,10 @@ void AudioEngine::shutdown() {
 
 void AudioEngine::set_snapshot(std::shared_ptr<const AudioMixSnapshot> snap, i64 transportNs) {
     std::lock_guard<std::mutex> lock(mutex_);
+    // Edits to the image can rebuild the snapshot. If its audio is identical,
+    // keep the queued PCM, clock and DSP state running.
+    if (snap && snap_ && snap->revision == snap_->revision && snap->endSample == snap_->endSample
+        && snap->dspError == snap_->dspError && snap->clips == snap_->clips) return;
     snap_ = std::move(snap);
     if (playing_.load(std::memory_order_acquire)) {
         i64 position = position_ns();

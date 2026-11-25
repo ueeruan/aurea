@@ -1,20 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 16/11/2026: assinaturas mensais (hyper/Paywall.kt, AureaSubscriptions.swift; docs/release/assinaturas.md). -->
+    <!-- 16/11/2026: assinaturas; 1.0.9: AureaHyper semanal, mensal e anual (hyper/Paywall.kt, AureaSubscriptions.swift; docs/release/assinaturas.md). -->
     <!-- Preço padrão enquanto a loja não responde (a loja mostra o preço localizado). -->
     <string name="assinatura_preco_avulso" translatable="false">R$ 5,00</string>
-    <string name="assinatura_preco_hyper" translatable="false">R$ 100,00</string>
+    <string name="assinatura_preco_semanal" translatable="false">R$ 7,00</string>
+    <string name="assinatura_preco_mensal" translatable="false">R$ 30,00</string>
+    <!-- O anual (1.0.9: R$ 150,00). -->
+    <string name="assinatura_preco_hyper" translatable="false">R$ 150,00</string>
     <string name="assinatura_badge">Recurso pago</string>
-    <string name="assinatura_intro_efeito">Este efeito faz parte do AureaHyper. Assine o AureaHyper uma vez por ano e libere todos os efeitos pagos, o Texto 3D e as ferramentas Hyper.</string>
-    <string name="assinatura_intro_texto3d">O Texto 3D faz parte do AureaHyper. Assine o AureaHyper uma vez por ano e libere também todos os efeitos pagos e as ferramentas Hyper.</string>
+    <string name="assinatura_intro_efeito">Este efeito faz parte do AureaHyper. Assine o AureaHyper (por semana, mês ou ano) e libere todos os efeitos pagos, o Texto 3D e as ferramentas Hyper.</string>
+    <string name="assinatura_intro_texto3d">O Texto 3D faz parte do AureaHyper. Assine o AureaHyper (por semana, mês ou ano) e libere também todos os efeitos pagos e as ferramentas Hyper.</string>
     <string name="assinatura_intro_hyper">O AureaHyper libera todos os efeitos pagos, o Texto 3D e as ferramentas Hyper.</string>
     <string name="assinatura_so_efeito">Assinar só este efeito</string>
     <string name="assinatura_so_texto3d">Assinar só o Texto 3D</string>
+    <string name="assinatura_escolha_plano">Escolha o seu plano do AureaHyper. Todos liberam tudo.</string>
+    <string name="assinatura_plano_semanal">Semanal</string>
+    <string name="assinatura_plano_mensal">Mensal</string>
+    <string name="assinatura_plano_anual">Anual</string>
+    <string name="assinatura_por_semana">%1$s/semana</string>
+    <string name="assinatura_melhor_valor">Melhor valor</string>
+    <string name="assinatura_economize">Economize %1$d%%</string>
     <string name="assinatura_por_mes">%1$s/mês</string>
     <string name="assinatura_por_ano">%1$s/ano</string>
     <string name="assinatura_libera_tudo">libera tudo</string>
     <string name="assinatura_restaurar">Restaurar compras</string>
-    <string name="assinatura_renovacao">Renova automaticamente uma vez por ano até você cancelar. Cancele quando quiser em %1$s.</string>
+    <string name="assinatura_renovacao">Renova automaticamente ao fim de cada período (semana, mês ou ano) até você cancelar. Cancele quando quiser em %1$s.</string>
     <string name="assinatura_entrar">Entre na sua conta Aurea para assinar. A assinatura fica ligada à conta.</string>
     <string name="assinatura_em_breve">As assinaturas ainda não estão disponíveis. Nada é cobrado aqui.</string>
     <string name="assinatura_obrigado">Assinatura ativa. Já pode usar.</string>

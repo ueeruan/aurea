@@ -1072,14 +1072,22 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     }
     // Export (planos Y em R8 e CbCr em RG8) não entra: compila no primeiro
     // quadro do export, que não é tempo real.
-    if (startupPrewarm_) {
+    // In a 32-bit Android process the GLES driver can spend many seconds in
+    // glCompileShader. Keep the first frame viable and compile optional
+    // project pipelines on demand.
+    const bool limitedStartup = sizeof(void*) == 4 && backend.capabilities().apiName == "OpenGL ES";
+    if (startupPrewarm_ && !limitedStartup) {
         prewarmed_ = shaders_.prewarm(keys.data(), static_cast<u32>(keys.size()));
     } else {
-        // Renderizador do export (set_startup_prewarm): só a composição, que
-        // todo quadro usa e que prova que a GPU compila; o resto no 1o quadro.
-        const PipelineKey composite = PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_layer_frag,
-                                                            kWorkFormat, true, BlendMode::Normal);
-        prewarmed_ = shaders_.prewarm(&composite, 1);
+        // Export only needs the compositor here. Preview also needs one of
+        // the two output formats to be ready before reporting success.
+        const PipelineKey essentials[] = {
+            PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_layer_frag,
+                                  kWorkFormat, true, BlendMode::Normal),
+            PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_output_frag, SurfaceFormat::RGBA8),
+            PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_output_frag, SurfaceFormat::BGRA8),
+        };
+        prewarmed_ = shaders_.prewarm(essentials, startupPrewarm_ ? 3u : 1u);
     }
     AUREA_LOG_INFO("renderer: %u pipelines pre-aquecidos", prewarmed_);
     // 0.3.0 (Huawei P30 lite, prévia que nunca aparece): sem o pipeline que
@@ -2808,8 +2816,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     out.scenes.clear();
     // The panorama is a bottom layer, even in a camera-only scene. Never
     // repeat it in subsequent 3D groups (which would hide lower 2D layers).
-    if (stackFrom == 0 && stackOnly.empty()
-        && comp.environment().background_at(time) && (comp.environment().hdri.valid() || comp.environment().studioPreset != 0)) {
+    if (stackFrom == 0 && stackOnly.empty() && comp.environment().background_at(time)) {
         out.scenes.emplace_back();
         out.scenes.back().environment.showBackground = true;
         RenderLayer sky;
@@ -2963,7 +2970,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // então travar o tempo local deixaria o vídeo andando normalmente — e
         // o efeito não seria um efeito, seria um nome no painel.
         FrameIndex layerTime = time;
-        if (effects_) {
+        if (effects_ && !l->effects.empty()) {
             const EffectTypeId posterize = posterizeType_;
             const ParameterRegistry* pp = posterize ? effects_->params(posterize) : nullptr;
             // The AE reference (aurea.time.posterize_reference) is not here: it
@@ -4093,7 +4100,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     std::vector<text::GlyphAnim> firstAnim;
                     std::vector<Mat4> firstRig;
                     bool glyphsChange = false;
-                    constexpr u32 probes = 17;
+                    // Glyphs, not meshes, dominate this probe. Preview still
+                    // samples both shutter ends but does less work per letter.
+                    const u32 probes = settings.finalQuality ? 17u : 9u;
+                    const bool projected = wants_3d(comp, *l, time);
                     for (u32 p = 0; p < probes; ++p) {
                         const f64 unit = p == 0 || p + 1 == probes ? static_cast<f64>(p) / (probes - 1)
                             : (p + .23 * std::sin(p * 2.399963229728653)) / (probes - 1);
@@ -4119,7 +4129,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                                 for (u32 c = 0; c < 4 && !glyphsChange; ++c) glyphsChange = !same4(firstRig[g].col[c], textTransforms[g].col[c]);
                         }
                         const f64 t = time.value + offset;
-                        const Mat4 world = (wants_3d(comp, *l, time)
+                        const Mat4 world = (projected
                             ? (settings.sceneEditor.enabled && !settings.finalQuality
                                 ? scene_editor_projection(out.compWidth, out.compHeight, settings.sceneEditor)
                                 : comp_view_projection_frac(comp, t, out.compWidth, out.compHeight)) * world_3d_frac(comp, *l, t)
@@ -4144,8 +4154,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     // With effects each instant covers the whole animator canvas
                     // (no crop) and may run the chain again: unbounded here, it
                     // stalled the preview on the phone. Export keeps every sample.
-                    constexpr u32 kPreviewEffectedTextSamples = 6;
-                    if (!settings.finalQuality && !l->effects.empty()) sets = std::min(sets, kPreviewEffectedTextSamples);
+                    if (!settings.finalQuality) sets = std::min(sets, l->effects.empty() ? 12u : 6u);
                 }
                 // Charge the same frame allowance as 3D samples, including
                 // already prepared children. No admission means no allocation.
@@ -4518,7 +4527,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         if (inScene3d) {
             // Rotação X/Y, profundidade, nulo 3D na cadeia: a MESMA câmera dos
             // modelos 3D (padrão = plano Z=0 1:1 com a composição).
-            m = compFromClip * viewProj3d * world_3d(comp, *l, time);
+            m = compFromClip * viewProj3d * world_3d_frac(comp, *l, compositionTime);
         }
         const Mat4 shiftM = Mat4::translation(Vec3{-srcShift.x, -srcShift.y, 0});
         const bool shifted = srcShift.x != 0.0f || srcShift.y != 0.0f;
@@ -4662,9 +4671,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         ShutterPlan layerShutter = l->motionBlur && !cameraThrough
             ? shutter_window(comp.motion_blur(), l->transform.motionBlurAmount) : ShutterPlan{};
         rl.blurSourceTransform = shifted ? shiftM : Mat4::identity();
+        const bool spatialShutter = l->motionBlur && comp.motion_blur().enabled && wants_3d(comp, *l, time);
         auto shutterMatrix = [&](f64 offset) {
-            const f64 ts = static_cast<f64>(time.value) + offset;
-            Mat4 matrix = wants_3d(comp, *l, time)
+            const f64 ts = compositionTime + offset;
+            Mat4 matrix = spatialShutter
                 ? (settings.sceneEditor.enabled && !settings.finalQuality ? scene_editor_projection(out.compWidth, out.compHeight, settings.sceneEditor)
                     : comp_view_projection_frac(comp, ts, out.compWidth, out.compHeight)) * world_3d_frac(comp, *l, ts)
                 : world_2d_frac(comp, *l, ts);
@@ -4675,8 +4685,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             // Scene planes are resampled on the group's clock below.
             const f64 travel = shutter_projected_path(layerShutter, static_cast<f32>(rl.source.width),
                 static_cast<f32>(rl.source.height), shutterMatrix, previewFactor);
+            const u32 limit = !settings.finalQuality && l->kind == LayerKind::Text
+                ? (l->effects.empty() ? 12u : 6u) : ShutterPlan::kHardLimit;
             const u32 k = rl.source.glyphSets > 1 ? rl.source.glyphSets
-                : shutter_sample_count(mb, settings.finalQuality, effective_quality(settings).motionBlurSamples, travel);
+                : shutter_sample_count(mb, settings.finalQuality, effective_quality(settings).motionBlurSamples, travel, false, limit);
             layerShutter.count = k;
             // Animated text on a still layer: the glyph instants integrate in
             // the source and the effects run once, as on any other layer.
@@ -10797,9 +10809,14 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         // AE layers (B10): as guias do visor vão no mesmo bloco (output.frag).
         const Vec4 guides{settings.finalQuality ? 0.0f : static_cast<f32>(settings.previewGuides & 7u),
                           settings.guideGridSpacing, compW, compH};
-        void* ubo = arena_.alloc(32, 16);
-        std::memcpy(ubo, &bg, 16);
-        std::memcpy(static_cast<u8*>(ubo) + 16, &guides, 16);
+        const u32 rgb = settings.guideGridRgb;
+        const Vec4 gridStyle{static_cast<f32>((rgb >> 16) & 255u) / 255.f,
+                             static_cast<f32>((rgb >> 8) & 255u) / 255.f,
+                             static_cast<f32>(rgb & 255u) / 255.f,
+                             static_cast<f32>(settings.guideGridBlend)};
+        const Vec4 displayParams[] = {bg, guides, gridStyle};
+        void* ubo = arena_.alloc(sizeof(displayParams), 16);
+        std::memcpy(ubo, displayParams, sizeof(displayParams));
         // Largura da composição em pixels do display: o shader de saída troca a
         // amostra única por uma média de área quando a imagem encolhe (zoom
         // pequeno, preview em tela menor que o alvo) — sem cintilar.
@@ -10825,7 +10842,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
             const f32 texelsPerPixel = static_cast<f32>(pc.desc(cap.comp).width) / std::max(1.0f, cap.dispW);
             push.params = Vec4{cap.dither, texelsPerPixel, cap.checker, 0};
             pc.cmds.bind_texture(0, pc.texture(cap.comp), SamplerHandle{cap.sampler});
-            pc.cmds.set_uniforms(cap.ubo, 32);
+            pc.cmds.set_uniforms(cap.ubo, sizeof(displayParams));
             pc.cmds.push_constants(&push, sizeof(push));
             pc.cmds.draw(6);
         });
@@ -10923,9 +10940,18 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     capturePhases.mark("graph-build");
     const bool terminalEffectFailure=settings.finalQuality && !renderEffectFailure.ok()
         && !transient_effect_failure(renderEffectFailure);
+    const bool canSegmentOffscreen = settings.allowGraphSegments && offscreenFrame
+        && offscreen && offscreen->texture.valid();
+    u32 passesPerSegment = 0;
+#if defined(__ANDROID__)
+    // Keep Android Vulkan's split budget, with a fence before reusing each
+    // frame context. Some drivers crash recording multiple primaries per frame.
+    if (canSegmentOffscreen && settings.finalQuality)
+        passesPerSegment = backend_->export_pass_budget();
+#endif
     Status result = previewSourceStatus;
     if (terminalEffectFailure) result = renderEffectFailure;
-    else if (result.ok()) result = graph_.compile(pool_);
+    else if (result.ok() && !passesPerSegment) result = graph_.compile(pool_);
     capturePhases.mark("graph-compile");
     bool frameOpen = true;
     bool segmented = false;
@@ -10967,9 +10993,10 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
             return Status{Errc::Busy, "preview graph continuation pending"};
         }
     }
-    if (!terminalEffectFailure && result.code() == Errc::OutOfDeviceMemory && settings.allowGraphSegments
-        && offscreenFrame && offscreen && offscreen->texture.valid()) {
-        result = render_segmented_graph(settings, fb, timings, frameOpen);
+    if (!terminalEffectFailure && canSegmentOffscreen
+        && ((result.ok() && passesPerSegment) || result.code() == Errc::OutOfDeviceMemory)) {
+        const u32 batch = result.ok() ? passesPerSegment : 1u;
+        result = render_segmented_graph(settings, fb, timings, frameOpen, batch);
         segmented = result.ok();
         if (cached) cached->gpuFrame = fb.frameNumber;
     }

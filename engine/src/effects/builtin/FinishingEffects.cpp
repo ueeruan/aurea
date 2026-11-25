@@ -498,7 +498,8 @@ private:
 // -----------------------------------------------------------------------------
 class HueSaturation final : public Effect {
 public:
-    enum : u32 { kHue = 0, kSaturation, kLightness, kColorize, kColorizeHue, kColorizeSaturation, kMix };
+    enum : u32 { kHue = 0, kSaturation, kLightness, kColorize, kColorizeHue, kColorizeSaturation, kMix,
+                 kChromaScale, kBrightnessGain, kPreserveLuma, kChannelScale, kDarkOffset };
 
     const EffectInfo& info() const noexcept override {
         // Passe próprio (HSL na cor codificada não é uma matriz linear), como o
@@ -514,6 +515,11 @@ public:
         p.add_angle("colorize_hue", "Matiz ao colorir", 0.0f);
         p.add_float("colorize_saturation", "Saturação ao colorir", 25.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("chroma_scale", "Ganho de saturação", 1, -2, 8, kParamAnimatable);
+        p.add_float("brightness_gain", "Ganho de brilho", 1, 0, 16, kParamAnimatable);
+        p.add_bool("preserve_luma", "Preservar luminância", false);
+        p.add_color("channel_scale", "Ganho por cor", Vec4{1, 1, 1, 1});
+        p.add_float("dark_offset", "Deslocamento dos escuros", 0, -8, 2, kParamAnimatable);
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         v[kHue] = ParamValue::scalar(150.0f);
@@ -523,6 +529,11 @@ public:
     bool is_identity(const EffectEval& e) const noexcept override {
         if (!(finite_or(e.f(kMix), 0.0f) > 0.01f)) return true;
         if (e.b(kColorize)) return false;
+        if (e.count > kDarkOffset) {
+            const Vec4 scale = e.color(kChannelScale);
+            if (e.f(kChromaScale) != 1 || e.f(kBrightnessGain) != 1 || e.f(kDarkOffset) != 0 ||
+                scale.x != 1 || scale.y != 1 || scale.z != 1) return false;
+        }
         const f32 hue = std::fmod(std::fabs(finite_or(e.f(kHue), 0.0f)), 360.0f);
         return (hue < 0.01f || hue > 359.99f) && std::fabs(finite_or(e.f(kSaturation), 0.0f)) < 0.01f
             && std::fabs(finite_or(e.f(kLightness), 0.0f)) < 0.01f;
@@ -540,6 +551,15 @@ public:
         u.p1 = Vec4{finite_or(e.f(kColorizeHue), 0.0f) / 360.0f,
                     std::clamp(finite_or(e.f(kColorizeSaturation), 25.0f) / 100.0f, 0.0f, 1.0f),
                     std::clamp(finite_or(e.f(kMix), 100.0f) / 100.0f, 0.0f, 1.0f), 0.0f};
+        u.p2 = {1, 1, 0, 0};
+        u.color = {1, 1, 1, 1};
+        if (e.count > kDarkOffset) {
+            u.p2 = {std::clamp(finite_or(e.f(kChromaScale), 1), -2.f, 8.f),
+                    std::clamp(finite_or(e.f(kBrightnessGain), 1), 0.f, 16.f),
+                    e.b(kPreserveLuma) ? 1.f : 0.f,
+                    std::clamp(finite_or(e.f(kDarkOffset), 0), -8.f, 2.f)};
+            u.color = e.color(kChannelScale);
+        }
         return single_pass(ctx, ShaderId::effects_hue_saturation_frag, input, u, "matiz-saturacao", out);
     }
 };

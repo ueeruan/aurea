@@ -1267,6 +1267,9 @@ internal class TimelineController(
             // 0.5.3: alça da camada de dentro escolhida (grupo aberto na timeline).
             r != null && r.inner && horizontal && (hit.kind == HitKind.TRIM_START || hit.kind == HitKind.TRIM_END) ->
                 innerTrimDrag(r, hit.kind == HitKind.TRIM_START, down)
+            r != null && state.compact && horizontal && !state.speedHandles &&
+                (hit.kind == HitKind.TRIM_START || hit.kind == HitKind.TRIM_END) ->
+                trimDrag(r, hit.kind == HitKind.TRIM_START, down)
             r != null && store.layerSelectMode && hit.kind == HitKind.HEADER && r.track == null && !state.compact && !horizontal ->
                 sweepSelect(down.id, slopAt, r)
             // Trilha de propriedade aberta (só do AUREA): o losango anda direto, como antes.
@@ -1923,7 +1926,8 @@ internal class TimelineController(
             if (omega) rowById(id)?.let { omegaTrimInfo(it, originalDuration) }
             val desired = frameAt(p.x) + grab
             val snapped = if (store.snapping) Snap.nearest(targets, desired, playheadFrame(), (metrics.snapClip / pxPerFrame()).toDouble()) else Snap.NONE
-            val target = GestureLimit.clampFrame(max(0, if (snapped != Snap.NONE) snapped else desired.toFrame()), captureGestureLimit())
+            val proposed = if (snapped != Snap.NONE) snapped else desired.toFrame()
+            val target = GestureLimit.clampFrame(if (magnetic) proposed else max(0, proposed), captureGestureLimit())
             val cur = rowById(id) ?: return@dragLoop
             if (magnetic) {
                 val step = (target - r.start) - applied

@@ -1129,7 +1129,7 @@ para editar la curva.</string>
     <string name="consent_title">Consentimiento y responsabilidad</string>
     <string name="consent_accept">Aceptar y continuar</string>
     <string name="consent_body">Aurea es una herramienta profesional de edición, creación y producción de contenido digital. Al utilizar la aplicación, el usuario reconoce que es plenamente responsable de los contenidos que crea, edita, importa, exporta, publica o comparte a través de la plataforma.\n\nAurea no controla, fomenta, apoya ni autoriza el uso de la herramienta para actividades ilegales, abusivas, fraudulentas, perjudiciales o que vulneren los derechos de terceros.\n\nEl usuario es responsable de garantizar que dispone de las autorizaciones, licencias y derechos necesarios sobre los materiales utilizados, incluidas imágenes, vídeos, música, marcas, modelos, archivos y demás contenidos protegidos.\n\nLa libertad creativa que ofrece Aurea no implica aprobación, participación ni responsabilidad de la aplicación por lo que cada usuario decide producir o hacer con la herramienta.\n\nEl usuario acepta utilizar Aurea conforme a la legislación aplicable y asume la responsabilidad de sus propias acciones y del contenido producido o distribuido mediante la aplicación.\n\nEn la máxima medida permitida por la legislación aplicable, Aurea y sus responsables no serán responsables de los actos realizados exclusivamente por el usuario, del uso indebido de la herramienta ni de las consecuencias derivadas de contenidos creados, publicados o compartidos por el propio usuario.\n\nAurea proporciona la herramienta. El usuario es responsable del modo en que decide utilizarla.\n\nAl continuar, el usuario declara que ha leído, comprendido y acepta estos términos.</string>
-    <string name="release_notes_body">Aurea 1.0.8 (2231)\n\n• Edición automática: corta pausas, muletillas y repeticiones y añade zoom, sonidos, música y subtítulos que no tapan el rostro\n• Rig 2D de rostro: anima una foto o dibujo (girar, asentir, parpadear, hablar) y separa el personaje en partes con física del cabello\n• Nuevo efecto Explosión para modelos, objetos y textos 3D\n• Partículas con formas: mariposas, hojas, pétalos, corazones, estrellas, luciérnagas, confeti y copos de nieve\n• Vuelven los presets de texto clásicos, incluido el salto suave clásico\n• Importar proyectos de After Effects (.aep, .zip, .rar) es más completo y fiable\n• Los medios ya no desaparecen del proyecto cuando se borra el archivo original\n• Correcciones: crear proyectos en teléfonos lentos, desplazamiento de listas y exportación</string>
+    <string name="release_notes_body">Aurea 1.0.9 (2234)\n\n• Nuevos planes de AureaHyper: semanal, mensual y anual — todos desbloquean todo\n• Panel de controles más compacto, con reglas en lugar de deslizadores\n• Editor de curvas con nuevo diseño\n• Desplazamiento corregido en los ajustes: al final de la lista el toque responde al instante\n• Edita puntos de vectores en 3D directamente en el escenario\n• Edición automática, rig 2D de rostro, efecto Explosión y partículas con formas\n• Los medios ya no desaparecen del proyecto cuando se borra el archivo original\n• Correcciones de exportación, importación de After Effects y estabilidad</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Rellenar</string>
@@ -3257,6 +3257,22 @@ para editar la curva.</string>
     <string name="social_intro">Comparte tus creaciones. Encuentra a quienes te inspiran.</string>
     <string name="social_all">Para ti</string>
     <string name="social_following">Siguiendo</string>
+    <string name="social_official_tab">Aurea Oficial</string>
+    <string name="social_sort">Ordenar por</string>
+    <string name="social_sort_newest">Más recientes</string>
+    <string name="social_sort_popular">Populares</string>
+    <string name="social_sort_oldest">Más antiguas</string>
+    <string name="social_filter">Filtrar por</string>
+    <string name="social_all_categories">Todos los tipos</string>
+    <string name="social_category_text">Texto</string>
+    <string name="social_category_showcase">Vitrina de proyectos</string>
+    <string name="social_category_project">Archivos de proyecto</string>
+    <string name="social_category_preset">Presets</string>
+    <string name="social_category_announcement">Comunicado oficial</string>
+    <string name="social_empty_announcements">Aún no hay comunicados.</string>
+    <string name="social_create_announcement">Crear comunicado</string>
+    <string name="social_post_type">Tipo de publicación</string>
+    <string name="social_standard_post">Publicación estándar</string>
     <string name="social_followers">Seguidores</string>
     <string name="social_follow">Seguir</string>
     <string name="social_unfollow">Dejar de seguir</string>

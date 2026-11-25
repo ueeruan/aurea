@@ -1266,7 +1266,7 @@ public:
                 if (codec_) break;
                 if (const char* name = android::software_audio_decoder(mime_, legacy)) codec_ = AMediaCodec_createCodecByName(name);
             }
-            if (codec_) AUREA_LOG_INFO("audio: decoder de software (export compativel)");
+            if (codec_) AUREA_LOG_INFO("audio: decoder de software");
         }
         if (!codec_) codec_ = AMediaCodec_createDecoderByType(mime_.c_str());
         if (!codec_) {
@@ -1294,7 +1294,7 @@ public:
         i64 pts = 0;
         bool eos = false;
         for (int i = 0; i < 8 && !formatKnown_ && !eos; ++i) {
-            if (!read(tmp, pts, eos).ok()) break;
+            if (const Status warm = read(tmp, pts, eos); !warm.ok()) return warm;
         }
         if (info_.sampleRate == 0 || info_.channels == 0) return Status{Errc::UnsupportedFormat, "audio sem formato"};
         return seek(0);
@@ -1500,7 +1500,11 @@ std::unique_ptr<audio::AudioDecoderBackend> MediaCodecFactory::open_audio(const 
     auto d = std::make_unique<MediaCodecAudioDecoder>(std::move(fd));
     if (const Status s = d->open(); !s.ok()) {
         AUREA_LOG_WARN("decoder de audio nao abriu: %s", s.message().data());
-        return nullptr;
+        if (s.code() == Errc::OutOfMemory) return nullptr;
+        // Release the failed codec before asking the system for its software
+        // implementation. The preview can use that same source immediately.
+        d.reset();
+        return open_audio_software(sourcePath);
     }
     AUREA_LOG_INFO("audio: %u Hz, %u canais", d->info().sampleRate, d->info().channels);
     return d;

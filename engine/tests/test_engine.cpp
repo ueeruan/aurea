@@ -11,6 +11,7 @@
 #include "aurea/render/Renderer.hpp"
 #include "aurea/project/FileIO.hpp"
 #include "aurea/scene3d/Text3D.hpp"
+#include "aurea/timeline/LayerWorld.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -1332,6 +1333,36 @@ AUREA_TEST(Engine, ParentingKeepsChildInPlace) {
     AUREA_CHECK(worst2 < 0.05f);
     AUREA_CHECK(std::fabs(ch->transform.position.x - 900.0f) < 0.05f);
     AUREA_CHECK(std::fabs(ch->transform.scale.x - 1.0f) < 1e-3f);
+    e.shutdown();
+}
+
+AUREA_TEST(Engine, AnimatedNullKeepsItsChildSpatialAtNeutralKeyframes) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(1280, 720, 30, nullptr).ok());
+    const auto parentId = e.add_null(false), childId = e.add_shape(0);
+    AUREA_CHECK(parentId.ok() && childId.ok());
+    if (!parentId.ok() || !childId.ok()) return;
+    auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    auto* parent = comp->layer(LayerId::unpack(*parentId));
+    auto* child = comp->layer(LayerId::unpack(*childId));
+    child->parent = LayerId::unpack(*parentId);
+    AUREA_CHECK(!world::wants_3d(*comp, *child, FrameIndex{0}));
+    for (auto axis : {TrackProperty::PositionZ, TrackProperty::RotationX, TrackProperty::RotationY}) {
+        auto& track = parent->tracks.get_or_create(axis);
+        track.set(FrameIndex{0}, 0.f);
+        track.set(FrameIndex{15}, 70.f);
+        track.set(FrameIndex{30}, 0.f);
+        AUREA_CHECK(world::wants_3d(*comp, *child, FrameIndex{0}));
+        AUREA_CHECK(world::wants_3d(*comp, *child, FrameIndex{15}));
+        AUREA_CHECK(world::wants_3d(*comp, *child, FrameIndex{30}));
+        const Vec3 point{15, 21, 0};
+        const Vec3 initial = layer_world_3d(*comp, *child, FrameIndex{0}).transform_point(point);
+        const Vec3 moved = layer_world_3d(*comp, *child, FrameIndex{15}).transform_point(point);
+        AUREA_CHECK((initial - moved).length() > 1.f);
+        track.clear();
+    }
+    AUREA_CHECK(!world::wants_3d(*comp, *child, FrameIndex{0}));
     e.shutdown();
 }
 

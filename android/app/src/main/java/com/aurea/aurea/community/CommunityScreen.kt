@@ -44,6 +44,42 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
+private enum class CommunityFeedTab(val title: Int) {
+    All(R.string.social_all), Following(R.string.social_following), Official(R.string.social_official_tab)
+}
+
+private enum class CommunitySort(val wire: String, val title: Int) {
+    Newest("newest", R.string.social_sort_newest), Popular("popular", R.string.social_sort_popular),
+    Oldest("oldest", R.string.social_sort_oldest)
+}
+
+private enum class CommunityCategory(val wire: String, val title: Int) {
+    All("", R.string.social_all_categories), Text("text", R.string.social_category_text),
+    Showcase("showcase", R.string.social_category_showcase), Project("project", R.string.social_category_project),
+    Preset("preset", R.string.social_category_preset), Official("announcement", R.string.social_category_announcement)
+}
+
+@Composable
+private fun <T> CommunityChoice(label: String, value: T, options: List<T>, title: (T) -> Int,
+    enabled: Boolean, tag: String, onSelect: (T) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val current = stringResource(title(value))
+    Box {
+        OutlinedButton(onClick = { expanded = true }, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp)
+            .testTag(tag).semantics { contentDescription = "$label, $current" }) {
+            Text(current, maxLines = 1)
+            Spacer(Modifier.width(6.dp))
+            CupertinoIcon(CupertinoGlyph.ChevronDown, 10.dp, AureaColors.LightTextMuted)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            for (option in options) DropdownMenuItem(text = { Text(stringResource(title(option))) }, onClick = {
+                expanded = false
+                onSelect(option)
+            })
+        }
+    }
+}
+
 /**
  * Omega home · P1-4: a aba Início (D1) e o Perfil (D2) com o casco da
  * referência — clara (papéis claros, componentes Material no claro), puxar
@@ -72,7 +108,10 @@ private fun CommunityScreenContent(store: EditorStore, conta: ContaViewModel, pr
     var profile by remember(api) { mutableStateOf<CommunityProfile?>(null) }
     var feed by remember(api) { mutableStateOf(emptyList<CommunityPost>()) }
     var cursor by remember(api) { mutableStateOf<String?>(null) }
-    var following by remember { mutableStateOf(false) }
+    var feedTab by remember(api) { mutableStateOf(CommunityFeedTab.All) }
+    var feedSort by remember(api) { mutableStateOf(CommunitySort.Newest) }
+    var feedCategory by remember(api) { mutableStateOf(CommunityCategory.All) }
+    var feedFilters by remember(api) { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var search by remember { mutableStateOf("") }
@@ -114,21 +153,34 @@ private fun CommunityScreenContent(store: EditorStore, conta: ContaViewModel, pr
         }
     }
     suspend fun loadFeed(more: Boolean = false) {
-        val suffix = "?following=${if (following && profile == null) 1 else 0}" +
-            (profile?.let { "&user=${it.id}" } ?: "") + (if (more && cursor != null) "&cursor=${CommunityApi.query(cursor!!)}" else "")
+        val suffix = buildString {
+            append("?following=${if (feedTab == CommunityFeedTab.Following && profile == null) 1 else 0}")
+            profile?.let { append("&user=${it.id}") }
+            if (feedFilters && profile == null) {
+                append("&sort=${feedSort.wire}")
+                val category = if (feedTab == CommunityFeedTab.Official) CommunityCategory.Official else feedCategory
+                if (category != CommunityCategory.All) append("&category=${category.wire}")
+            }
+            if (more) cursor?.let { append("&cursor=${CommunityApi.query(it)}") }
+        }
         val r = withContext(Dispatchers.IO) { api.request("/posts$suffix") }
         val items = r.optJSONArray("items").mapObjects { it.post() }
         feed = if (more) (feed + items).distinctBy { it.id } else items; cursor = r.nextCursor()
     }
+    suspend fun resetFeed() {
+        feed = emptyList(); cursor = null
+        loadFeed()
+    }
     suspend fun refresh() {
         val r = withContext(Dispatchers.IO) { api.request("/me") }
-        me = r.getJSONObject("profile").profile(); canVerify = r.optBoolean("canVerify")
+        me = r.getJSONObject("profile").profile(); canVerify = r.optBoolean("canVerify"); feedFilters = r.optBoolean("feedFilters")
+        if (!feedFilters && feedTab == CommunityFeedTab.Official) feedTab = CommunityFeedTab.All
         if (profileMode && profile == null || profile?.id == me?.id) profile = me
         loadFeed()
     }
     fun showProfile(id: String) = work {
         val r = withContext(Dispatchers.IO) { api.request("/profiles/$id") }
-        profile = r.getJSONObject("profile").profile(); search = ""; results = emptyList(); loadFeed()
+        profile = r.getJSONObject("profile").profile(); search = ""; results = emptyList(); resetFeed()
     }
     fun listPeople(type: String, more: Boolean = false) = work {
         val p = profile ?: return@work
@@ -138,7 +190,7 @@ private fun CommunityScreenContent(store: EditorStore, conta: ContaViewModel, pr
         peopleCursor = r.nextCursor(); people = type
     }
     LaunchedEffect(api, profileMode) {
-        profile = null; search = ""; feed = emptyList(); busy = true
+        profile = null; search = ""; feed = emptyList(); cursor = null; busy = true
         try { refresh(); offline = false } catch (e: CancellationException) { throw e } catch (e: Exception) { failure(e) }
         finally { if (currentCoroutineContext().isActive) busy = false }
     }
@@ -149,10 +201,10 @@ private fun CommunityScreenContent(store: EditorStore, conta: ContaViewModel, pr
         catch (e: CancellationException) { throw e } catch (e: Exception) { failure(e) }
     }
     val nestedProfile = profile != null && (!profileMode || profile?.id != me?.id)
-    BackHandler(nestedProfile && !busy) { work { profile = if (profileMode) me else null; loadFeed() } }
+    BackHandler(nestedProfile && !busy) { work { profile = if (profileMode) me else null; resetFeed() } }
     Column(Modifier.fillMaxSize().background(AureaColors.LightBackground).testTag("social.screen")) {
         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (nestedProfile) TextButton(enabled = !busy, onClick = { work { profile = if (profileMode) me else null; loadFeed() } }) { Text("‹", fontSize = 28.sp) }
+            if (nestedProfile) TextButton(enabled = !busy, onClick = { work { profile = if (profileMode) me else null; resetFeed() } }) { Text("‹", fontSize = 28.sp) }
             Text(stringResource(if (profile != null) R.string.social_profile else R.string.social_community), style = LTitle, modifier = Modifier.weight(1f))
         }
         // Com itens na tela, uma barra fina; sem itens, o indicador fica no meio (abaixo).
@@ -160,7 +212,7 @@ private fun CommunityScreenContent(store: EditorStore, conta: ContaViewModel, pr
         if (!offline) error?.let { Text(it, color = AureaColors.LightDanger, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).testTag("social.error")) }
         PullToRefreshBox(
             isRefreshing = refreshing,
-            onRefresh = { refreshing = true; work { refresh() } },
+            onRefresh = { if (!busy) { refreshing = true; work { refresh() } } },
             modifier = Modifier.weight(1f).fillMaxWidth().testTag("home.feed.refresh"),
         ) {
         if (offline && feed.isEmpty() && !busy) {
@@ -175,7 +227,7 @@ private fun CommunityScreenContent(store: EditorStore, conta: ContaViewModel, pr
                 Text(stringResource(R.string.conta_erro_rede), style = AureaType.of(12f, FontWeight.Bold, 0f, AureaColors.LightText),
                     textAlign = TextAlign.Center, modifier = Modifier.widthIn(max = 300.dp))
             }
-        } else if (busy && feed.isEmpty() && !refreshing) {
+        } else if (busy && feed.isEmpty() && me == null && !refreshing) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = AureaColors.LightAccentInk, modifier = Modifier.testTag("home.feed.loading"))
             }
@@ -188,20 +240,32 @@ private fun CommunityScreenContent(store: EditorStore, conta: ContaViewModel, pr
                 items(results, key = { "search-${it.id}" }) { result -> CommunityAuthor(result, api, Modifier.fillMaxWidth().clickable(enabled = !busy) { showProfile(result.id) }) }
                 item("filters") {
                     Column {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(!following, enabled = !busy, onClick = { work { following = false; loadFeed() } }, label = { Text(stringResource(R.string.social_all)) })
-                            FilterChip(following, enabled = !busy, onClick = { work { following = true; loadFeed() } }, label = { Text(stringResource(R.string.social_following)) })
-                            Spacer(Modifier.weight(1f))
-                            TextButton(onClick = { legacy = true }) { Text(stringResource(R.string.pn_caption), maxLines = 1) }
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            for (tab in CommunityFeedTab.entries) {
+                                if (tab == CommunityFeedTab.Official && !feedFilters) continue
+                                FilterChip(feedTab == tab, enabled = !busy, onClick = {
+                                    if (feedTab != tab) work { feedTab = tab; resetFeed() }
+                                }, label = { Text(stringResource(tab.title)) }, modifier = Modifier.testTag("social.tab.${tab.name}"))
+                            }
+                        }
+                        if (feedFilters) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CommunityChoice(stringResource(R.string.social_sort), feedSort, CommunitySort.entries, { it.title }, !busy, "social.sort") {
+                                if (feedSort != it) work { feedSort = it; resetFeed() }
+                            }
+                            if (feedTab != CommunityFeedTab.Official) CommunityChoice(stringResource(R.string.social_filter), feedCategory,
+                                CommunityCategory.entries.filter { it != CommunityCategory.Official }, { it.title }, !busy, "social.category") {
+                                if (feedCategory != it) work { feedCategory = it; resetFeed() }
+                            }
                         }
                         // 0.4.6: a Loja da Comunidade (plugins, efeitos e presets).
                         // Enquanto o servidor não guarda arquivos (R2): "Em breve" (GET /store/config).
                         // Beta (nov/2026): na mesma linha dos filtros o nome era espremido e
                         // quebrava no meio da palavra; agora tem a linha dele, numa linha só.
-                        TextButton(onClick = { if (storeReady) storeOpen = true else storeSoon = true }, modifier = Modifier.testTag("social.store")) {
+                        if (feedTab != CommunityFeedTab.Official) TextButton(onClick = { if (storeReady) storeOpen = true else storeSoon = true }, modifier = Modifier.testTag("social.store")) {
                             Text(stringResource(R.string.store_title) + if (storeReady) "" else " · " + stringResource(R.string.store_soon),
                                 maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                         }
+                        if (feedTab != CommunityFeedTab.Official) TextButton(onClick = { legacy = true }) { Text(stringResource(R.string.pn_caption), maxLines = 1) }
                     }
                 }
             } else {
@@ -232,11 +296,21 @@ private fun CommunityScreenContent(store: EditorStore, conta: ContaViewModel, pr
                     }
                 }
             }
-            if (p == null || p.id == me?.id) item("compose") {
+            val official = p == null && feedTab == CommunityFeedTab.Official
+            if ((p == null || p.id == me?.id) && (!official || canVerify)) item("compose") {
                 Button(onClick = { if (me?.username.isNullOrBlank()) edit = true else composing = true }, enabled = me != null && !busy,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("social.compose")) { Text(stringResource(R.string.social_create_post)) }
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("social.compose")) {
+                    Text(stringResource(if (official) R.string.social_create_announcement else R.string.social_create_post))
+                }
             }
-            if (!busy && feed.isEmpty()) item("empty") { Text(stringResource(R.string.social_empty), color = AureaColors.LightTextMuted, modifier = Modifier.padding(vertical = 24.dp)) }
+            if (feed.isEmpty()) item("empty") {
+                if (busy && !refreshing) Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = AureaColors.LightAccentInk, modifier = Modifier.testTag("home.feed.loading"))
+                } else if (!busy && error == null) {
+                    Text(stringResource(if (official) R.string.social_empty_announcements else R.string.social_empty),
+                        color = AureaColors.LightTextMuted, modifier = Modifier.padding(vertical = 24.dp))
+                }
+            }
             items(feed, key = { it.id }) { post ->
                 CommunityPostCard(post, api, busy, me?.id == post.author.id, canVerify,
                     onProfile = { showProfile(post.author.id) }, onComments = { commentsFor = post }, onDelete = { deleting = post },
@@ -268,7 +342,11 @@ private fun CommunityScreenContent(store: EditorStore, conta: ContaViewModel, pr
     }
     if (edit && me != null) CommunityEditProfile(me!!, api, onError = ::failure,
         onDismiss = { edit = false }, onSaved = { me = it; if (profileMode || profile?.id == it.id) profile = it; edit = false })
-    if (composing) CommunityCompose(store, api, onError = ::failure, onDismiss = { composing = false }, onPosted = { composing = false; work { refresh() } })
+    if (composing) CommunityCompose(store, api, feedFilters, canVerify, when {
+        profile == null && feedTab == CommunityFeedTab.Official -> CommunityCategory.Official
+        profile == null && feedCategory == CommunityCategory.Showcase -> CommunityCategory.Showcase
+        else -> CommunityCategory.All
+    }, onDismiss = { composing = false }, onPosted = { composing = false; work { refresh() } })
     commentsFor?.let { post -> CommunityComments(post, me?.id, canVerify, api, ::failure, { commentsFor = null; work { loadFeed() } }, { id -> commentsFor = null; showProfile(id) },
         onReport = { c -> reporting = "comment" to c.id }) }
     if (storeSoon) AlertDialog(onDismissRequest = { storeSoon = false }, modifier = Modifier.testTag("social.store.soon"),
@@ -334,6 +412,9 @@ private val badgeOptions = listOf("blue" to R.string.social_badge_blue, "green" 
     onProfile: () -> Unit, onComments: () -> Unit, onDelete: () -> Unit, onReport: () -> Unit, onLike: () -> Unit, onDownload: () -> Unit) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(AureaColors.LightSurface).padding(16.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         CommunityAuthor(post.author, api, Modifier.fillMaxWidth().clickable(enabled = !busy, onClick = onProfile))
+        CommunityCategory.entries.firstOrNull { it != CommunityCategory.All && it != CommunityCategory.Text && it.wire == post.category }?.let {
+            Text(stringResource(it.title), style = LSmall, color = AureaColors.LightAccentInk)
+        }
         Text(android.text.format.DateUtils.getRelativeTimeSpanString(post.createdAt).toString(), style = LNote, color = AureaColors.LightTextMuted)
         if (post.body.isNotEmpty()) Text(post.body, style = LBody)
         post.asset?.let { a -> OutlinedButton(enabled = !busy, onClick = onDownload, modifier = Modifier.fillMaxWidth()) {
@@ -409,15 +490,23 @@ private val badgeOptions = listOf("blue" to R.string.social_badge_blue, "green" 
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable private fun CommunityCompose(store: EditorStore, api: CommunityApi, onError: (Exception) -> Unit, onDismiss: () -> Unit, onPosted: () -> Unit) {
+@Composable private fun CommunityCompose(store: EditorStore, api: CommunityApi, feedFilters: Boolean, canAnnounce: Boolean,
+    initialCategory: CommunityCategory, onDismiss: () -> Unit, onPosted: () -> Unit) {
     val context = LocalContext.current; val scope = rememberCoroutineScope()
     var body by remember { mutableStateOf("") }; var selected by remember { mutableStateOf<Pair<File, String>?>(null) }
     var picker by remember { mutableStateOf<String?>(null) }; var busy by remember { mutableStateOf(false) }; var error by remember { mutableStateOf<String?>(null) }
+    var category by remember { mutableStateOf(initialCategory) }
     val files = remember { mutableListOf<File>() }
     DisposableEffect(Unit) { onDispose { files.forEach { it.delete() } } }
     ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }, containerColor = AureaColors.LightBackground) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).imePadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(stringResource(R.string.social_create_post), style = LTitle)
+            if (feedFilters) {
+                val categories = if (canAnnounce) listOf(CommunityCategory.All, CommunityCategory.Showcase, CommunityCategory.Official)
+                    else listOf(CommunityCategory.All, CommunityCategory.Showcase)
+                CommunityChoice(stringResource(R.string.social_post_type), category, categories,
+                    { if (it == CommunityCategory.All) R.string.social_standard_post else it.title }, !busy, "social.post.category") { category = it }
+            }
             OutlinedTextField(body, { body = it.take(2000) }, label = { Text(stringResource(R.string.social_post_hint)) }, minLines = 3, maxLines = 6, modifier = Modifier.fillMaxWidth().testTag("social.post.body"))
             Row { TextButton(enabled = !busy, onClick = { picker = "preset" }) { Text(stringResource(R.string.social_attach_preset)) }; TextButton(enabled = !busy, onClick = { picker = "project" }) { Text(stringResource(R.string.social_attach_project)) } }
             selected?.let { item -> Row(verticalAlignment = Alignment.CenterVertically) { Text(item.first.name, Modifier.weight(1f)); TextButton(enabled = !busy, onClick = { selected = null }) { Text(stringResource(R.string.social_remove)) } } }
@@ -427,7 +516,9 @@ private val badgeOptions = listOf("blue" to R.string.social_badge_blue, "green" 
                 scope.launch { busy = true; error = null
                     try { withContext(Dispatchers.IO) {
                         val attachment = selected?.let { api.upload(it.first, it.second) }
-                        api.request("/posts", "POST", JSONObject().put("body", body).put("asset", attachment?.id ?: JSONObject.NULL))
+                        val post = JSONObject().put("body", body).put("asset", attachment?.id ?: JSONObject.NULL)
+                        if (feedFilters && category != CommunityCategory.All) post.put("category", category.wire)
+                        api.request("/posts", "POST", post)
                     }; onPosted() } catch (e: CancellationException) { throw e } catch (e: Exception) { error = context.getString(R.string.social_error) } finally { busy = false }
                 }
             }) { if (busy) CircularProgressIndicator(Modifier.size(20.dp)) else Text(stringResource(R.string.social_publish)) }

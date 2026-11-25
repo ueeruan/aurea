@@ -25,8 +25,9 @@ struct PaidEffect {
     const char* product;
 };
 
-// 16/11/2026 (decisão do dono): cada efeito pago é uma assinatura de R$ 5,00/mês;
-// o AureaHyper (R$ 59,50/mês) libera todos. docs/release/assinaturas.md.
+// 16/11/2026 (decisão do dono): cada efeito pago tinha a sua assinatura avulsa
+// (fora de venda desde a 1.0.2.1, reconhecida para quem já tem); o AureaHyper
+// (semanal, mensal ou anual desde a 1.0.9) libera todos. docs/release/assinaturas.md.
 constexpr PaidEffect kPaidEffects[] = {
     // As 3 ferramentas Hyper: só no AureaHyper (sem assinatura avulsa).
     {effect_type_id(effect_keys::kHyperUpscale), nullptr},
@@ -125,11 +126,31 @@ const char* effect_product_id(u32 effectTypeId) noexcept {
 const char* text3d_product_id() noexcept { return kText3DProductId; }
 
 bool product_unlocks_everything(std::string_view productId) noexcept {
-    return productId == kHyperSubscriptionId || productId == kHyperMonthlyLegacyId || productId == kProductId;
+    return productId == kHyperWeeklyId || productId == kHyperMonthlyId || productId == kHyperAnnualId
+        || productId == kProductId;
+}
+
+std::vector<std::string> hyper_plans_on_sale() {
+    // 1.0.9: semanal, mensal e anual (o anual é o destacado nas telas).
+    return {kHyperWeeklyId, kHyperMonthlyId, kHyperAnnualId};
+}
+
+u32 hyper_annual_savings_percent(i64 weeklyMicros, i64 monthlyMicros, i64 annualMicros) noexcept {
+    if (annualMicros <= 0) return 0;
+    // Um ano do plano curto mais barato (o selo nunca exagera a economia).
+    f64 year = 0.0;
+    if (weeklyMicros > 0) year = static_cast<f64>(weeklyMicros) * 52.0;
+    if (monthlyMicros > 0) {
+        const f64 m = static_cast<f64>(monthlyMicros) * 12.0;
+        year = year > 0.0 ? std::min(year, m) : m;
+    }
+    if (year <= static_cast<f64>(annualMicros)) return 0;
+    const f64 pct = std::floor((1.0 - static_cast<f64>(annualMicros) / year) * 100.0 + 1e-9);
+    return static_cast<u32>(std::clamp(pct, 0.0, 99.0));
 }
 
 std::vector<std::string> subscription_product_ids() {
-    std::vector<std::string> ids{kHyperSubscriptionId, kHyperMonthlyLegacyId};
+    std::vector<std::string> ids = hyper_plans_on_sale();
     for (const PaidEffect& e : kPaidEffects)
         if (e.product && std::find(ids.begin(), ids.end(), e.product) == ids.end()) ids.emplace_back(e.product);
     ids.emplace_back(kText3DProductId);

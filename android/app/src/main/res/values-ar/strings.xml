@@ -1155,7 +1155,7 @@
     <string name="consent_title">الموافقة والمسؤولية</string>
     <string name="consent_accept">موافقة ومتابعة</string>
     <string name="consent_body">Aurea أداة احترافية لتحرير المحتوى الرقمي وإنشائه وإنتاجه. باستخدام التطبيق، يقر المستخدم بأنه يتحمل المسؤولية الكاملة عن المحتوى الذي ينشئه أو يحرره أو يستورده أو يصدره أو ينشره أو يشاركه عبر المنصة.\n\nلا يتحكم Aurea في استخدام الأداة لأنشطة غير قانونية أو مسيئة أو احتيالية أو ضارة أو تنتهك حقوق الآخرين، ولا يشجع هذا الاستخدام أو يدعمه أو يصرح به.\n\nيتحمل المستخدم مسؤولية التأكد من امتلاكه التصاريح والتراخيص والحقوق اللازمة للمواد المستخدمة، بما فيها الصور ومقاطع الفيديو والموسيقى والعلامات التجارية والنماذج والملفات وغيرها من المحتويات المحمية.\n\nلا تعني الحرية الإبداعية التي يوفرها Aurea موافقة التطبيق أو مشاركته أو مسؤوليته عما يقرر كل مستخدم إنتاجه أو فعله باستخدام الأداة.\n\nيوافق المستخدم على استخدام Aurea وفقاً للقانون المعمول به ويتحمل مسؤولية أفعاله والمحتوى المنتج أو الموزع عبر التطبيق.\n\nإلى أقصى حد يسمح به القانون المعمول به، لا يتحمل Aurea والمسؤولون عنه المسؤولية عن الأفعال التي يقوم بها المستخدم وحده، أو إساءة استخدام الأداة، أو العواقب الناجمة عن المحتوى الذي ينشئه المستخدم نفسه أو ينشره أو يشاركه.\n\nيوفر Aurea الأداة. ويتحمل المستخدم مسؤولية الطريقة التي يختار استخدامها بها.\n\nبالمتابعة، يقر المستخدم بأنه قرأ هذه الشروط وفهمها ووافق عليها.</string>
-    <string name="release_notes_body">Aurea 1.0.8 (2231)\n\n• التحرير التلقائي: يقص التوقفات والحشو والإعادات ويضيف تكبيرًا وأصواتًا وموسيقى وترجمات لا تغطي الوجه\n• تحريك الوجه ثنائي الأبعاد: حرّك صورة أو رسمًا (التفات، إيماء، رمش، كلام) وقسّم الشخصية إلى أجزاء مع فيزياء الشعر\n• مؤثر انفجار جديد للنماذج والأجسام والنصوص ثلاثية الأبعاد\n• جسيمات بأشكال: فراشات، أوراق، بتلات، قلوب، نجوم، يراعات، قصاصات ملونة ورقاقات ثلج\n• عودة إعدادات النص الكلاسيكية، ومنها الارتداد الناعم الكلاسيكي\n• استيراد مشاريع After Effects (.aep و.zip و.rar) أصبح أكمل وأكثر موثوقية\n• لم تعد الوسائط تختفي من المشروع عند حذف الملف الأصلي\n• إصلاحات: إنشاء المشاريع على الهواتف الأبطأ، وتمرير القوائم، والتصدير</string>
+    <string name="release_notes_body">Aurea 1.0.9 (2234)\n\n• خطط AureaHyper الجديدة: أسبوعية وشهرية وسنوية — كلها تفتح كل شيء\n• لوحة تحكم أكثر إحكامًا، مع مساطر بدل أشرطة التمرير\n• محرر منحنيات بتصميم جديد\n• إصلاح التمرير في الإعدادات: عند نهاية القائمة تستجيب اللمسة فورًا\n• تعديل نقاط المتجهات ثلاثية الأبعاد مباشرة على المسرح\n• تحرير تلقائي، وتحريك الوجه ثنائي الأبعاد، ومؤثر الانفجار، وجسيمات بأشكال\n• لم تعد الوسائط تختفي من المشروع عند حذف الملف الأصلي\n• إصلاحات في التصدير واستيراد After Effects والثبات</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">تعبئة</string>
@@ -3283,6 +3283,22 @@
     <string name="social_intro">شارك إبداعاتك واعثر على من يلهمك.</string>
     <string name="social_all">مقترحات لك</string>
     <string name="social_following">تتم متابعتهم</string>
+    <string name="social_official_tab">Aurea الرسمي</string>
+    <string name="social_sort">الترتيب حسب</string>
+    <string name="social_sort_newest">الأحدث</string>
+    <string name="social_sort_popular">الأكثر رواجًا</string>
+    <string name="social_sort_oldest">الأقدم</string>
+    <string name="social_filter">التصفية حسب</string>
+    <string name="social_all_categories">كل الأنواع</string>
+    <string name="social_category_text">نص</string>
+    <string name="social_category_showcase">معرض المشاريع</string>
+    <string name="social_category_project">ملفات المشاريع</string>
+    <string name="social_category_preset">الإعدادات المسبقة</string>
+    <string name="social_category_announcement">إعلان رسمي</string>
+    <string name="social_empty_announcements">لا توجد إعلانات بعد.</string>
+    <string name="social_create_announcement">إنشاء إعلان</string>
+    <string name="social_post_type">نوع المنشور</string>
+    <string name="social_standard_post">منشور عادي</string>
     <string name="social_followers">المتابعون</string>
     <string name="social_follow">متابعة</string>
     <string name="social_unfollow">إلغاء المتابعة</string>

@@ -19,6 +19,10 @@
     <string name="om_vm_pixel">Реальные пиксели</string>
     <string name="om_vm_grid">Сетка</string>
     <string name="om_vm_grid_spacing">Шаг сетки</string>
+    <string name="preview_grid_appearance">Внешний вид сетки</string>
+    <string name="preview_grid_blend">Режим наложения сетки</string>
+    <string name="preview_grid_color">Цвет сетки</string>
+    <string name="preview_grid_contrast">Высокий контраст</string>
     <string name="om_vm_solo">Фокус на выбранном слое</string>
     <string name="om_vm_solo_off">Обычный</string>
     <string name="om_vm_solo_only">Только выбранный слой</string>

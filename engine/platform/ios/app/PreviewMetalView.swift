@@ -1576,39 +1576,9 @@ enum LayerResizeGeometry {
             let placed = StageZoomMath.fit(size: size, composition: CGSize(width: cw, height: ch), zoom: viewZoom.zoom, pan: viewZoom.pan)
             let fit = placed.scale, ox = placed.origin.x, oy = placed.origin.y
             func screen(_ x: Float, _ y: Float) -> CGPoint { CGPoint(x: CGFloat(x) * fit + ox, y: CGFloat(y) * fit + oy) }
-            // Omega chrome (área 02, P1-2): o tamanho da composição em 1× vai para os
-            // degraus de zoom da coluna; a grade de ESPAÇAMENTO (px da composição, a
-            // partir do centro) + a cruz do centro, ligada pela coluna de modos.
+            // O tamanho da composição em 1× define os degraus de zoom da coluna.
             let base = fit / max(StageZoomMath.minZoom, viewZoom.zoom)
             viewZoom.noteExtent(CGSize(width: cw * base, height: ch * base), pixelScale: UIScreen.main.scale)
-            if modes.grid {
-                let ink = AureaColors.text.opacity(0.35)
-                let step = CGFloat(max(1, modes.gridSpacing))
-                var grid = Path()
-                // Linhas a menos de 4 pt na tela viram borrão: só a cruz do centro.
-                if step * fit >= 4 {
-                    var d = step
-                    while d <= cw / 2 {
-                        for gx in [cw / 2 - d, cw / 2 + d] {
-                            grid.move(to: screen(Float(gx), 0)); grid.addLine(to: screen(Float(gx), Float(ch)))
-                        }
-                        d += step
-                    }
-                    d = step
-                    while d <= ch / 2 {
-                        for gy in [ch / 2 - d, ch / 2 + d] {
-                            grid.move(to: screen(0, Float(gy))); grid.addLine(to: screen(Float(cw), Float(gy)))
-                        }
-                        d += step
-                    }
-                }
-                context.stroke(grid, with: .color(ink), lineWidth: 1)
-                var cross = Path()
-                let c = screen(Float(cw) / 2, Float(ch) / 2)
-                cross.move(to: CGPoint(x: c.x - 10, y: c.y)); cross.addLine(to: CGPoint(x: c.x + 10, y: c.y))
-                cross.move(to: CGPoint(x: c.x, y: c.y - 10)); cross.addLine(to: CGPoint(x: c.x, y: c.y + 10))
-                context.stroke(cross, with: .color(AureaColors.text.opacity(0.6)), lineWidth: 1.5)
-            }
             if let x = shell.snapX {
                 var p = Path(); p.move(to: screen(x, 0)); p.addLine(to: screen(x, Float(ch)))
                 context.stroke(p, with: .color(Color(hex: 0xFF6B6B).opacity(0.8)), lineWidth: 1.5)

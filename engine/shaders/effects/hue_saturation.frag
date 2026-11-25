@@ -53,7 +53,8 @@ void main() {
     const vec4 source = texture(u_tex0, v_uv);
     if (source.a <= 1e-5) { o_color = source; return; }
     const vec3 straight = clamp(source.rgb / source.a, 0.0, 1.0);
-    vec3 hsl = rgb_to_hsl(aurea_linear_to_srgb(straight));
+    const vec3 encodedSource = aurea_linear_to_srgb(straight);
+    vec3 hsl = rgb_to_hsl(encodedSource);
     if (p.p0.w > 0.5) {
         hsl.x = fract(p.p1.x);
         hsl.y = clamp(p.p1.y, 0.0, 1.0);
@@ -61,9 +62,17 @@ void main() {
         hsl.x = fract(hsl.x + p.p0.x);
         hsl.y = clamp(hsl.y * (1.0 + clamp(p.p0.y, -1.0, 1.0)), 0.0, 1.0);
     }
+    if (p.p2.x < 0.0) hsl.x = fract(hsl.x + 0.5);
+    hsl.y = clamp(hsl.y * abs(p.p2.x), 0.0, 1.0);
     vec3 enc = clamp(hsl_to_rgb(hsl), 0.0, 1.0);
+    const vec3 lumaWeights = vec3(0.2126, 0.7152, 0.0722);
+    if (p.p2.z > 0.5) enc = clamp(enc + dot(encodedSource - enc, lumaWeights), 0.0, 1.0);
     const float light = clamp(p.p0.z, -1.0, 1.0);
     enc = light >= 0.0 ? mix(enc, vec3(1.0), light) : enc * (1.0 + light);
+    if (p.p2.y != 1.0 || p.p2.w != 0.0 || any(notEqual(p.color.rgb, vec3(1.0)))) {
+        const float darkWeight = 1.0 - clamp(dot(enc, lumaWeights), 0.0, 1.0);
+        enc = max(enc * p.p2.y * aurea_linear_to_srgb(p.color.rgb) + p.p2.w * darkWeight, 0.0);
+    }
     const vec4 adjusted = vec4(aurea_srgb_to_linear(enc) * source.a, source.a);
     o_color = mix(source, adjusted, clamp(p.p1.z, 0.0, 1.0));
 }

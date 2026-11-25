@@ -82,6 +82,7 @@ internal fun PlatformWideEditor(
     totalHeight: Float,
     sheetWidth: Float,
     stage: @Composable (Modifier) -> Unit,
+    @Suppress("UNUSED_PARAMETER") floatingText: Boolean = false,
 ) {
     val gap = 6.dp
     val density = androidx.compose.ui.platform.LocalDensity.current

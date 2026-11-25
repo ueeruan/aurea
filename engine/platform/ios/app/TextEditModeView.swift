@@ -399,12 +399,11 @@ private struct ColorPopup: View {
     }
 }
 
-// MARK: - O painel grande com a faixa de entrada
+// MARK: - Entrada de texto
 
-/// O PAINEL GRANDE do modo de texto: fundo do painel de edição e a faixa de
-/// entrada de 60 pt no topo (sobe acima do teclado se ele cobrir a faixa).
 struct TextEditPanel: View {
     @EnvironmentObject private var model: AureaModel
+    var floating = false
     @State private var text = ""
     @State private var loadedLayer: Int64?
     @State private var keyboardTop: CGFloat = .infinity
@@ -420,34 +419,23 @@ struct TextEditPanel: View {
 
     var body: some View {
         let current = info
-        GeometryReader { geo in
-            let frame = geo.frame(in: .global)
-            let strip: CGFloat = 60
-            let covered = max(0, frame.maxY - keyboardTop)
-            let top = geo.size.height - covered >= strip ? 0 : geo.size.height - covered - strip
-            ZStack(alignment: .topLeading) {
-                AureaColors.contentEditPanel
-                VStack(alignment: .leading, spacing: 0) {
-                    ZStack(alignment: .leading) {
-                        AureaColors.contentInputStrip
-                        if text.isEmpty {
-                            Text(AureaText.t("om_txm_hint")).font(.aurea(size: 18)).foregroundStyle(AureaColors.contentHint)
-                                .padding(.horizontal, 12).allowsHitTesting(false).accessibilityHidden(true)
-                        }
-                        TextModeInput(text: $text, alignment: current.alignment, selectAll: model.textEditSelectAll) { next in
-                            TextModeState.shared.draftBlank = current.is3D && next.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            model.typeText(next)
-                        }
-                        .padding(4)
-                        .id(model.textEditLayer ?? 0)
-                    }
-                    .frame(height: strip)
-                    if current.is3D && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(AureaText.t("text_content_3d_required")).font(.aurea(size: 12.5)).foregroundStyle(AureaColors.muted)
-                            .padding(12)
+        Group {
+            if floating {
+                let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+                input(alignment: current.alignment, is3D: current.is3D)
+                    .background(AureaColors.contentEditPanel, in: shape)
+                    .clipShape(shape)
+                    .overlay { shape.strokeBorder(AureaColors.contentStrongLine).allowsHitTesting(false) }
+                    .shadow(color: .black.opacity(0.25), radius: 10, y: 3)
+            } else {
+                GeometryReader { geo in
+                    let covered = max(0, geo.frame(in: .global).maxY - keyboardTop)
+                    let top = min(0, geo.size.height - covered - 60)
+                    ZStack(alignment: .topLeading) {
+                        AureaColors.contentEditPanel
+                        input(alignment: current.alignment, is3D: current.is3D).offset(y: top)
                     }
                 }
-                .offset(y: top)
             }
         }
         .accessibilityElement(children: .contain)
@@ -464,10 +452,33 @@ struct TextEditPanel: View {
             if model.textEditLayer != nil && model.textEditLayer != id { model.closeTextEdit() }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
-            guard let end = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else { return }
+            guard !floating, let end = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else { return }
             keyboardTop = end.minY >= UIScreen.main.bounds.height - 1 ? .infinity : end.minY
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardTop = .infinity }
+    }
+
+    private func input(alignment: Int, is3D: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .leading) {
+                AureaColors.contentInputStrip
+                if text.isEmpty {
+                    Text(AureaText.t("om_txm_hint")).font(.aurea(size: 18)).foregroundStyle(AureaColors.contentHint)
+                        .padding(.horizontal, 12).allowsHitTesting(false).accessibilityHidden(true)
+                }
+                TextModeInput(text: $text, alignment: alignment, selectAll: model.textEditSelectAll) { next in
+                    TextModeState.shared.draftBlank = is3D && next.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    model.typeText(next)
+                }
+                .padding(4)
+                .id(model.textEditLayer ?? 0)
+            }
+            .frame(height: 60)
+            if is3D && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(AureaText.t("text_content_3d_required")).font(.aurea(size: 12.5)).foregroundStyle(AureaColors.muted)
+                    .padding(12)
+            }
+        }
     }
 
     private func load() {

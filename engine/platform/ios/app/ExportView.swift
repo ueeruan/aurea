@@ -84,6 +84,7 @@ struct ExportView: View {
         .overlay { if let request = fpsKeypad { NumericKeypadSheet(request: request) { fpsKeypad = nil }.id(request.id) } }
         .sheet(item: $sharedProject) { file in ProjectFileShareSheet(url: file.url) }
         .task(id: model.projectGeneration) {
+            sourceIssues = nil
             let engine = model.engine
             let found = await Task.detached {
                 engine.exportSourceIssues().compactMap(ExportSourceNotice.init)
@@ -650,13 +651,19 @@ struct ExportView: View {
     // MARK: Exportar (pré-checagens, P1-11)
 
     private var exportButton: some View {
-        let disabled = model.exporting || (item != .package && sourceIssues == nil)
+        let checkingSources = item != .package && sourceIssues == nil
+        let disabled = model.exporting || checkingSources
+        let label = AureaText.t(checkingSources ? "motion_export_checking_media" : "om_exp_go")
         let ink = disabled ? AureaColors.exportHint : AureaColors.exportOnPrimary
         return Button(action: go) {
             HStack(spacing: 10) {
-                CupertinoGlyph.text(CupertinoGlyph.SquareArrowUp, size: 18, color: ink)
-                    .accessibilityHidden(true)
-                Text(AureaText.t("om_exp_go")).font(.aurea(size: 16, weight: .semibold))
+                if checkingSources {
+                    ProgressView().tint(ink).controlSize(.small).accessibilityHidden(true)
+                } else {
+                    CupertinoGlyph.text(CupertinoGlyph.SquareArrowUp, size: 18, color: ink)
+                        .accessibilityHidden(true)
+                }
+                Text(label).font(.aurea(size: 16, weight: .semibold))
                     .foregroundStyle(ink)
             }
             .padding(.horizontal, 14).padding(.vertical, 8).frame(maxWidth: .infinity, minHeight: 52)
@@ -667,7 +674,7 @@ struct ExportView: View {
         .padding(.horizontal, 16).padding(.vertical, 10)
         .background(AureaColors.exportCard.ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) { AureaColors.exportLine.frame(height: 1) }
-        .accessibilityLabel(AureaText.t("om_exp_go"))
+        .accessibilityLabel(label)
         .accessibilityIdentifier("export.go")
     }
 

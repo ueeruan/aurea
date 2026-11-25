@@ -205,7 +205,8 @@ def main() -> int:
     checks = {
         "P0-2 moldura comum, lista própria": "PanelFrame(rail: panelRail, scrollContent: false)" in view,
         "P0-2 ⋯ inativo com os controles abertos": "moreEnabled: openId == nil" in view,
-        "P0-2 só o 1º efeito de camada vazia abre": "FxParamMath.opensAfterAdd(previousCount: seen.count" in view,
+        "P0-2 adicionar mantém a lista e revela a nova linha": "proxy.scrollTo(last, anchor: .bottom)" in view
+            and "FxParamMath.opensAfterAdd(previousCount: seen.count" not in view,
         "P0-2 decorações fora da lista": "fxShownInEffectList($0)" in view and "!e.isDecoration" in human,
         "P0-2 toque longo de 0,4 s reordena": all(token in view for token in (
             "UILongPressGestureRecognizer(target: self, action: #selector(pressed(_:)))",
@@ -217,7 +218,7 @@ def main() -> int:
                                                                    "struct AureaSlider", "struct FxRuler",
                                                                    "struct FxSegmented", "struct FxDropdownBox")),
         "P1-1 régua anda de risco em risco": "FxParamMath.snapToTick(raw, step: tickStep)" in design,
-        "P1-1 arremesso ignora toque em outra régua": "FxRulerFling.owner" in design,
+        "P1-1 nova régua pode interromper o arremesso anterior": "FxRulerFling.interrupt()" in design and "FxRulerFling.start(token, stop: stopFling)" in design,
         "P1-1 vibração leve 0,2": "impactOccurred(intensity: 0.2)" in design,
         "P1-2 guia e arrasto relativo": "stage.effect.guide" in stage and "FxParamMath.trackball(" in stage,
         "P1-2 arrasto abaixo das alças": "EffectParamDragOverlay()" in editor

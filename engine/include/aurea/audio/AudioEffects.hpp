@@ -107,6 +107,7 @@ struct FxParam {
     f32 value = 0.0f;
     std::vector<f32> byFrame;
     std::vector<f64> integral;
+    bool operator==(const FxParam&) const = default;
 };
 
 struct FxStage {
@@ -122,6 +123,7 @@ struct FxStage {
     i64 origin = 0;
     /// Maior valor que um parâmetro de tempo assume (dimensiona as linhas).
     f32 maxDelayMs = 0.0f;
+    bool operator==(const FxStage&) const = default;
 
     /// Valor do parâmetro `i` na amostra `t` da raiz.
     [[nodiscard]] f32 at(u32 i, i64 t) const noexcept;

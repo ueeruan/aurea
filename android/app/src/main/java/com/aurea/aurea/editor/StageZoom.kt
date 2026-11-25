@@ -15,6 +15,7 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -277,6 +278,13 @@ internal object StageView {
  * degraus). Tudo é da SESSÃO e só da prévia: nada vai para o projeto nem para
  * o export. O espaçamento da grade fica guardado no aparelho.
  */
+internal enum class GridBlend(val wire: Int, val label: Int) {
+    Normal(0, R.string.particular_blend_normal), Difference(1, R.string.pn_blend_difference),
+    HighContrast(2, R.string.preview_grid_contrast),
+}
+
+internal data class GridAppearance(val rgb: Int = 0xFFFFFF, val blend: GridBlend = GridBlend.Normal)
+
 internal object ViewModes {
     const val GRID_MIN = 5
     const val GRID_MAX = 500
@@ -293,6 +301,8 @@ internal object ViewModes {
     var hideOverlay by mutableStateOf(false)
     var gridSpacing by mutableIntStateOf(GRID_MARK)
         private set
+    var gridAppearance by mutableStateOf(GridAppearance())
+        private set
     /** 0 normal, 1 só a(s) escolhida(s), 2 a(s) escolhida(s) a 50 % (só na prévia). */
     var solo by mutableIntStateOf(0)
     var camera by mutableStateOf(false)
@@ -305,6 +315,14 @@ internal object ViewModes {
         val p = context.applicationContext.getSharedPreferences("aurea.omega.chrome", Context.MODE_PRIVATE)
         prefs = p
         gridSpacing = p.getInt("gridSpacing", GRID_MARK).coerceIn(GRID_MIN, GRID_MAX)
+        val blend = GridBlend.entries.firstOrNull { it.wire == p.getInt("gridBlend", 0) } ?: GridBlend.Normal
+        gridAppearance = GridAppearance(p.getInt("gridRgb", 0xFFFFFF) and 0xFFFFFF, blend)
+    }
+
+    fun changeGridAppearance(value: GridAppearance) {
+        if (gridAppearance == value) return
+        gridAppearance = value
+        prefs?.edit()?.putInt("gridRgb", value.rgb)?.putInt("gridBlend", value.blend.wire)?.apply()
     }
 
     fun changeGridSpacing(value: Int) {
@@ -447,7 +465,10 @@ internal fun ViewModeColumn(store: EditorStore, width: Dp, modifier: Modifier) {
                     onDismissRequest = { ViewModes.spacingOpen = false },
                     properties = PopupProperties(focusable = true),
                 ) {
-                    GridSpacingSpinner(ViewModes.gridSpacing) { ViewModes.changeGridSpacing(it) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        GridAppearanceButton()
+                        GridSpacingSpinner(ViewModes.gridSpacing) { ViewModes.changeGridSpacing(it) }
+                    }
                 }
             }
         }

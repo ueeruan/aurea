@@ -24,6 +24,7 @@ class EffectPickerLogicTest {
     private val toneByKey = fx("aurea.audio.tone", "Gerador", "Áudio")
     private val toneByName = fx("aurea.audio.qualquer", "Tom", "Áudio")
     private val catalog = listOf(gaussian, lens, glow, vhs, reverb, toneByKey, toneByName)
+    private val rasterFlags = listOf(1, 2, 4, 5, 12).fold(0) { mask, kind -> mask or (1 shl (8 + kind)) }
 
     @Test
     fun categoryIdsAreStableSlugsWithoutAccents() {
@@ -60,7 +61,7 @@ class EffectPickerLogicTest {
 
     @Test
     fun rasterExtrusionUsesThe3dGroupAndOnlyOffersRasterLayers() {
-        val extrusion = fx("aurea.generate.raster_extrude", "Extrusão 3D", "Gerar")
+        val extrusion = fx("aurea.generate.raster_extrude", "Extrusão 3D", "Gerar").copy(flags = rasterFlags)
         assertEquals(EffectGroup.ThreeD, effectGroupOf(extrusion))
         val choices = listOf(glow, extrusion)
         for (kind in listOf(1, 2, 4, 5, 12)) {
@@ -69,6 +70,19 @@ class EffectPickerLogicTest {
         for (kind in listOf(0, 3, 6, 7, 8, 9, 10, 11)) {
             assertEquals(listOf(glow), pickableEffects(choices, layerHasAudio = true, layerKind = kind))
         }
+    }
+
+    @Test
+    fun modelOnlyEffectsHonorTheNativeCatalogFlags() {
+        val modelMask = 1 shl (8 + 10)
+        val part = fx("aurea.3d.part_transform", "Animar parte 3D", "3D").copy(flags = modelMask)
+        val text = fx("aurea.text3d.layout", "Text 3D Layout", "3D").copy(flags = modelMask or 2)
+        val shape = fx("aurea.shape3d.layout", "Shape 3D Layout", "3D").copy(flags = modelMask or 4)
+        val choices = listOf(glow, part, text, shape)
+        assertEquals(listOf(glow), pickableEffects(choices, false, 5))
+        assertEquals(listOf(glow, part), pickableEffects(choices, false, 10, false, false))
+        assertEquals(listOf(glow, part, text), pickableEffects(choices, false, 10, true, false))
+        assertEquals(listOf(glow, part, shape), pickableEffects(choices, false, 10, false, true))
     }
 
     @Test
@@ -404,7 +418,7 @@ class EffectPickerLogicTest {
         val newAudio = EffectCatalogEntry(typeId = effectTypeId("aurea.audio.novo"), effectClass = 0, paramCount = 0,
             name = "Eco novo", category = "Áudio", flags = 1)
         val extrusion = EffectCatalogEntry(typeId = effectTypeId("aurea.generate.raster_extrude"), effectClass = 0, paramCount = 0,
-            name = "Extrusão", category = "Gerar", flags = 1)
+            name = "Extrusão", category = "Gerar", flags = rasterFlags or 1)
         val all = listOf(vhs, newAudio, extrusion)
         assertEquals(listOf(vhs), recommendedEffects(all, layerKind = 3, applied = emptyList(), layerHasAudio = false))
         assertEquals(listOf(vhs, newAudio, extrusion), recommendedEffects(all, layerKind = 1, applied = emptyList(), layerHasAudio = true))

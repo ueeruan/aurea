@@ -186,24 +186,24 @@ AudioBlockCache::~AudioBlockCache() {
 }
 
 void AudioBlockCache::register_asset(u64 key, AudioAssetRef ref) {
-    {
-        // Caminho de sempre (o snapshot re-registra a cada edição): só o lock curto.
-        std::lock_guard<std::mutex> lock(mutex_);
-        auto it = assets_.find(key);
-        if (it != assets_.end() && it->second.path == ref.path) {
-            it->second.durationSamples = ref.durationSamples;
-            return;
-        }
-    }
+    (void)register_asset_revision(key, std::move(ref));
+}
+
+u64 AudioBlockCache::register_asset_revision(u64 key, AudioAssetRef ref) {
     std::lock_guard<std::mutex> lock(mutex_);
+    auto it = assets_.find(key);
+    if (it != assets_.end() && it->second.path == ref.path) {
+        it->second.durationSamples = ref.durationSamples;
+        return assetVersions_[key];
+    }
     assets_[key] = std::move(ref);
-    ++assetVersions_[key];
+    const u64 version = ++assetVersions_[key];
     failed_.erase(key);   // caminho novo: tenta já
     for (auto b = blocks_.begin(); b != blocks_.end();) {
         if (b->first.asset == key) b = blocks_.erase(b); else ++b;
     }
     // The decoder worker replaces its reader lazily. No decoder lock/join here.
-
+    return version;
 }
 
 bool AudioBlockCache::knows(u64 key) const {

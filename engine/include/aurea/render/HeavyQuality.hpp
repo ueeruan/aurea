@@ -147,7 +147,10 @@ inline void apply_scene3d_quality(HeavyQuality& q, Scene3DQuality tier) noexcept
     }
     switch (tier) {
         case Scene3DQuality::Auto: return;
-        case Scene3DQuality::Low: q.msaaSamples = 1; q.fxaa = true; q.bloomStartDiv = 2; q.bloomLevels = 6; return;
+        case Scene3DQuality::Low:
+            q.msaaSamples = 1; q.fxaa = true; q.bloomStartDiv = 2; q.bloomLevels = 6;
+            q.screenEffectDiv = 4; q.aoDirections = 2; q.aoSteps = 3;
+            return;
         case Scene3DQuality::Medium: q.msaaSamples = 2; q.fxaa = false; q.bloomStartDiv = 2; q.bloomLevels = 6; return;
         case Scene3DQuality::High: q.msaaSamples = 4; q.fxaa = false; q.bloomStartDiv = 2; q.bloomLevels = 6; return;
         case Scene3DQuality::Ultra: q.msaaSamples = 4; q.fxaa = false; q.bloomStartDiv = 1; q.bloomLevels = 7; return;

@@ -19,6 +19,10 @@
     <string name="om_vm_pixel">असली पिक्सेल</string>
     <string name="om_vm_grid">ग्रिड</string>
     <string name="om_vm_grid_spacing">ग्रिड की दूरी</string>
+    <string name="preview_grid_appearance">ग्रिड का स्वरूप</string>
+    <string name="preview_grid_blend">ग्रिड ब्लेंड मोड</string>
+    <string name="preview_grid_color">ग्रिड का रंग</string>
+    <string name="preview_grid_contrast">उच्च कंट्रास्ट</string>
     <string name="om_vm_solo">चुनी गई लेयर पर फ़ोकस</string>
     <string name="om_vm_solo_off">सामान्य</string>
     <string name="om_vm_solo_only">सिर्फ़ चुनी गई लेयर</string>

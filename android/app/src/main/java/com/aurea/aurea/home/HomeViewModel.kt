@@ -272,9 +272,12 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     internal fun createFromLibraryModel(store: EditorStore, id: String, name: String) {
         val request = ++mediaCreation
         val destination = store.projectGeneration
-        viewModelScope.launch {
-            if (openMediaProject(store, name, 1f, request, destination)) store.importLibraryModel(id, name)
+        val create: () -> Unit = {
+            viewModelScope.launch {
+                if (openMediaProject(store, name, 1f, request, destination)) store.importLibraryModel(id, name)
+            }
         }
+        if (store.whenEngineReady(create)) create()
     }
 
     private suspend fun openMediaProject(store: EditorStore, name: String, ratio: Float, request: Long, destination: Long): Boolean {

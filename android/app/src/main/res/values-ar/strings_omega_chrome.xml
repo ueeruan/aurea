@@ -19,6 +19,10 @@
     <string name="om_vm_pixel">البكسلات الفعلية</string>
     <string name="om_vm_grid">الشبكة</string>
     <string name="om_vm_grid_spacing">تباعد الشبكة</string>
+    <string name="preview_grid_appearance">مظهر الشبكة</string>
+    <string name="preview_grid_blend">وضع مزج الشبكة</string>
+    <string name="preview_grid_color">لون الشبكة</string>
+    <string name="preview_grid_contrast">تباين عالٍ</string>
     <string name="om_vm_solo">تمييز الطبقة المختارة</string>
     <string name="om_vm_solo_off">عادي</string>
     <string name="om_vm_solo_only">الطبقة المختارة فقط</string>

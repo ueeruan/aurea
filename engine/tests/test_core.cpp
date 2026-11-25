@@ -308,6 +308,26 @@ AUREA_TEST(CommandQueue, FullQueueRejectsWithoutBlocking) {
     AUREA_CHECK_EQ(q->dropped_count(), static_cast<u64>(1));
 }
 
+AUREA_TEST(CommandQueue, StringArenaCannotWrapOverAnUnreadCommand) {
+    auto q = std::make_unique<CommandQueue>();
+    char* reserved = q->alloc_string(CommandQueue::kStringBlobSize - 1);
+    AUREA_CHECK(reserved != nullptr);
+    if (!reserved) return;
+    std::memcpy(reserved, "texto", 5);
+    Command cmd;
+    cmd.type = CommandType::TextSetContent;
+    cmd.stringOffset = q->offset_of(reserved);
+    cmd.stringLength = 5;
+    AUREA_CHECK(q->push(cmd) != kInvalidIndex);
+    AUREA_CHECK(q->alloc_string(8) == nullptr);
+    AUREA_CHECK_EQ(q->drain([&](const Command& out) {
+        AUREA_CHECK_EQ(q->available(), 0u);
+        AUREA_CHECK(q->alloc_string(8) == nullptr);
+        AUREA_CHECK_EQ(std::strncmp(q->string_at(out.stringOffset, out.stringLength), "texto", 5), 0);
+    }), 1u);
+    AUREA_CHECK(q->alloc_string(8) == reserved);
+}
+
 AUREA_TEST(CommandQueue, DrainReturnsCount) {
     auto q = std::make_unique<CommandQueue>();
     for (u32 i = 0; i < 10; ++i) {

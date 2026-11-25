@@ -650,8 +650,11 @@ struct HomeView: View {
 
     /// P2-1: "Prévia leve" abre o editor com a prévia em 1/2.
     private func openProject(_ entry: HomeProjectEntry) {
-        model.open(entry.file)
-        if defaults.lightPreview { model.setPreviewScale(num: 1, den: 2, auto: false) }
+        Task { @MainActor in
+            if await model.open(entry.file), defaults.lightPreview {
+                model.setPreviewScale(num: 1, den: 2, auto: false)
+            }
+        }
     }
 
     /// A ficha (`.meta.json`) do projeto aberto, com os números que o MOTOR

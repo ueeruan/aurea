@@ -38,7 +38,8 @@ public:
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_camera_shake_frag, work));
     }
     enum : u32 { kAmplitudeX, kAmplitudeY, kFrequency, kSeed, kSeparate, kRotation, kSmoothing, kMix,
-                 kAmount, kZoom, kStyle, kBlur, kPhase, kEdges, kWave, kDirection, kDecay };
+                 kAmount, kZoom, kStyle, kBlur, kPhase, kEdges, kWave, kDirection, kDecay,
+                 kFreqX, kFreqY, kFreqRotation, kFreqZoom, kPhaseY, kStillness, kTwitchFreq, kDrift, kCenterBias };
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kShake, "Shake", "Distort", EffectClass::Domain};
         return i;
@@ -80,6 +81,15 @@ public:
         p.add_angle("direction", "Direção", 0);
         p.add_float("decay", "Decaimento", 0, 0, 10, kParamAnimatable, "1/s");
         p.typed_range(0, kShakeMaxDecay);
+        p.add_float("frequency_x", "Frequência horizontal relativa", 1, 0, 12);
+        p.add_float("frequency_y", "Frequência vertical relativa", 1, 0, 12);
+        p.add_float("frequency_rotation", "Frequência de rotação relativa", 1, 0, 12);
+        p.add_float("frequency_zoom", "Frequência de zoom relativa", 1, 0, 12);
+        p.add_float("phase_y", "Fase vertical", 0, -10000, 10000);
+        p.add_float("stillness", "Imobilidade", 70, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_float("twitch_frequency", "Frequência das rajadas", 0, 0, 60, kParamAnimatable, "Hz");
+        p.add_float("drift", "Deriva", 15, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_float("center_bias", "Retorno ao centro", 0, 0, 100, kParamAnimatable | kParamPercent, "%");
     }
     bool is_identity(const EffectEval& e) const noexcept override {
         return e.f(kMix) <= 0 || e.f(kAmount) <= 0 || e.f(kFrequency) <= 0
@@ -107,6 +117,16 @@ public:
         s.amount = std::clamp(finite_or(e.f(kAmount), 100) / 100.f, 0.f, kShakeMaxAmount);
         s.style = e.e(kStyle); s.phase = finite_or(e.f(kPhase), 0);
         s.wave = std::clamp(finite_or(e.f(kWave), 0) / 100.f, 0.f, 1.f);
+        const auto scalar = [&](u32 i, f32 fallback, f32 low, f32 high) {
+            return i < e.count ? std::clamp(finite_or(e.f(i), fallback), low, high) : fallback;
+        };
+        s.frequencyScale = {scalar(kFreqX, 1, 0, 12), scalar(kFreqY, 1, 0, 12),
+                            scalar(kFreqRotation, 1, 0, 12), scalar(kFreqZoom, 1, 0, 12)};
+        s.phaseY = scalar(kPhaseY, 0, -10000, 10000);
+        s.stillness = scalar(kStillness, 70, 0, 100) / 100.f;
+        s.twitchFrequency = scalar(kTwitchFreq, 0, 0, 60);
+        s.drift = scalar(kDrift, 15, 0, 100) / 100.f;
+        s.centerBias = scalar(kCenterBias, 0, 0, 100) / 100.f;
         const f64 fps = e.framesPerSecond > 0 ? e.framesPerSecond : 30.0;
         const f64 seconds = e.time_frames() / fps;
         const f32 blur = std::clamp(finite_or(e.f(kBlur), 0) / 100.f, 0.f, kShakeMaxShutter);

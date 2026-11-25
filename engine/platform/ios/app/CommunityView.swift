@@ -19,10 +19,11 @@ private struct SocialAsset: Codable, Identifiable { var id: String; var kind: St
 private struct SocialPost: Codable, Identifiable {
     var id: String; var body: String; var createdAt: Double; var author: SocialProfile
     var asset: SocialAsset?; var likes: Int; var comments: Int; var liked: Bool
+    var category: String?
 }
 private struct SocialComment: Codable, Identifiable { var id: String; var body: String; var createdAt: Double; var author: SocialProfile }
 private struct SocialPage<T: Decodable>: Decodable { var items: [T]; var cursor: String? }
-private struct SocialAccount: Decodable { var profile: SocialProfile; var canVerify: Bool? }
+private struct SocialAccount: Decodable { var profile: SocialProfile; var canVerify: Bool?; var feedFilters: Bool? }
 private struct SocialLike: Decodable { var likes: Int; var liked: Bool }
 private struct SocialDone: Decodable { var id: String?; var ok: Bool? }
 private struct SocialFailure: Error {
@@ -81,6 +82,63 @@ private actor SocialAPI {
     }
 }
 
+private enum SocialFeedTab: CaseIterable, Hashable {
+    case all, following, official
+    var title: String {
+        switch self {
+        case .all: return AureaText.t("social_all")
+        case .following: return AureaText.t("social_following")
+        case .official: return AureaText.t("social_official_tab")
+        }
+    }
+}
+
+private struct SocialChoice<Value: Hashable>: View {
+    let label: String
+    let options: [Value]
+    let title: (Value) -> String
+    @Binding var selection: Value
+    var body: some View {
+        Menu {
+            Picker(label, selection: $selection) {
+                ForEach(options, id: \.self) { option in Text(title(option)).tag(option) }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(title(selection)).lineLimit(1)
+                Image(systemName: "chevron.down").font(.caption)
+            }.frame(minHeight: 44)
+        }
+        .accessibilityLabel(label)
+        .accessibilityValue(title(selection))
+    }
+}
+
+private enum SocialFeedSort: String, CaseIterable {
+    case newest, popular, oldest
+    var title: String {
+        switch self {
+        case .newest: return AureaText.t("social_sort_newest")
+        case .popular: return AureaText.t("social_sort_popular")
+        case .oldest: return AureaText.t("social_sort_oldest")
+        }
+    }
+}
+
+private enum SocialCategory: String, CaseIterable {
+    case all, text, showcase, project, preset, announcement
+    var title: String {
+        switch self {
+        case .all: return AureaText.t("social_all_categories")
+        case .text: return AureaText.t("social_category_text")
+        case .showcase: return AureaText.t("social_category_showcase")
+        case .project: return AureaText.t("social_category_project")
+        case .preset: return AureaText.t("social_category_preset")
+        case .announcement: return AureaText.t("social_category_announcement")
+        }
+    }
+}
+
 @MainActor
 private final class SocialState: ObservableObject {
     @Published var me: SocialProfile?
@@ -88,7 +146,10 @@ private final class SocialState: ObservableObject {
     @Published var canVerify = false
     @Published var feed: [SocialPost] = []
     @Published var cursor: String?
-    @Published var following = false
+    @Published var feedTab: SocialFeedTab = .all
+    @Published var feedSort: SocialFeedSort = .newest
+    @Published var feedCategory: SocialCategory = .all
+    @Published var feedFilters = false
     @Published var busy = false
     @Published var error: String?
     /// Omega home: sem rede (URLError de conexão) = o estado sem rede da referência.
@@ -108,8 +169,10 @@ private final class SocialState: ObservableObject {
     }
     /// Puxar para atualizar (`.refreshable`): espera o trabalho terminar.
     func pullRefresh() async {
+        guard !busy else { return }
         let request = generation
-        error = nil
+        busy = true; error = nil
+        defer { if generation == request { busy = false } }
         do { try await refresh(); if generation == request { offline = false } }
         catch { if !Task.isCancelled && generation == request { fail(error) } }
     }
@@ -125,7 +188,9 @@ private final class SocialState: ObservableObject {
     }
     func start(_ session: ContaSessao?, own: Bool) async {
         let request = UUID(); generation = request
-        api = SocialAPI(token: session?.token ?? ""); ownMode = own; profile = nil; feed = []; busy = true; error = nil
+        api = SocialAPI(token: session?.token ?? ""); ownMode = own; profile = nil; me = nil
+        feed = []; cursor = nil; feedTab = .all; feedSort = .newest; feedCategory = .all; feedFilters = false
+        busy = true; error = nil
         defer { if generation == request { busy = false } }
         do { try await refresh(); offline = false } catch { if !Task.isCancelled && generation == request { fail(error) } }
     }
@@ -133,24 +198,36 @@ private final class SocialState: ObservableObject {
         let request = generation
         let account = try await api.call("/me", as: SocialAccount.self)
         try requireCurrent(request)
-        me = account.profile; canVerify = account.canVerify == true
+        me = account.profile; canVerify = account.canVerify == true; feedFilters = account.feedFilters == true
+        if !feedFilters && feedTab == .official { feedTab = .all }
         if (ownMode && profile == nil) || profile?.id == me?.id { profile = me }
         try await loadFeed()
     }
     func loadFeed(more: Bool = false) async throws {
         let request = generation
-        let suffix = "?following=\(following && profile == nil ? 1 : 0)" + (profile.map { "&user=\($0.id)" } ?? "") + (more ? cursor.map { "&cursor=\(SocialAPI.query($0))" } ?? "" : "")
+        var suffix = "?following=\(feedTab == .following && profile == nil ? 1 : 0)"
+        if let profile { suffix += "&user=\(profile.id)" }
+        if feedFilters && profile == nil {
+            suffix += "&sort=\(feedSort.rawValue)"
+            let category = feedTab == .official ? .announcement : feedCategory
+            if category != .all { suffix += "&category=\(category.rawValue)" }
+        }
+        if more, let cursor { suffix += "&cursor=\(SocialAPI.query(cursor))" }
         let result = try await api.call("/posts\(suffix)", as: SocialPage<SocialPost>.self)
         try requireCurrent(request)
         feed = more ? feed + result.items.filter { item in !feed.contains { $0.id == item.id } } : result.items
         cursor = result.cursor
+    }
+    func resetFeed() async throws {
+        feed = []; cursor = nil
+        try await loadFeed()
     }
     func open(_ id: String) async throws {
         let request = generation
         let result = try await api.call("/profiles/\(id)", as: SocialAccount.self).profile
         try requireCurrent(request)
         profile = result
-        try await loadFeed()
+        try await resetFeed()
     }
     func follow(_ p: SocialProfile) async throws {
         let request = generation
@@ -225,7 +302,7 @@ struct CommunityView: View {
         VStack(spacing: 0) {
             HStack {
                 if state.profile != nil && (!profileMode || state.profile?.id != state.me?.id) {
-                    Button { state.run { state.profile = profileMode ? state.me : nil; try await state.loadFeed() } } label: { Image(systemName: "chevron.left").fontWeight(AureaIconWeight.symbol).mirrorsInRtl().frame(width: 44, height: 44) }.accessibilityLabel(AureaText.t("common_back"))
+                    Button { state.run { state.profile = profileMode ? state.me : nil; try await state.resetFeed() } } label: { Image(systemName: "chevron.left").fontWeight(AureaIconWeight.symbol).mirrorsInRtl().frame(width: 44, height: 44) }.accessibilityLabel(AureaText.t("common_back"))
                 }
                 Text(AureaText.t(state.profile == nil ? "social_community" : "social_profile")).font(.aurea(size: 21, weight: .bold))
                     .foregroundStyle(AureaColors.lightText)
@@ -246,7 +323,7 @@ struct CommunityView: View {
                 }
                 .refreshable { await state.pullRefresh() }
                 .accessibilityIdentifier("home.feed.offline")
-            } else if state.busy && state.feed.isEmpty {
+            } else if state.busy && state.feed.isEmpty && state.me == nil {
                 Spacer()
                 ProgressView().tint(AureaColors.lightAccentInk).accessibilityIdentifier("home.feed.loading")
                 Spacer()
@@ -255,13 +332,22 @@ struct CommunityView: View {
                 LazyVStack(spacing: 12) {
                     if let profile = state.profile { profileHeader(profile) }
                     else { feedHeader }
-                    if state.profile == nil || state.profile?.id == state.me?.id {
+                    if (state.profile == nil || state.profile?.id == state.me?.id) && (!officialFeed || state.canVerify) {
                         Button { if state.me?.username.isEmpty != false { editing = true } else { composing = true } } label: {
-                            Text(AureaText.t("social_create_post")).frame(maxWidth: .infinity, minHeight: 48)
+                            Text(AureaText.t(officialFeed ? "social_create_announcement" : "social_create_post"))
+                                .frame(maxWidth: .infinity, minHeight: 48)
                         }.buttonStyle(.borderedProminent).tint(AureaColors.accent).foregroundStyle(AureaColors.onAccent)
                             .disabled(state.me == nil || state.busy).accessibilityIdentifier("social.compose")
                     }
-                    if state.feed.isEmpty && !state.busy { Text(AureaText.t("social_empty")).foregroundStyle(AureaColors.lightTextMuted).padding(.vertical, 24) }
+                    if state.feed.isEmpty {
+                        if state.busy {
+                            ProgressView().tint(AureaColors.lightAccentInk).padding(.vertical, 24)
+                                .accessibilityIdentifier("home.feed.loading")
+                        } else if state.error == nil {
+                            Text(AureaText.t(officialFeed ? "social_empty_announcements" : "social_empty"))
+                                .foregroundStyle(AureaColors.lightTextMuted).padding(.vertical, 24)
+                        }
+                    }
                     ForEach(state.feed) { post in postCard(post) }
                     if state.cursor != nil { Button(AureaText.t("social_more")) { state.run { try await state.loadFeed(more: true) } }.frame(minHeight: 44).disabled(state.busy) }
                 }.padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 69)
@@ -285,7 +371,13 @@ struct CommunityView: View {
             .sheet(isPresented: $editing) {
                 if let me = state.me { SocialEditProfile(profile: me, api: state.api) { p in state.me = p; if profileMode || state.profile?.id == p.id { state.profile = p }; editing = false } }
             }
-            .sheet(isPresented: $composing) { SocialCompose(api: state.api) { composing = false; state.run { try await state.refresh() } }.environmentObject(model) }
+            .sheet(isPresented: $composing) {
+                SocialCompose(api: state.api, feedFilters: state.feedFilters, canAnnounce: state.canVerify,
+                              initialCategory: officialFeed ? .announcement : (
+                                state.profile == nil && state.feedCategory == .showcase ? .showcase : .all)) {
+                    composing = false; state.run { try await state.refresh() }
+                }.environmentObject(model)
+            }
             .sheet(item: $comments, onDismiss: { state.run { try await state.loadFeed() } }) { post in
                 SocialComments(post: post, ownID: state.me?.id, api: state.api) { id in comments = nil; state.run { try await state.open(id) } }
             }
@@ -310,26 +402,55 @@ struct CommunityView: View {
                 Button(AureaText.t("editor_fechar"), role: .cancel) { deleting = nil }
             }
     }
+    private var officialFeed: Bool { state.profile == nil && state.feedTab == .official }
+
     private var feedHeader: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(AureaText.t("social_intro")).font(.subheadline).foregroundStyle(AureaColors.lightTextMuted)
             TextField(AureaText.t("social_search"), text: $search).textInputAutocapitalization(.never).autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder).accessibilityIdentifier("social.search")
             ForEach(results) { p in Button { search = ""; state.run { try await state.open(p.id) } } label: { SocialAuthor(profile: p) }.buttonStyle(.plain).disabled(state.busy) }
-            HStack {
-                Button(AureaText.t("social_all")) { state.run { state.following = false; try await state.loadFeed() } }
-                    .fontWeight(state.following ? .regular : .bold).frame(minHeight: 44)
-                Button(AureaText.t("social_following")) { state.run { state.following = true; try await state.loadFeed() } }
-                    .fontWeight(state.following ? .bold : .regular).frame(minHeight: 44)
-                Spacer()
-                Button(AureaText.t("pn_caption")) { legacy = true }.lineLimit(1).frame(minHeight: 44)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(SocialFeedTab.allCases.filter { state.feedFilters || $0 != .official }, id: \.self) { tab in
+                        Button {
+                            guard state.feedTab != tab else { return }
+                            state.run { state.feedTab = tab; try await state.resetFeed() }
+                        } label: {
+                            Text(tab.title).fontWeight(state.feedTab == tab ? .bold : .regular).frame(minHeight: 36)
+                        }.buttonStyle(.bordered)
+                            .accessibilityAddTraits(state.feedTab == tab ? .isSelected : [])
+                            .accessibilityIdentifier("social.tab.\(tab)")
+                    }
+                }
             }.disabled(state.busy)
+            if state.feedFilters {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 16) {
+                        SocialChoice(label: AureaText.t("social_sort"), options: SocialFeedSort.allCases, title: { $0.title },
+                                     selection: Binding(get: { state.feedSort }, set: { value in
+                            guard state.feedSort != value else { return }
+                            state.run { state.feedSort = value; try await state.resetFeed() }
+                        })).accessibilityIdentifier("social.sort")
+                        if !officialFeed {
+                            SocialChoice(label: AureaText.t("social_filter"), options: SocialCategory.allCases.filter { $0 != .announcement },
+                                         title: { $0.title }, selection: Binding(get: { state.feedCategory }, set: { value in
+                                guard state.feedCategory != value else { return }
+                                state.run { state.feedCategory = value; try await state.resetFeed() }
+                            })).accessibilityIdentifier("social.category")
+                        }
+                    }
+                }.disabled(state.busy)
+            }
             // 0.4.6: a Loja da Comunidade (plugins, efeitos e presets). Par do Android.
             // Enquanto o armazenamento (R2) não está ativo no servidor: "Em breve".
             // Beta (nov/2026): na linha dos filtros o nome quebrava no meio; agora tem a linha dele.
-            Button(AureaText.t("store_title") + (storeReady ? "" : " · " + AureaText.t("store_soon"))) {
-                if storeReady { storeOpen = true } else { storeSoon = true }
-            }.lineLimit(1).truncationMode(.tail).frame(minHeight: 44).accessibilityIdentifier("social.store").disabled(state.busy)
+            if !officialFeed {
+                Button(AureaText.t("store_title") + (storeReady ? "" : " · " + AureaText.t("store_soon"))) {
+                    if storeReady { storeOpen = true } else { storeSoon = true }
+                }.lineLimit(1).truncationMode(.tail).frame(minHeight: 44).accessibilityIdentifier("social.store").disabled(state.busy)
+                Button(AureaText.t("pn_caption")) { legacy = true }.lineLimit(1).frame(minHeight: 44)
+            }
         }
     }
     private func profileHeader(_ p: SocialProfile) -> some View {
@@ -350,6 +471,9 @@ struct CommunityView: View {
     private func postCard(_ post: SocialPost) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Button { state.run { try await state.open(post.author.id) } } label: { SocialAuthor(profile: post.author) }.buttonStyle(.plain)
+            if let category = post.category.flatMap(SocialCategory.init(rawValue:)), category != .text && category != .all {
+                Text(category.title).font(.caption).foregroundStyle(AureaColors.lightAccentInk)
+            }
             Text(Date(timeIntervalSince1970: post.createdAt / 1000), style: .relative).font(.caption).foregroundStyle(AureaColors.lightTextMuted)
             if !post.body.isEmpty { Text(post.body).textSelection(.enabled) }
             if let a = post.asset {
@@ -455,6 +579,8 @@ private struct SocialCompose: View {
     @EnvironmentObject private var model: AureaModel
     @Environment(\.dismiss) private var dismiss
     let api: SocialAPI
+    let feedFilters: Bool
+    let canAnnounce: Bool
     let posted: () -> Void
     @State private var bodyText = ""
     @State private var attachment: URL?
@@ -465,9 +591,26 @@ private struct SocialCompose: View {
     @State private var temporary: [URL] = []
     @State private var busy = false
     @State private var error: String?
+    @State private var category: SocialCategory
+
+    init(api: SocialAPI, feedFilters: Bool, canAnnounce: Bool, initialCategory: SocialCategory, posted: @escaping () -> Void) {
+        self.api = api
+        self.feedFilters = feedFilters
+        self.canAnnounce = canAnnounce
+        self.posted = posted
+        _category = State(initialValue: initialCategory)
+    }
+
     var body: some View {
         NavigationStack {
             Form {
+                if feedFilters {
+                    Picker(AureaText.t("social_post_type"), selection: $category) {
+                        Text(AureaText.t("social_standard_post")).tag(SocialCategory.all)
+                        Text(SocialCategory.showcase.title).tag(SocialCategory.showcase)
+                        if canAnnounce { Text(SocialCategory.announcement.title).tag(SocialCategory.announcement) }
+                    }.disabled(busy).accessibilityIdentifier("social.post.category")
+                }
                 TextField(AureaText.t("social_post_hint"), text: $bodyText, axis: .vertical).lineLimit(3...8).accessibilityIdentifier("social.post.body")
                 HStack {
                     Button(AureaText.t("social_attach_preset")) { presets = PanelPresetEntry.loadAll().filter { $0.textPreset == nil }; picker = "preset" }.buttonStyle(.borderless)
@@ -521,7 +664,9 @@ private struct SocialCompose: View {
             do {
                 var asset: String?
                 if let attachment { asset = try await api.upload(attachment, kind: kind).id }
-                _ = try await api.call("/posts", method: "POST", body: ["body": bodyText, "asset": asset as Any? ?? NSNull()], as: SocialDone.self)
+                var post: [String: Any] = ["body": bodyText, "asset": asset as Any? ?? NSNull()]
+                if feedFilters && category != .all { post["category"] = category.rawValue }
+                _ = try await api.call("/posts", method: "POST", body: post, as: SocialDone.self)
                 for file in temporary { try? FileManager.default.removeItem(at: file) }; temporary = []; posted()
             } catch { self.error = (error as? SocialFailure)?.message ?? AureaText.t("social_error") }
         }

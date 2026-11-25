@@ -1,17 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 16/11/2026: assinaturas mensais (hyper/Paywall.kt, AureaSubscriptions.swift; docs/release/assinaturas.md). -->
+    <!-- 16/11/2026: assinaturas; 1.0.9: AureaHyper semanal, mensal e anual (hyper/Paywall.kt, AureaSubscriptions.swift; docs/release/assinaturas.md). -->
     <string name="assinatura_badge">Paid feature</string>
-    <string name="assinatura_intro_efeito">This effect is part of AureaHyper. Subscribe to AureaHyper once a year to unlock every paid effect, 3D Text and the Hyper tools.</string>
-    <string name="assinatura_intro_texto3d">3D Text is part of AureaHyper. Subscribe to AureaHyper once a year to also unlock every paid effect and the Hyper tools.</string>
+    <string name="assinatura_intro_efeito">This effect is part of AureaHyper. Subscribe to AureaHyper (weekly, monthly or yearly) to unlock every paid effect, 3D Text and the Hyper tools.</string>
+    <string name="assinatura_intro_texto3d">3D Text is part of AureaHyper. Subscribe to AureaHyper (weekly, monthly or yearly) to also unlock every paid effect and the Hyper tools.</string>
     <string name="assinatura_intro_hyper">AureaHyper unlocks every paid effect, 3D Text and the Hyper tools.</string>
     <string name="assinatura_so_efeito">Subscribe to this effect only</string>
     <string name="assinatura_so_texto3d">Subscribe to 3D Text only</string>
+    <string name="assinatura_escolha_plano">Choose your AureaHyper plan. Every plan unlocks everything.</string>
+    <string name="assinatura_plano_semanal">Weekly</string>
+    <string name="assinatura_plano_mensal">Monthly</string>
+    <string name="assinatura_plano_anual">Annual</string>
+    <string name="assinatura_por_semana">%1$s/week</string>
+    <string name="assinatura_melhor_valor">Best value</string>
+    <string name="assinatura_economize">Save %1$d%%</string>
     <string name="assinatura_por_mes">%1$s/month</string>
     <string name="assinatura_por_ano">%1$s/year</string>
     <string name="assinatura_libera_tudo">unlocks everything</string>
     <string name="assinatura_restaurar">Restore purchases</string>
-    <string name="assinatura_renovacao">Renews automatically once a year until you cancel. Cancel anytime in %1$s.</string>
+    <string name="assinatura_renovacao">Renews automatically at the end of each period (week, month or year) until you cancel. Cancel anytime in %1$s.</string>
     <string name="assinatura_entrar">Sign in to your Aurea account to subscribe. The subscription is tied to the account.</string>
     <string name="assinatura_em_breve">Subscriptions are not available yet. Nothing is charged here.</string>
     <string name="assinatura_obrigado">Subscription active. You can use it now.</string>

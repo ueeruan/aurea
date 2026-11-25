@@ -2048,7 +2048,7 @@ public:
     /// Guias da prévia (o Grid/Safe/Rulers do visor do AE), só na tela: bit 0
     /// grade, bit 1 margens de ação/título, bit 2 réguas. `gridSpacing` em px
     /// da composição (≤ 0 = 100). Não é gravado no projeto.
-    void set_preview_guides(u32 flags, f32 gridSpacing) noexcept;
+    void set_preview_guides(u32 flags, f32 gridSpacing, u32 gridRgb = 0xFFFFFF, u32 gridBlend = 0) noexcept;
     [[nodiscard]] u32 preview_guides() noexcept;
     /// Solo: com alguma camada em solo, o preview (e o áudio) só tocam as em solo.
     bool set_layer_solo(u64 layerId, bool on) noexcept;
@@ -2220,7 +2220,7 @@ public:
     // --- Ambiente 3D (HDRI) ------------------------------------------------------
     /// HDRI Radiance (.hdr) do arquivo local: ilumina e reflete nos modelos 3D
     /// da composição atual. Devolve o asset.
-    [[nodiscard]] Result<u64> import_hdri(const char* path, u64 objectLayer = 0) noexcept;
+    [[nodiscard]] Result<u64> import_hdri(const char* path, u64 objectLayer = 0, bool showAsBackground = false) noexcept;
     /// Volta ao estúdio neutro.
     bool clear_hdri() noexcept;
     /// Intensidade (≥ 0) e giro (graus) do ambiente.
@@ -3925,6 +3925,8 @@ private:
     bool omegaPixelPreview_ = false;
     u32 previewGuides_ = 0;              ///< set_preview_guides (EngineAeLayers.cpp)
     f32 previewGridSpacing_ = 100.0f;
+    u32 previewGridRgb_ = 0xFFFFFF;
+    PreviewGridBlend previewGridBlend_ = PreviewGridBlend::Normal;
     std::vector<u64> omegaViewIds_;      ///< ids empacotados, ordenados
     void apply_omega_view_locked(RenderSettings& rs) const noexcept;
     std::unordered_map<u64, std::shared_ptr<const scene3d::HdriPixels>> hdris_;

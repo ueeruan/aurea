@@ -18,7 +18,7 @@ internal data class CommunityProfile(val id: String, val username: String, val n
     val posts: Int = 0, val followed: Boolean = false, val blocked: Boolean = false)
 internal data class CommunityAsset(val id: String, val kind: String, val name: String, val bytes: Long)
 internal data class CommunityPost(val id: String, val body: String, val createdAt: Long, val author: CommunityProfile,
-    val asset: CommunityAsset?, val likes: Int, val comments: Int, val liked: Boolean)
+    val asset: CommunityAsset?, val likes: Int, val comments: Int, val liked: Boolean, val category: String = "")
 internal data class CommunityComment(val id: String, val body: String, val createdAt: Long, val author: CommunityProfile)
 internal class CommunityFailure(val code: String) : IOException(code)
 internal fun JSONObject.profile() = CommunityProfile(getString("id"), optString("username"), optString("name"),
@@ -26,7 +26,8 @@ internal fun JSONObject.profile() = CommunityProfile(getString("id"), optString(
     optInt("followers"), optInt("following"), optInt("posts"), optBoolean("followed"), optBoolean("blocked"))
 internal fun JSONObject.asset() = CommunityAsset(getString("id"), getString("kind"), getString("name"), getLong("bytes"))
 internal fun JSONObject.post() = CommunityPost(getString("id"), optString("body"), getLong("createdAt"),
-    getJSONObject("author").profile(), optJSONObject("asset")?.asset(), optInt("likes"), optInt("comments"), optBoolean("liked"))
+    getJSONObject("author").profile(), optJSONObject("asset")?.asset(), optInt("likes"), optInt("comments"),
+    optBoolean("liked"), optString("category"))
 /** Item da Loja da Comunidade. `type`: plugin, effect ou preset; `format`: plugin ou preset. */
 internal data class StoreItem(val id: String, val type: String, val format: String, val name: String, val description: String,
     val tutorialUrl: String, val photos: Int, val pluginId: String?, val version: String, val presetKind: String?,

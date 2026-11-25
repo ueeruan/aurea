@@ -72,14 +72,22 @@ private val AeDesktopOnlyEffects = setOf(
     effectTypeId("aurea.control.dropdown"), effectTypeId("aurea.control.layer"), effectTypeId("aurea.control.point3d"),
 )
 
+private val HiddenCatalogEffects = setOf(
+    effectTypeId("aurea.motion.oscillate"), effectTypeId("aurea.layout.grid_builder"),
+    effectTypeId("aurea.layout.grid_item"), effectTypeId("aurea.light.scene_flare"),
+)
+
 /** O que o catálogo oferece para ESTA camada: sem som, some o que só mexe no som. */
-fun pickableEffects(catalog: List<EffectCatalogEntry>, layerHasAudio: Boolean, layerKind: Int = 0): List<EffectCatalogEntry> =
+fun pickableEffects(
+    catalog: List<EffectCatalogEntry>, layerHasAudio: Boolean, layerKind: Int = 0,
+    textModel: Boolean? = null, shapeModel: Boolean? = null,
+): List<EffectCatalogEntry> =
     catalog.filter {
-        it.typeId !in setOf(effectTypeId("aurea.motion.oscillate"), effectTypeId("aurea.layout.grid_builder"), effectTypeId("aurea.layout.grid_item"), effectTypeId("aurea.light.scene_flare")) &&
+        it.typeId !in HiddenCatalogEffects &&
             (layerHasAudio || !isAudioCategory(it.category) || makesSound(it)) &&
             (layerKind != 12 || !PluginTexts.isAudio(it.typeId)) &&
             (com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe || it.typeId !in AeDesktopOnlyEffects) &&
-            (it.typeId != effectTypeId("aurea.generate.raster_extrude") || layerKind in setOf(1, 2, 4, 5, 12))
+            it.supportsLayer(layerKind, textModel, shapeModel)
     }
 
 // --- Ferramentas que moram no catálogo de efeitos ------------------------------

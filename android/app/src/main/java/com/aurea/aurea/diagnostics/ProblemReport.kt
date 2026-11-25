@@ -44,6 +44,7 @@ object ProblemReport {
 
     private const val PREFS = "aurea_problem_report"
     private const val KEY_LAST_EXPORT = "last_export"
+    private const val KEY_SLOW_ENGINE_START = "slow_engine_start"
     private const val LAST_EXPORT_MAX = 600
 
     /**
@@ -60,6 +61,21 @@ object ProblemReport {
 
     fun lastExport(context: Context): String? =
         runCatching { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_LAST_EXPORT, null) }.getOrNull()
+
+    // Included only if the user sends a report. Keep the last slow start
+    // available even after reopening the app to report it.
+    fun noteSlowEngineStart(context: Context, elapsedMs: Long, ready: Boolean?) {
+        val outcome = when (ready) {
+            null -> "pending"
+            true -> "ready"
+            false -> "failed"
+        }
+        runCatching {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(KEY_SLOW_ENGINE_START, "build=${BuildConfig.VERSION_CODE} elapsed_ms=$elapsedMs status=$outcome")
+                .apply()
+        }
+    }
 
     /** Caminhos de arquivo saem do diagnóstico (nada de mídia ou pasta no relato). */
     fun sanitize(text: String): String = text.replace(Regex("""(/[^\s/]+){2,}/?"""), "<arquivo>")
@@ -86,8 +102,12 @@ object ProblemReport {
     /** Envia (IO). A sessão, quando há, dá ao relato o e-mail da conta. */
     fun send(context: Context, sessao: SessaoGuardada?, whatDid: String, whatHappened: String, steps: String): Result {
         val diagnostic = ExportDiagnosticReport.last(context)
+        val startup = runCatching {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_SLOW_ENGINE_START, null)
+        }.getOrNull()
+        val prefix = startup?.let { "[engine-startup] $it\n\n" }.orEmpty()
         val corpo = body(CrashReporter.installationId(context), whatDid, whatHappened,
-            stepsWithExportDiagnostics(steps, lastExport(context), diagnostic))
+            stepsWithExportDiagnostics(prefix + steps, lastExport(context), diagnostic))
         if (sessao != null) corpo.put("email", sessao.email)
         val r = ContaApi.relatar(corpo, sessao?.token)
         return when {

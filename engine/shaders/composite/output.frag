@@ -30,6 +30,7 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     // de ação/título, 4 réguas), y = passo da grade (px da composição),
     // zw = tamanho da composição (px).
     vec4 guides;
+    vec4 gridStyle;   // rgb = cor codificada; w = Normal, Difference, High Contrast
 } p;
 
 layout(location = 0) in vec2 v_uv;
@@ -70,7 +71,17 @@ float guide_box(vec2 q, vec2 size, float k, vec2 px) {
     return a;
 }
 
-// As guias do AE por cima da imagem já codificada: grade, margens de ação
+vec3 grid_ink(vec3 backdrop, vec3 ink, uint mode) {
+    if (mode == 1u) return abs(backdrop - ink);
+    if (mode == 2u) {
+        vec3 linear = srgb_to_linear(clamp(backdrop, 0.0, 1.0));
+        float luma = dot(linear, vec3(0.2126, 0.7152, 0.0722));
+        return vec3(luma >= 0.179 ? 0.0 : 1.0);
+    }
+    return ink;
+}
+
+// As guias por cima da imagem já codificada: grade, margens de ação
 // (90 %) e título (80 %) com a cruz do centro, e réguas no topo e à esquerda.
 vec3 draw_guides(vec3 enc) {
     const uint bits = uint(p.guides.x + 0.5);
@@ -78,6 +89,8 @@ vec3 draw_guides(vec3 enc) {
     const vec2 size = max(p.guides.zw, vec2(1.0));
     const vec2 q = v_uv * size;
     const vec2 px = max(fwidth(q), vec2(1e-4));
+    const uint gridMode = uint(p.gridStyle.w + 0.5);
+    const vec3 backdrop = enc;
     if ((bits & 1u) != 0u) {
         // A partir do CENTRO da composição (a grade da coluna de modos de sempre).
         const float gstep = max(p.guides.y, 4.0);
@@ -87,8 +100,12 @@ vec3 draw_guides(vec3 enc) {
         const float minorA = max(guide_line(m.x, px.x), guide_line(m.y, px.y));
         const float majorA = max(guide_line(major.x, px.x), guide_line(major.y, px.y));
         // Passo menor que ~4 px da tela: só as linhas maiores (sem virar um borrão).
-        const float minorK = gstep / max(px.x, px.y) >= 4.0 ? 0.28 : 0.0;
-        enc = mix(enc, vec3(0.62, 0.66, 0.72), max(minorA * minorK, majorA * 0.5));
+        const bool highVisibility = gridMode != 0u;
+        const float pxStep = gstep / max(px.x, px.y);
+        const float minorK = pxStep >= 4.0 ? (highVisibility ? 0.8 : 0.35) : 0.0;
+        const float majorK = pxStep * 5.0 >= 4.0 ? (highVisibility ? 1.0 : 0.55) : 0.0;
+        const float gridA = max(minorA * minorK, majorA * majorK);
+        if (gridA > 0.0) enc = mix(enc, grid_ink(backdrop, p.gridStyle.rgb, gridMode), gridA);
     }
     if ((bits & 3u) != 0u) {
         // Margens de ação (90 %) e de título (80 %) só com o bit 1; a cruz do
@@ -99,7 +116,11 @@ vec3 draw_guides(vec3 enc) {
         float crossA = 0.0;
         if (abs(c.y) <= arm) crossA = max(crossA, guide_line(c.x, px.x));
         if (abs(c.x) <= arm) crossA = max(crossA, guide_line(c.y, px.y));
-        enc = mix(enc, vec3(0.92), max(a, crossA) * 0.75);
+        enc = mix(enc, vec3(0.92), a * 0.75);
+        if (crossA > 0.0) {
+            if ((bits & 1u) != 0u) enc = mix(enc, grid_ink(backdrop, p.gridStyle.rgb, gridMode), crossA * 0.85);
+            else enc = mix(enc, vec3(0.92), crossA * 0.75);
+        }
     }
     if ((bits & 4u) != 0u) {
         // Faixa de 16 px da tela; marcas a cada passo redondo de ≥ 6 px da tela.

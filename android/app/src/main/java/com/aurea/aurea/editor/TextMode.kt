@@ -1,6 +1,7 @@
 package com.aurea.aurea.editor
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -449,11 +451,10 @@ private fun ColorPopup(store: EditorStore) {
 }
 
 /**
- * O PAINEL GRANDE do modo de texto: fundo do painel de edição e a faixa de
- * entrada de 60 dp no topo (sobe acima do teclado se ele cobrir a faixa).
+ * Entrada do modo de texto. No tablet, a faixa flutua acima do teclado.
  */
 @Composable
-internal fun TextEditPanel(store: EditorStore, modifier: Modifier) {
+internal fun TextEditPanel(store: EditorStore, modifier: Modifier, floating: Boolean = false) {
     val id = store.textEditLayer ?: return
     val initial = remember(id) { store.text3d?.content ?: store.textDetail?.content ?: "" }
     var field by remember(id) {
@@ -476,45 +477,47 @@ internal fun TextEditPanel(store: EditorStore, modifier: Modifier) {
     DisposableEffect(id) { onDispose { keyboard?.hide() } }
     val alignment = store.text3d?.alignment ?: store.textDetail?.alignment ?: 0
     val hint = stringResource(R.string.om_txm_hint)
-    BoxWithConstraints(modifier.background(AureaColors.ContentEditPanel).testTag("text.edit.mode")) {
+    BoxWithConstraints(if (floating) modifier else modifier.background(AureaColors.ContentEditPanel).testTag("text.edit.mode")) {
         val density = LocalDensity.current
         val covered = (WindowInsets.ime.getBottom(density) - WindowInsets.navigationBars.getBottom(density)).coerceAtLeast(0)
         val strip = with(density) { 60.dp.roundToPx() }
-        val top = if (constraints.maxHeight - covered >= strip) 0 else constraints.maxHeight - covered - strip
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(60.dp)
-                .offset { IntOffset(0, top) }
-                .background(AureaColors.ContentInputStrip)
-                .padding(4.dp),
-        ) {
-            BasicTextField(
-                value = field,
-                onValueChange = { v ->
-                    val changed = v.text != field.text
-                    field = v
-                    TextModeState.draftBlank = store.text3d != null && v.text.isBlank()
-                    if (changed) store.typeText(v.text)
-                },
-                textStyle = AureaType.Base.merge(TextStyle(fontSize = 18.sp, color = AureaColors.Text, textAlign = when (alignment) {
-                    1 -> TextAlign.Center
-                    2 -> TextAlign.End
-                    else -> TextAlign.Start
-                })),
-                cursorBrush = SolidColor(AureaColors.Accent),
-                modifier = Modifier.fillMaxSize().focusRequester(focus).testTag("text.edit.input").semantics { contentDescription = hint },
-                decorationBox = { inner ->
-                    Box(Modifier.fillMaxSize().padding(horizontal = 8.dp), contentAlignment = Alignment.CenterStart) {
-                        if (field.text.isEmpty()) Text(hint, Modifier.alpha(1f), style = AureaType.of(18f, color = AureaColors.ContentHint))
-                        inner()
-                    }
-                },
-            )
-        }
-        if (store.text3d != null && field.text.isBlank()) {
-            Text(stringResource(R.string.text_content_3d_required), Modifier.offset { IntOffset(0, top + strip) }.padding(12.dp),
-                style = AureaType.of(12.5f, color = AureaColors.Muted))
+        val top = (constraints.maxHeight - covered - strip).coerceAtMost(0)
+        val placement = if (floating) {
+            val shape = RoundedCornerShape(16.dp)
+            Modifier.align(Alignment.BottomCenter).offset { IntOffset(0, -covered) }.padding(16.dp)
+                .widthIn(max = 560.dp).fillMaxWidth().clip(shape)
+                .background(AureaColors.ContentEditPanel).border(1.dp, AureaColors.ContentStrongLine, shape)
+                .testTag("text.edit.mode")
+        } else Modifier.align(Alignment.TopCenter).offset { IntOffset(0, top) }.fillMaxWidth()
+        Column(placement) {
+            Box(Modifier.fillMaxWidth().height(60.dp).background(AureaColors.ContentInputStrip).padding(4.dp)) {
+                BasicTextField(
+                    value = field,
+                    onValueChange = { v ->
+                        val changed = v.text != field.text
+                        field = v
+                        TextModeState.draftBlank = store.text3d != null && v.text.isBlank()
+                        if (changed) store.typeText(v.text)
+                    },
+                    textStyle = AureaType.Base.merge(TextStyle(fontSize = 18.sp, color = AureaColors.Text, textAlign = when (alignment) {
+                        1 -> TextAlign.Center
+                        2 -> TextAlign.End
+                        else -> TextAlign.Start
+                    })),
+                    cursorBrush = SolidColor(AureaColors.Accent),
+                    modifier = Modifier.fillMaxSize().focusRequester(focus).testTag("text.edit.input").semantics { contentDescription = hint },
+                    decorationBox = { inner ->
+                        Box(Modifier.fillMaxSize().padding(horizontal = 8.dp), contentAlignment = Alignment.CenterStart) {
+                            if (field.text.isEmpty()) Text(hint, Modifier.alpha(1f), style = AureaType.of(18f, color = AureaColors.ContentHint))
+                            inner()
+                        }
+                    },
+                )
+            }
+            if (store.text3d != null && field.text.isBlank()) {
+                Text(stringResource(R.string.text_content_3d_required), Modifier.padding(12.dp),
+                    style = AureaType.of(12.5f, color = AureaColors.Muted))
+            }
         }
     }
 }

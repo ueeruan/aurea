@@ -29,7 +29,11 @@ import kotlin.math.sin
 class MediaSelectionAudioDeviceTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun audioPickedWithPhotosBecomesAnAudioLayer() {
+    @Test fun audioPickedWithPhotosBecomesAnAudioLayer() = verifyAudioImport(mediaBrowser = false)
+
+    @Test fun audioInTheMediaBrowserBatchBecomesAnAudioLayer() = verifyAudioImport(mediaBrowser = true)
+
+    private fun verifyAudioImport(mediaBrowser: Boolean) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         check(context.packageName == "com.aurea.aurea.uitest")
         lateinit var store: EditorStore
@@ -59,7 +63,11 @@ class MediaSelectionAudioDeviceTest {
         try { bitmap.eraseColor(Color.GREEN); photo.outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) } }
         finally { bitmap.recycle() }
 
-        compose.runOnIdle { store.importMediaBatch(listOf(Uri.fromFile(photo), Uri.fromFile(audio))) }
+        compose.runOnIdle {
+            val uris = listOf(Uri.fromFile(photo), Uri.fromFile(audio))
+            if (mediaBrowser) store.importMediaPicks(uris.map { EditorStore.OmegaMediaPick(uri = it, video = false) }, placement = 0)
+            else store.importMediaBatch(uris)
+        }
         compose.waitUntil(30000) { store.busyMessage == null && store.layers.size == 2 }
         compose.runOnIdle {
             assertNull(store.errorMessage)

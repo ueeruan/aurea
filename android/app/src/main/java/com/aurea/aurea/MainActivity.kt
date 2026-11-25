@@ -607,7 +607,11 @@ private fun MainActivity.CreatorWelcome(content: @Composable () -> Unit) {
                             opened = opened or bit
                             prefs.edit().putInt("opened_v", opened).apply()
                             error = false
-                        } catch (_: android.content.ActivityNotFoundException) { error = true }
+                        } catch (_: android.content.ActivityNotFoundException) {
+                            error = true
+                        } catch (_: SecurityException) {
+                            error = true
+                        }
                     }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = opened and bit == 0) {
                         Text(profile.first)
                     }

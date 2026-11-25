@@ -16,9 +16,10 @@ class SubscriptionEntitlementsTest {
     private val now = 1_800_000_000_000L
     private val day = 24L * 3600 * 1000
 
-    /** A mesma regra de hyper::has_access (AureaHyper mensal/vitalício ou o produto do item). */
+    /** A mesma regra de hyper::has_access (AureaHyper semanal/mensal/anual/vitalício ou o produto do item). */
     private fun engineRule(item: String?): (Set<String>) -> Boolean = { owned ->
-        "aurea_hyper_mensal" in owned || "aureahyper_lifetime" in owned || (item != null && item in owned)
+        listOf("aurea_hyper_semanal", "aurea_hyper_mensal", "aurea_hyper_anual", "aureahyper_lifetime").any { it in owned } ||
+            (item != null && item in owned)
     }
 
     private fun cache(products: Set<String>, expires: Map<String, Long> = emptyMap(), at: Long = now) =

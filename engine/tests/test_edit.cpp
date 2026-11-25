@@ -1489,6 +1489,56 @@ AUREA_TEST(MagneticTrack, ReorderRefusesOnALooseClipAndOnALockedRow) {
     AUREA_CHECK_EQ(m.start_of(m.r.c), 60);
 }
 
+AUREA_TEST(MagneticTrack, ReorderStillImageAndRestoreTrimAtFrameZero) {
+    MagneticRig m;
+    Layer* image = m.r.comp()->layer(LayerId::unpack(m.r.c));
+    image->kind = LayerKind::Image;
+    image->offset = FrameIndex{0};
+    m.magnetic(true);
+    AUREA_CHECK(m.r.e.reorder_clip(m.r.c, 0));
+    AUREA_CHECK(m.r.at(m.r.c, 0, 30));
+    AUREA_CHECK(m.r.e.edit_clip_time(m.r.c, 0, 9));
+    AUREA_CHECK(m.r.at(m.r.c, 0, 21));
+    AUREA_CHECK_EQ(m.r.L(m.r.c)->offset.value, 9);
+    AUREA_CHECK(m.r.e.edit_clip_time(m.r.c, 0, -40));
+    AUREA_CHECK(m.r.at(m.r.c, 0, 30));
+    AUREA_CHECK(m.r.at(m.r.a, 30, 60));
+    AUREA_CHECK_EQ(m.r.L(m.r.c)->offset.value, 0);
+    AUREA_CHECK(!m.r.e.edit_clip_time(m.r.c, 0, -1));
+    AUREA_CHECK(m.r.at(m.overlay, 40, 70));
+}
+
+AUREA_TEST(Edit, TrimmingAfterQueuedEffectsAndTextKeepsBothEditsThroughUndo) {
+    EditRig r;
+    clip_source(r, r.a);
+    clip_source(r, r.b);
+    const auto text = r.e.add_text("Original");
+    AUREA_CHECK(text.ok());
+    Command batch[3]{};
+    batch[0].type = CommandType::EffectAdd;
+    batch[0].effect_add.layer = LayerId::unpack(r.b);
+    batch[0].effect_add.effectType = effect_type_id(effect_keys::kShake);
+    batch[0].effect_add.index = kInvalidIndex;
+    batch[1].type = CommandType::TextSetContent;
+    batch[1].layer_ref.layer = LayerId::unpack(*text);
+    constexpr char title[] = "Vlog edit";
+    batch[1].stringLength = sizeof(title) - 1;
+    batch[2].type = CommandType::UndoBeginGroup;
+    AUREA_CHECK_EQ(r.e.submit_commands(batch, 3, title, sizeof(title) - 1), 3u);
+    AUREA_CHECK(r.e.edit_clip_time(r.a, 1, 12));
+    AUREA_CHECK(r.e.edit_clip_time(r.a, 1, 18));
+    Command end{};
+    end.type = CommandType::UndoEndGroup;
+    AUREA_CHECK(r.e.apply_command(end).ok());
+    AUREA_CHECK_EQ(r.L(r.b)->effects.size(), 1u);
+    AUREA_CHECK_EQ(r.L(*text)->text.content, title);
+    r.undo();
+    AUREA_CHECK(r.at(r.a, 0, 30));
+    AUREA_CHECK(r.at(r.b, 30, 60));
+    AUREA_CHECK_EQ(r.L(r.b)->effects.size(), 1u);
+    AUREA_CHECK_EQ(r.L(*text)->text.content, title);
+}
+
 AUREA_TEST(MagneticTrack, NewClipLandsAtTheEndOfTheMagneticRow) {
     MagneticRig m;
     m.magnetic(true);

@@ -1237,8 +1237,7 @@ struct Panel3DView: View {
         let types: [UTType] = [UTType(filenameExtension: "hdr") ?? .data, UTType(filenameExtension: "exr") ?? .data, .zip, .image, .data]
         DocumentImportPicker.present(types: types) { urls in
             guard let url = urls?.first else { return }
-            if model.selectedLayer?.kind == 8 { _ = model.engine.setEnvironmentBackground(true) }
-            model.importMedia(url: url, kind: .hdri, objectHDRI: target)
+            model.importMedia(url: url, kind: .hdri, objectHDRI: target, showHDRIBackground: !object)
         }
     }
     private func openFonts() {

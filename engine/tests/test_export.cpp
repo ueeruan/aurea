@@ -1950,13 +1950,16 @@ AUREA_TEST(Export, MemoryWarningReducesAdmissionWithoutChangingFramesOrAudio) {
     cfg.width = 320;
     cfg.height = 180;
     cfg.pattern = SyntheticPattern::MovingSquare;
-    u64 hashes[2]{}, audioHashes[2]{};
-    for (int pressure = 0; pressure < 2; ++pressure) {
+    u64 hashes[3]{}, audioHashes[3]{};
+    for (int pressure = 0; pressure < 3; ++pressure) {
         Rig r(cfg, 30.0, 30, 4);
         AUREA_CHECK(r.ok);
         if (!r.ok) return;
         build_effects_scene(r);
-        if (pressure) (void)r.e.trim_memory(10);
+        if (pressure == 1) (void)r.e.trim_memory(10);
+        // Headroom alone must throttle the producer even without a trim
+        // callback or a low-memory flag from Android/iOS.
+        if (pressure == 2) r.e.report_memory_headroom(104ull << 20, 100ull << 20, false);
         const Outcome o = run_export(r, 180, 0.0, true, 120);
         AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
         AUREA_CHECK_EQ(r.cap.hashes.size(), static_cast<usize>(30));
@@ -1968,7 +1971,9 @@ AUREA_TEST(Export, MemoryWarningReducesAdmissionWithoutChangingFramesOrAudio) {
         audioHashes[pressure] = r.cap.audioHash;
     }
     AUREA_CHECK_EQ(hashes[0], hashes[1]);
+    AUREA_CHECK_EQ(hashes[0], hashes[2]);
     AUREA_CHECK_EQ(audioHashes[0], audioHashes[1]);
+    AUREA_CHECK_EQ(audioHashes[0], audioHashes[2]);
 }
 
 AUREA_TEST(ExportSchedulerGpu, ProfilesPreserveAllFramesEffectsAndAudio) {

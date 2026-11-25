@@ -130,8 +130,12 @@ class AureaEngine private constructor() {
         @JvmStatic external fun nativeText3dProductId(): String
         /** A assinatura que libera tudo (hyper::kHyperSubscriptionId). */
         @JvmStatic external fun nativeHyperSubscriptionId(): String
-        /** O que as lojas vendem: AureaHyper primeiro, depois cada avulso (hyper::subscription_product_ids). */
+        /** Tudo o que o app reconhece (restaurar): os 3 planos do AureaHyper, depois cada avulso legado (hyper::subscription_product_ids). */
         @JvmStatic external fun nativeSubscriptionProductIds(): Array<String>?
+        /** 1.0.9: os planos do AureaHyper à venda, na ordem da tela: semanal, mensal, anual (hyper::hyper_plans_on_sale). */
+        @JvmStatic external fun nativeHyperPlansOnSale(): Array<String>?
+        /** 1.0.9: "economize N%" do anual contra um ano do plano curto mais barato (micros da loja; 0 = sem selo). */
+        @JvmStatic external fun nativeHyperAnnualSavingsPercent(weeklyMicros: Long, monthlyMicros: Long, annualMicros: Long): Int
         /** A regra única de acesso (hyper::has_access); [itemProduct] null = item só do AureaHyper. */
         @JvmStatic external fun nativeHasPaidAccess(owned: Array<String>, itemProduct: String?): Boolean
         /** [detector de rostos registrado, modelo de rostos (gfpgan-v1.4) presente]. */
@@ -839,7 +843,8 @@ class AureaEngine private constructor() {
     private external fun nativeSetSceneSetting(handle: Long, parameter: Int, value: Float): Boolean
 
     // Ambiente 3D (HDRI).
-    fun importHdri(path: String): Long = nativeWork.run(-5L) { nativeImportHdri(nativeHandle, path) }
+    fun importHdri(path: String, objectLayer: Long = 0, showAsBackground: Boolean = false): Long =
+        nativeWork.run(-5L) { nativeImportHdri(nativeHandle, path, objectLayer, showAsBackground) }
     fun clearHdri(): Boolean = nativeClearHdri(nativeHandle)
     fun setEnvironmentBackground(visible: Boolean): Boolean = nativeSetEnvironmentBackground(nativeHandle, visible)
     fun setEnvironmentBackgroundRange(start: Long, end: Long): Boolean = nativeSetEnvironmentBackgroundRange(nativeHandle, start, end)
@@ -1194,7 +1199,8 @@ class AureaEngine private constructor() {
     /** ◆ dos canais `paramMask` (bits R, G, B, opacidade, metal, rugosidade) do material (−1 = todos), num passo. */
     fun toggleMaterialKeys(layer: Long, material: Int, paramMask: Int): Boolean = nativeToggleMaterialKeys(nativeHandle, layer, material, paramMask)
     /** Guias da prévia (só na tela): bit 0 grade, bit 1 margens de ação/título, bit 2 réguas. */
-    fun setPreviewGuides(flags: Int, gridSpacing: Float = 100f) = nativeSetPreviewGuides(nativeHandle, flags, gridSpacing)
+    fun setPreviewGuides(flags: Int, gridSpacing: Float, rgb: Int, blend: Int) =
+        nativeSetPreviewGuides(nativeHandle, flags, gridSpacing, rgb, blend)
     fun previewGuides(): Int = nativePreviewGuides(nativeHandle)
     /** Queda do feather da máscara: 0 suave, 1 linear (o atual vem no float 11 de `queryMasks`). */
     fun setMaskFalloff(layer: Long, mask: Int, falloff: Int): Boolean = nativeSetMaskFalloff(nativeHandle, layer, mask, falloff)
@@ -2412,7 +2418,7 @@ class AureaEngine private constructor() {
     private external fun nativeModelMaterialPreset(handle: Long, layer: Long): Int
     private external fun nativeModelMaterialPresetPreview(handle: Long, layer: Long, preset: Int, size: Int): IntArray?
     private external fun nativeToggleMaterialKeys(handle: Long, layer: Long, material: Int, paramMask: Int): Boolean
-    private external fun nativeSetPreviewGuides(handle: Long, flags: Int, gridSpacing: Float)
+    private external fun nativeSetPreviewGuides(handle: Long, flags: Int, gridSpacing: Float, rgb: Int, blend: Int)
     private external fun nativePreviewGuides(handle: Long): Int
     private external fun nativeSetMaskFalloff(handle: Long, layer: Long, mask: Int, falloff: Int): Boolean
     private external fun nativeSetMaskFlags(handle: Long, layer: Long, mask: Int, flags: Int, change: Int): Boolean
@@ -2747,7 +2753,7 @@ class AureaEngine private constructor() {
     private external fun nativeSeekTimelineEvent(handle: Long, frame: Long): Boolean
     private external fun nativeUngroupPrecomp(handle: Long, layer: Long): String?
     private external fun nativeUngroupPrecomps(handle: Long, layers: LongArray): String?
-    private external fun nativeImportHdri(handle: Long, path: String): Long
+    private external fun nativeImportHdri(handle: Long, path: String, objectLayer: Long, showAsBackground: Boolean): Long
     private external fun nativeQueryGizmo(handle: Long, layer: Long, length: Float, out: FloatArray, localSpace: Boolean): Boolean
     private external fun nativeGizmoMoveLocal(handle: Long, layer: Long, axis: Int, amount: Float, out: FloatArray): Boolean
     private external fun nativeClearHdri(handle: Long): Boolean

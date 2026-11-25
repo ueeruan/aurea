@@ -24,5 +24,6 @@
     <string name="motion_export_waiting_decode">Esperando al decodificador de vídeo…</string>
     <string name="motion_link_media">Vincular medio</string>
     <string name="motion_view_layer">Ver capa</string>
-    <string name="motion_release_body">Aurea 1.0.8.1 BETA (2232)\n• Reordena trazados, contornos y operadores vectoriales.\n• Curvas de velocidad con las mismas reglas en Android e iOS.\n• Texto, color y opacidad por instancia de precomposición.\n• Revisa y corrige un tramo del seguimiento planar.\n• Diagnóstico de medios y avisos de espera del decodificador al exportar.</string>
+    <string name="motion_release_body">Aurea 1.0.9 (2234)\n• Inicio, menú para añadir, biblioteca de efectos y exportación renovados.\n• Filtros, orden y anuncios oficiales en la comunidad.\n• Gráficas compactas en tablets y cuadrícula personalizable.\n• Máscaras vectoriales, Time Remap en Efectos y más opciones de partículas.\n• Repetidor 3D, material Toon y complementos para la escena 3D.\n• Mejoras en el cielo de 360°, las sombras de contacto y el recorte del follaje.\n• Más efectos editables al importar proyectos de After Effects.\n• Correcciones en la línea de tiempo, el audio, los controles táctiles y la exportación.</string>
+    <string name="motion_export_checking_media">Verificando archivos…</string>
 </resources>

@@ -247,12 +247,13 @@ private fun EffectBrowserBody(
     // `detail` muda a cada quadro da reprodução: a folha só quer o TIPO da camada.
     val kind by remember(store) { derivedStateOf { store.detail?.kind ?: 0 } }
     val text3dLayer = store.text3d != null
+    val shape3dLayer = store.shape3d != null
     val toolNames = EffectTool.entries.associateWith { stringResource(toolLabelRes(it)) }
     // Funções do AUREA (13/11/2026): as ferramentas que valem para esta camada.
     val tools = com.aurea.aurea.editor.panels.toolsForSelection(store)
-    val sorted = remember(catalog, layerHasAudio, kind, text3dLayer, toolNames, tools) {
+    val sorted = remember(catalog, layerHasAudio, kind, text3dLayer, shape3dLayer, toolNames, tools) {
         val textLayer = kind == 4
-        val effects = pickableEffects(catalog, layerHasAudio, layerKind = kind).filter {
+        val effects = pickableEffects(catalog, layerHasAudio, kind, text3dLayer, shape3dLayer).filter {
             (textLayer || text3dLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.transform")) &&
                 (textLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.progress")) &&
                 (textLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.randomizer")) &&

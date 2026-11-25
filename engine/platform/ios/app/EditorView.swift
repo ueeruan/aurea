@@ -26,17 +26,30 @@ struct EditorView: View {
     // com a mesma chave da 0.3.2.
     @AppStorage("editor.previewHeight") private var previewPreference: Double = 0
     @State private var dividerStart: CGFloat?
-    var body: some View {
+    private var tabletTextEntry: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad && model.textModeActive && !model.fullscreen && !model.sceneEditor
+    }
+
+    private var workspace: some View {
         GeometryReader { geometry in
-            let wide = !model.fullscreen && model.panel != .curve && EditorLayout.isWide(geometry.size.width, geometry.size.height)
+            let floatingText = tabletTextEntry && geometry.size.width >= 600
+            let floatingCurve = !model.fullscreen && !model.sceneEditor && model.sheetContent == .curve
+                && geometry.size.width >= 600 && geometry.size.height >= 430
+            let wide = !model.fullscreen && (model.panel != .curve || floatingCurve)
+                && EditorLayout.isWide(geometry.size.width, geometry.size.height)
+            let layoutContent = floatingCurve ? SheetContent.dock : model.sheetContent
             let sideWidth = EditorLayout.wideSheetWidth(geometry.size.width)
+            let editingWorkspace = model.uiMode == AureaUiMode.edit
+            let textLayoutBeside = floatingCurve && model.curveReturnPanel == .textLayout
+                && (editingWorkspace ? geometry.size.width > geometry.size.height : wide)
+            let inspectorWidth: CGFloat = textLayoutBeside ? (editingWorkspace ? geometry.size.width * 0.48 : sideWidth) : 0
             let aspect: CGFloat = model.compositionHeight > 0 ? CGFloat(model.compositionWidth) / CGFloat(model.compositionHeight) : 0
             // Fora da tela cheia o palco tem 8 pt de margem de cada lado.
             let sideMargin: CGFloat = model.fullscreen ? 0 : EditorLayout.previewSideMargin
             // A zona inferior cresce ao abrir o inspetor e a divisa permite ajustá-la.
             // Omega chrome (área 02, P0-4): com a seleção múltipla a timeline fica com a zona
             // inteira e a barra inferior flutua por cima dela (sem o painel de lote).
-            let metrics = EditorLayout.solve(total: geometry.size.height, content: model.sheetContent == .batch ? .none : model.sheetContent, fullscreen: model.fullscreen,
+            let metrics = EditorLayout.solve(total: geometry.size.height, content: layoutContent == .batch ? .none : layoutContent, fullscreen: model.fullscreen,
                                              width: max(0, geometry.size.width - sideMargin * 2), aspect: aspect,
                                              preferred: CGFloat(previewPreference),  // 0.3.3 recursos: a divisa
                                              dockRows: 2,  // Omega painel: (área 04) a zona da camada tem a altura do painel (200)
@@ -44,9 +57,9 @@ struct EditorView: View {
             Group {
                 if model.sceneEditor {
                     SceneLayoutWorkspace(height: geometry.size.height, width: geometry.size.width)
-                } else if model.uiMode == AureaUiMode.edit {
+                } else if editingWorkspace {
                     // A interface de Edição (0.2.5): trilha principal e Dock em níveis.
-                    EditModeView(height: geometry.size.height)
+                    EditModeView(height: geometry.size.height, floatingCurve: floatingCurve, floatingText: floatingText)
                 } else if wide {
                     VStack(spacing: 0) {
                         TopBarView().frame(height: EditorLayout.topBar)
@@ -57,7 +70,8 @@ struct EditorView: View {
                                     .padding(.horizontal, sideMargin)
                                 if EditorLayout.strip > 0 { Rectangle().fill(AureaColors.editorCanvas).frame(height: EditorLayout.strip) }
                                 TransportView().frame(height: EditorLayout.transport)
-                                TimelineView(timecodeStyle: model.selection.count == 1 ? .box : .underline).frame(height: EditorLayout.wideTimeline(geometry.size.height))
+                                TimelineView(timecodeStyle: model.selection.count == 1 ? .box : .underline, floatingCurve: floatingCurve)
+                                    .frame(height: EditorLayout.wideTimeline(geometry.size.height))
                                 // A barra de adicionar na base da coluna do palco.
                                 // Omega adicionar (área 08): também com o adicionar aberto.
                                 if model.sheetContent == .addBar || model.sheetContent == .adding { ShellAddBar().frame(height: StageDim.addBar) }
@@ -65,8 +79,11 @@ struct EditorView: View {
                             // 0.3.3 barra: a grade do "+" por cima do palco e da timeline, encostada embaixo.
                             .overlay(alignment: .bottom) { if model.sheetContent == .addBar || model.sheetContent == .adding { AddBarMoreOverlay() } }
                             // Omega conteúdo (área 06, P0-1): no modo de texto, o painel grande com a faixa de entrada.
-                            if model.textModeActive { TextEditPanel().frame(width: sideWidth, height: max(1, geometry.size.height - EditorLayout.topBar)) }
-                            else { ContextSheet(metrics: metrics).frame(width: sideWidth, height: max(1, geometry.size.height - EditorLayout.topBar)) }
+                            if model.textModeActive && !floatingText { TextEditPanel().frame(width: sideWidth, height: max(1, geometry.size.height - EditorLayout.topBar)) }
+                            else {
+                                ContextSheet(metrics: metrics, showsActivePanel: !floatingCurve, retainedPanel: textLayoutBeside ? .textLayout : nil)
+                                    .frame(width: sideWidth, height: max(1, geometry.size.height - EditorLayout.topBar))
+                            }
                         }
                     }
                 } else {
@@ -79,7 +96,7 @@ struct EditorView: View {
                         if model.fullscreen {
                             FullscreenTimeBar()
                             TransportView().frame(height: metrics.transport)
-                        } else if model.textModeActive {
+                        } else if model.textModeActive && !floatingText {
                             // Omega conteúdo (área 06, P0-1): o MODO DE TEXTO — o painel grande (faixa de
                             // entrada de 60) ocupa o transporte e a zona inferior; a prévia não muda.
                             TextEditPanel().frame(height: metrics.transport + metrics.zone)
@@ -118,11 +135,12 @@ struct EditorView: View {
                                         TimelineView(compactDock: true,
                                                      obscuredBottom: metrics.overlay ? metrics.obscuredTimeline
                                                         : model.sheetContent == .adding ? EditorLayout.addContent(metrics) : 0,
-                                                     timecodeStyle: model.selection.count == 1 ? .box : .underline).frame(height: metrics.timeline)
+                                                     timecodeStyle: model.selection.count == 1 ? .box : .underline,
+                                                     floatingCurve: floatingCurve).frame(height: metrics.timeline)
                                     }
                                     if !metrics.overlay && metrics.sheet > 0 {
                                         if model.sheetContent == .addBar || model.sheetContent == .adding { ShellAddBar().frame(height: metrics.sheet) }
-                                        else { ContextSheet(metrics: metrics).frame(height: metrics.sheet) }
+                                        else { ContextSheet(metrics: metrics, showsActivePanel: !floatingCurve).frame(height: metrics.sheet) }
                                     }
                                 }
                                 .frame(height: metrics.zone, alignment: .top)
@@ -147,7 +165,7 @@ struct EditorView: View {
                                     // 0.3.4 painéis: o painel de propriedade tem a zona inteira menos a faixa
                                     // de foco (régua + linha em foco + folga; `EditorLayout.timelineFocusHeight`).
                                     // O painel por cima segura o toque: nada passa para a timeline embaixo.
-                                    ContextSheet(metrics: metrics).frame(height: metrics.sheet).contentShape(Rectangle())
+                                    ContextSheet(metrics: metrics, showsActivePanel: !floatingCurve).frame(height: metrics.sheet).contentShape(Rectangle())
                                 }
                                 // Omega chrome (área 02, P0-4): a barra inferior flutuante da seleção múltipla.
                                 if model.sheetContent == .batch && !RealCameraState.shared.painting(model) { MultiSelectBottomBar().keepLtr() }
@@ -166,6 +184,12 @@ struct EditorView: View {
                     }
                 }
             }
+            .overlay(alignment: textLayoutBeside ? .bottomTrailing : .bottomLeading) {
+                if floatingCurve && !model.textModeActive {
+                    FloatingCurveCard(width: min(440, geometry.size.width * 0.62, geometry.size.width - inspectorWidth - 32))
+                        .padding(.trailing, inspectorWidth)
+                }
+            }
             // Omega conteúdo (área 06, P0-3): os popups da barra de estilo do modo de texto.
             .overlay(alignment: .top) {
                 if !model.sceneEditor && model.uiMode != AureaUiMode.edit && !model.fullscreen {
@@ -174,9 +198,14 @@ struct EditorView: View {
             }
             .background(AureaColors.editorCanvas.ignoresSafeArea())
         }
-        // Omega conteúdo (área 06, P0-1): no modo de texto o teclado não encolhe o editor
-        // (a prévia fica); a faixa de entrada sobe sozinha (TextEditPanel).
-        .ignoresSafeArea(model.textModeActive ? .keyboard : [], edges: .bottom)
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            // Only the editor workspace extends behind the keyboard. The tablet input follows the safe area.
+            workspace.ignoresSafeArea(model.textModeActive ? .keyboard : [], edges: .bottom)
+            if tabletTextEntry { FloatingTextEntry() }
+        }
         .fullScreenCover(isPresented: $model.showExport) { ExportView() }
         // 1.0.2: Pre Render & Pre Export, o player do pré-export e o paywall da Neural (IA)
         // num modificador próprio (EditorPresentations102): na mesma cadeia o body passava
@@ -245,6 +274,35 @@ struct EditorView: View {
         .modifier(ModelTexturesPrompt(shell: shell))
         .modifier(ModelOptimizePrompt())
         .modifier(AddLayerPickers(shell: shell))
+    }
+}
+
+private struct FloatingTextEntry: View {
+    var body: some View {
+        GeometryReader { geometry in
+            if geometry.size.width >= 600 {
+                TextEditPanel(floating: true)
+                    .frame(width: min(560, geometry.size.width - 32))
+                    .padding(.bottom, 16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            }
+        }
+    }
+}
+
+private struct FloatingCurveCard: View {
+    let width: CGFloat
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+        CurvePanel()
+            .frame(width: width, height: width * 0.64)
+            .background(AureaColors.editorPanel, in: shape)
+            .clipShape(shape)
+            .overlay { shape.strokeBorder(AureaColors.panelFrameDivider).allowsHitTesting(false) }
+            .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("curve.floating")
+            .padding(16)
     }
 }
 
@@ -441,6 +499,7 @@ private struct ModelOptimizePrompt: ViewModifier {
     var body: some View {
         ZStack {
             AureaColors.previewBackdrop
+            PreviewGridSync(visible: !model.fullscreen && !model.rawPlayback)
             PreviewMetalView(compositionSize: compositionSize, interactive: !model.fullscreen && !model.rawPlayback)
                 .overlay { if !model.fullscreen && !model.rawPlayback { StageOverlay().allowsHitTesting(false) } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { StageInteractionOverlay().allowsHitTesting(false) } }
@@ -1015,8 +1074,11 @@ struct ContextSheet: View {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject private var realCamera = RealCameraState.shared
     let metrics: EditorMetrics
+    var showsActivePanel = true
+    var retainedPanel: PanelKind? = nil
 
     var body: some View {
+        let panel = retainedPanel ?? (showsActivePanel ? model.panel : .none)
         VStack(spacing: 0) {
             // ContextArea.kt: faixa VAZIA de 12; painel aberto começa no seu
             // próprio cabeçalho, sem puxador ou faixa adicionais.
@@ -1040,14 +1102,14 @@ struct ContextSheet: View {
             } else {
             // 0.4.1 (mockup "interface 03"): a ferramenta entra deslizando da direita por cima
             // das ferramentas da camada, e o ‹ volta deslizando (~300 ms; par do ContextArea.kt).
-            InspectorPageSlide(panelPage: model.panel != .none && model.panel != .dock) {
+            InspectorPageSlide(panelPage: panel != .none && panel != .dock) {
                 // Omega painel: (área 04) o painel da camada da referência (LayerPanelView.swift).
                 LayerPanelView()
             } panel: {
             // Omega painel: (área 04, P1-10) trocar de um painel para outro ainda entra por cima
             // (x +100 → 0 em 100 ms, fade de 25 ms); a curva não anima.
             Group {
-            switch model.panel {
+            switch panel {
             case .none, .dock:
                 EmptyView()
             // Plugin V3: estes cinco um plugin pode substituir (sempre com volta ao original).
@@ -1115,7 +1177,7 @@ struct ContextSheet: View {
                 AnimationPanelView()
             }
             }
-            .modifier(PanelEntrance(panel: model.panel, onAppear: false))
+            .modifier(PanelEntrance(panel: panel, onAppear: false))
             }
             }
         }

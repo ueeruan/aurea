@@ -113,32 +113,44 @@ class EffectsAddSheetTest {
         compose.runOnIdle { assertEquals(invertId, picked) }
     }
 
-    @Test fun anotherRulerFlingDoesNotBlockScrollInEitherDirection() {
+    @Test fun anotherRulerFlingDoesNotBlockScrollOrTheNextControl() {
         val scroll = ScrollState(0)
         val owner = FxRulerState()
         var edits = 0
+        var interruptions = 0
+        var changes = 0
         compose.setContent {
             AureaTheme {
                 Column(Modifier.fillMaxWidth().height(168.dp).testTag("test.rulers").verticalScroll(scroll)) {
-                    repeat(5) {
+                    repeat(5) { index ->
                         FxRuler(
                             value = 0f, step = 1f, min = -1000f, max = 1000f,
-                            onStart = { edits++ }, onValue = {}, onEnd = {},
-                            modifier = Modifier.fillMaxWidth().height(42.dp),
+                            onStart = { edits++ }, onValue = { changes++ }, onEnd = {},
+                            modifier = Modifier.fillMaxWidth().height(42.dp).testTag("test.ruler.$index"),
                         )
                     }
                 }
             }
         }
-        compose.runOnIdle { FxRulerFling.owner = owner }
+        compose.runOnIdle { FxRulerFling.start(owner) { interruptions++ } }
         try {
             val list = compose.onNodeWithTag("test.rulers")
             list.performTouchInput { swipeUp(durationMillis = 450) }
             compose.runOnIdle { assertEquals(scroll.maxValue, scroll.value) }
             list.performTouchInput { swipeDown(durationMillis = 450) }
-            compose.runOnIdle { assertEquals(0, scroll.value); assertEquals(0, edits) }
+            compose.runOnIdle {
+                assertEquals(0, scroll.value)
+                assertEquals(0, edits)
+                assertEquals(0, interruptions)
+            }
+            compose.onNodeWithTag("test.ruler.0").performTouchInput { swipeLeft(durationMillis = 550) }
+            compose.runOnIdle {
+                assertEquals(1, interruptions)
+                assertEquals(1, edits)
+                assertTrue(changes > 0)
+            }
         } finally {
-            compose.runOnIdle { FxRulerFling.owner = null }
+            compose.runOnIdle { FxRulerFling.interrupt() }
         }
     }
 

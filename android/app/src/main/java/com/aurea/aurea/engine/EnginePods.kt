@@ -641,6 +641,15 @@ data class EffectCatalogEntry(
     val flags: Int = 0,
 ) {
     val isNew get() = flags and 1 != 0
+
+    internal fun supportsLayer(kind: Int, textModel: Boolean?, shapeModel: Boolean?): Boolean {
+        val layerMask = flags ushr 8
+        if (layerMask == 0) return true
+        if (kind !in 1..31 || layerMask and (1 shl kind) == 0) return false
+        if (kind != 10) return true
+        return (flags and 2 == 0 || textModel != false) && (flags and 4 == 0 || shapeModel != false)
+    }
+
     companion object {
         const val ROW_BYTES = 32
 

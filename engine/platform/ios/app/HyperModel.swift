@@ -252,9 +252,9 @@ struct HyperJobRequest: Equatable {
 
 // MARK: - Portão pago (compra única `aureahyper_lifetime`)
 //
-// 16/11/2026 (decisão do dono): ASSINATURAS mensais. O AureaHyper
-// (`aurea_hyper_mensal`) libera tudo; cada efeito pago e o Texto 3D têm a sua
-// assinatura avulsa; o legado `aureahyper_lifetime` segue liberando tudo. A
+// 16/11/2026 (decisão do dono): ASSINATURAS. O AureaHyper (1.0.9: semanal,
+// mensal ou anual) libera tudo; os efeitos pagos e o Texto 3D tiveram a sua
+// assinatura avulsa (fora de venda, reconhecida para quem tem); o legado `aureahyper_lifetime` segue liberando tudo. A
 // StoreKit 2 cobra (AureaSubscriptions.swift), o servidor confere com a App Store
 // e diz o que a conta tem AGORA (GET /api/entitlements: produtos + vencimento).
 // QUAL produto libera QUAL item é regra do motor (hyper::has_access, via
@@ -363,7 +363,7 @@ final class HyperEntitlements: ObservableObject {
     private(set) var parityPaywall = false
     func prepareParityPaywall() {
         parityPaywall = true
-        purchasable = Set(AureaEngine.subscriptionProductIds())
+        purchasable = Set(AureaEngine.hyperPlansOnSale())
         revision += 1
     }
 #endif

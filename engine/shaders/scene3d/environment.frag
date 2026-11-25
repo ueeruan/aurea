@@ -10,9 +10,14 @@ layout(set=0,binding=AUREA_TEX1) uniform samplerCube blurred;   // especular pr�
 // projection = (aspecto, tan(fov/2), escala das derivadas, LOD do especular);
 // light = (giro, intensidade, exposição, mistura do especular);
 // post = (exposição do grupo, operador de tone map, 1 = saída direta, -).
-layout(std140,set=0,binding=AUREA_PARAMS) uniform Sky { mat4 view; vec4 projection; vec4 light; vec4 post; } u;
+layout(std140,set=0,binding=AUREA_PARAMS) uniform Sky {
+    mat4 view; vec4 projection; vec4 light; vec4 post;
+    vec4 unframeX; vec4 unframeY;
+} u;
 void main() {
-    vec2 ndc = v_uv*2.0-1.0;
+    // Undo the same tracked-camera framing that meshes use on projection.
+    vec3 clip = vec3(v_uv*2.0-1.0, 1.0);
+    vec2 ndc = vec2(dot(u.unframeX.xyz,clip),dot(u.unframeY.xyz,clip));
     vec3 world = transpose(mat3(u.view))*normalize(vec3(ndc.x*u.projection.x*u.projection.y,ndc.y*u.projection.y,1.0));
     vec3 d = vec3(world.x,-world.y,-world.z);
     float c=cos(u.light.x), s=sin(u.light.x);

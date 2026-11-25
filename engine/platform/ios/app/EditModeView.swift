@@ -30,6 +30,8 @@ struct EditModeView: View {
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
     let height: CGFloat
+    var floatingCurve = false
+    var floatingText = false
     @State private var level: EditDockLevel = .root
     @State private var timelineOptions = false
     @State private var previewOptions = false
@@ -43,12 +45,14 @@ struct EditModeView: View {
     var body: some View {
         GeometryReader { geometry in
             let texting = model.textModeActive && !model.fullscreen
-            let inspecting = model.panel != .none && model.panel != .dock
+            let inlineText = texting && !floatingText
             let top: CGFloat = model.fullscreen ? 0 : texting ? 52 : 50
-            let wide = geometry.size.width >= 600 && geometry.size.width > geometry.size.height && !texting && !model.fullscreen
+            let wide = geometry.size.width >= 600 && geometry.size.width > geometry.size.height && !inlineText && !model.fullscreen
+            let retainedPanel: PanelKind? = wide && floatingCurve && model.curveReturnPanel == .textLayout ? .textLayout : nil
+            let inspecting = retainedPanel != nil || (!floatingCurve && model.panel != .none && model.panel != .dock)
             let available = max(0, geometry.size.height - top - 40)
-            let lowerFloor: CGFloat = texting ? 180 : inspecting ? 220 : 170
-            let preferred = geometry.size.height * (inspecting || texting ? 0.30 : 0.48)
+            let lowerFloor: CGFloat = inlineText ? 180 : inspecting ? 220 : 170
+            let preferred = geometry.size.height * (inspecting || inlineText ? 0.30 : 0.48)
             let previewHeight = model.fullscreen ? available : min(available, max(72, min(preferred, available - lowerFloor)))
             let lower = max(0, available - previewHeight)
             let editorHeight = wide ? max(0, geometry.size.height - top) : lower
@@ -69,14 +73,15 @@ struct EditModeView: View {
                     }.frame(maxWidth: .infinity)
                     if !model.fullscreen {
                         VStack(spacing: 0) {
-                            if texting { TextEditPanel().frame(height: lower) }
+                            if inlineText { TextEditPanel().frame(height: lower) }
                             else {
-                                EditTimelineView(compact: inspecting, showMore: $timelineOptions, onAddMedia: addMedia,
+                                EditTimelineView(compact: inspecting && !floatingCurve, showMore: $timelineOptions, onAddMedia: addMedia,
                                                  onTransition: { cut = EditCut(outgoing: $0, incoming: $1) })
                                     .frame(height: timelineHeight)
                                     .environment(\.layoutDirection, .leftToRight)
                                 if inspecting {
-                                    ContextSheet(metrics: EditorMetrics(topBar: 0, preview: 0, strip: 0, transport: 0, timeline: 0, sheet: 0))
+                                    ContextSheet(metrics: EditorMetrics(topBar: 0, preview: 0, strip: 0, transport: 0, timeline: 0, sheet: 0),
+                                                 retainedPanel: retainedPanel)
                                         .frame(height: max(0, editorHeight - timelineHeight))
                                         .background(EditColors.bar)
                                 } else { dock }
@@ -499,6 +504,7 @@ enum TrackOp {
 extension AureaModel {
     @discardableResult
     func editTrackClip(_ op: UInt32, layer: Int64, frame: Int64, track: UInt32 = 0) -> Bool {
+        commitPendingCommands()
         let ok = engine.editTrackClip(op, layer: layer, frame: frame, track: track)
         if !ok { toast = AureaText.t("edit_track_blocked") }
         refreshModel(force: true)
@@ -1058,14 +1064,19 @@ private struct EditTimelineBody: View {
         let frame = frameAt(p.x)
         let edgeFrames = edge / pxPerFrame
         var near: (lane: Int, clip: LaneClip, zone: EditDragKind)?
+        var nearestEdge = CGFloat.infinity
         for clip in clips[lane] {
             let s = CGFloat(clip.row.startFrame), e = CGFloat(clip.row.endFrame)
             if frame < s - edgeFrames || frame > e + edgeFrames { continue }
-            let wide = (e - s) * pxPerFrame > edge * 3
-            // Clipe estreito: o miolo continua alcançável.
-            let zone: EditDragKind = wide && frame <= s + edgeFrames ? .trimIn : wide && frame >= e - edgeFrames ? .trimOut : .move
-            if frame >= s && frame <= e { return (lane, clip, zone) }
-            near = (lane, clip, frame < s ? .trimIn : .trimOut)
+            // Reserve a middle drag zone even when zoomed far out.
+            let inset = min(edgeFrames, (e - s) / 3)
+            let zone: EditDragKind = clip.virtual ? .move : frame <= s + inset ? .trimIn : frame >= e - inset ? .trimOut : .move
+            if frame >= s && frame < e { return (lane, clip, zone) }
+            let distance = min(abs(frame - s), abs(frame - e))
+            if !clip.virtual && distance < nearestEdge {
+                nearestEdge = distance
+                near = (lane, clip, zone)
+            }
         }
         return near
     }
@@ -1194,7 +1205,11 @@ private struct EditTimelineBody: View {
         defer { gestureStart = nil; drag = nil; scrubbing = false; gestureMoved = false }
         guard let start = gestureStart, start.x >= headW else { return }
         if scrubbing { return }
-        if let current = drag { commit(current); return }
+        if var current = drag {
+            if gestureMoved { update(&current, translation: value.translation.width, location: value.location) }
+            commit(current)
+            return
+        }
         if !gestureMoved && zoomStart == nil { tap(start, clips: clips) }
     }
 

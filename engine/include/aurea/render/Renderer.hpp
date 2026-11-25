@@ -576,6 +576,8 @@ struct SceneEditorView {
 [[nodiscard]] scene3d::SceneCamera scene_editor_camera(u32 width, u32 height, const SceneEditorView& view) noexcept;
 [[nodiscard]] Mat4 scene_editor_projection(u32 width, u32 height, const SceneEditorView& view) noexcept;
 
+enum class PreviewGridBlend : u32 { Normal, Difference, HighContrast };
+
 struct RenderSettings {
     // Nonzero only for the editor's composed-frame cache. Final export ignores it.
     u64 previewCacheRevision = 0;
@@ -627,6 +629,8 @@ struct RenderSettings {
     /// bit 0 grade, bit 1 margens de ação/título, bit 2 réguas. 0 no export.
     u32  previewGuides = 0;
     f32  guideGridSpacing = 100.0f;  ///< px da composição entre as linhas da grade
+    u32  guideGridRgb = 0xFFFFFF;   ///< RGB codificado da grade (0xRRGGBB)
+    PreviewGridBlend guideGridBlend = PreviewGridBlend::Normal;
     /// Export: amostras de desfoque de movimento da qualidade final
     /// (`MotionBlurSettings::samples`); a prévia também, reduzida pela folga do aparelho.
     bool finalQuality = false;
@@ -1224,7 +1228,7 @@ private:
         u32 width, u32 height, std::span<TextureHandle> textures,
         FrameStats& stats, RenderTimings& timings) noexcept;
     [[nodiscard]] Status render_segmented_graph(const RenderSettings&, FrameBegin&,
-        RenderTimings&, bool& frameOpen) noexcept;
+        RenderTimings&, bool& frameOpen, u32 passesPerSegment) noexcept;
     struct PreviewFrame;
     struct RenderCompletion {
         FrameBegin frame{};

@@ -19,4 +19,5 @@ internal fun PlatformWideEditor(
     totalHeight: Float,
     sheetWidth: Float,
     stage: @Composable (Modifier) -> Unit,
-) = WideEditor(store, ui, content, totalHeight, sheetWidth, stage)
+    floatingText: Boolean = false,
+) = WideEditor(store, ui, content, totalHeight, sheetWidth, stage, floatingText)

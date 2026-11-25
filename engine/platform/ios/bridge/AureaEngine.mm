@@ -1403,6 +1403,10 @@ bool aurea_vision_person_segment(void*, uint32_t model, const uint8_t* rgb, uint
     [self flush];
 }
 
+- (void)setPreviewGuideFlags:(uint32_t)flags gridSpacing:(float)spacing gridRGB:(uint32_t)rgb blendMode:(uint32_t)mode {
+    if (auto* e = self.engine) e->set_preview_guides(flags, spacing, rgb, mode);
+}
+
 // =============================================================================
 // Camadas
 // =============================================================================
@@ -1668,6 +1672,7 @@ bool aurea_vision_person_segment(void*, uint32_t model, const uint8_t* rgb, uint
 }
 
 - (BOOL)reorderClip:(long long)layerId toFrame:(int64_t)targetFrame {
+    [self flush];
     auto* e = self.engine;
     return e && e->reorder_clip(static_cast<aurea::u64>(layerId), static_cast<aurea::i64>(targetFrame));
 }
@@ -2323,6 +2328,8 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 }
 - (int64_t)removeGaps { auto* e = self.engine; return e ? e->remove_gaps() : 0; }
 - (BOOL)editClipTime:(long long)layerId operation:(uint32_t)operation amount:(int64_t)amount previous:(long long)previous next:(long long)next {
+    // Preserve the order of pending text/effect edits and the timeline edit.
+    [self flush];
     auto* e = self.engine; return e && e->edit_clip_time(layerId, operation, amount, previous, next);
 }
 - (uint32_t)queryClipTimeActions:(long long)layerId frame:(int64_t)frame {
@@ -3036,10 +3043,14 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     _lastImportError = @""; return static_cast<long long>(*result);
 }
 - (long long)importHdri:(NSString*)path {
+    return [self importHdri:path showAsBackground:NO];
+}
+
+- (long long)importHdri:(NSString*)path showAsBackground:(BOOL)visible {
     auto* e = self.engine;
     if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);
     const std::string p = to_std(path);
-    const aurea::Result<aurea::u64> r = e->import_hdri(p.c_str());
+    const aurea::Result<aurea::u64> r = e->import_hdri(p.c_str(), 0, visible);
     if (!r.ok()) {
         _lastImportError = to_ns(std::string(r.status().message()));
         return -static_cast<long long>(r.status().code());
@@ -3237,6 +3248,7 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 - (void)markPluginsHealthy { if (auto* e = self.engine) e->mark_plugins_healthy(); }
 
 - (BOOL)editTrackClip:(uint32_t)op layer:(long long)layer frame:(long long)frame track:(uint32_t)track {
+    [self flush];
     auto* e = self.engine;
     return e && e->edit_track_clip(op, static_cast<aurea::u64>(layer), frame, track);
 }
@@ -6740,6 +6752,16 @@ static aurea::ImageExportSettings AureaImageSettings(uint32_t format, uint32_t s
     NSMutableArray<NSString*>* out = [NSMutableArray array];
     for (const std::string& id : aurea::hyper::subscription_product_ids()) [out addObject:[NSString stringWithUTF8String:id.c_str()]];
     return out;
+}
+
++ (NSArray<NSString*>*)hyperPlansOnSale {
+    NSMutableArray<NSString*>* out = [NSMutableArray array];
+    for (const std::string& id : aurea::hyper::hyper_plans_on_sale()) [out addObject:[NSString stringWithUTF8String:id.c_str()]];
+    return out;
+}
+
++ (int32_t)hyperAnnualSavingsPercentWeekly:(int64_t)weeklyMicros monthly:(int64_t)monthlyMicros annual:(int64_t)annualMicros {
+    return static_cast<int32_t>(aurea::hyper::hyper_annual_savings_percent(weeklyMicros, monthlyMicros, annualMicros));
 }
 
 + (BOOL)hasPaidAccess:(NSArray<NSString*>*)owned item:(nullable NSString*)item {

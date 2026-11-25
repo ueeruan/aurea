@@ -32,17 +32,27 @@ struct EditorView: View {
 
     private var workspace: some View {
         GeometryReader { geometry in
-            let floatingText = tabletTextEntry && geometry.size.width >= 600
-            let floatingCurve = !model.fullscreen && !model.sceneEditor && model.sheetContent == .curve
-                && geometry.size.width >= 600 && geometry.size.height >= 430
-            let wide = !model.fullscreen && (model.panel != .curve || floatingCurve)
-                && EditorLayout.isWide(geometry.size.width, geometry.size.height)
-            let layoutContent = floatingCurve ? SheetContent.dock : model.sheetContent
-            let sideWidth = EditorLayout.wideSheetWidth(geometry.size.width)
-            let editingWorkspace = model.uiMode == AureaUiMode.edit
-            let textLayoutBeside = floatingCurve && model.curveReturnPanel == .textLayout
-                && (editingWorkspace ? geometry.size.width > geometry.size.height : wide)
-            let inspectorWidth: CGFloat = textLayoutBeside ? (editingWorkspace ? geometry.size.width * 0.48 : sideWidth) : 0
+            // Tipos explícitos e expressões curtas: o verificador de tipos do Swift
+            // travava (CI 25/11) com as condições longas dentro do GeometryReader.
+            let width: CGFloat = geometry.size.width
+            let height: CGFloat = geometry.size.height
+            let roomy: Bool = width >= 600
+            let floatingText: Bool = tabletTextEntry && roomy
+            let curveSheet: Bool = model.sheetContent == .curve
+            let floatingCurve: Bool = !model.fullscreen && !model.sceneEditor && curveSheet && roomy && height >= 430
+            let curveAllowsWide: Bool = model.panel != .curve || floatingCurve
+            let wide: Bool = !model.fullscreen && curveAllowsWide && EditorLayout.isWide(width, height)
+            let layoutContent: SheetContent = floatingCurve ? SheetContent.dock : model.sheetContent
+            let sideWidth = EditorLayout.wideSheetWidth(width)
+            let editingWorkspace: Bool = model.uiMode == AureaUiMode.edit
+            let returnsToTextLayout: Bool = model.curveReturnPanel == AureaModel.PanelKind.textLayout
+            let besideRoom: Bool = editingWorkspace ? width > height : wide
+            let textLayoutBeside: Bool = floatingCurve && returnsToTextLayout && besideRoom
+            let besideWidth: CGFloat = editingWorkspace ? width * 0.48 : sideWidth
+            let inspectorWidth: CGFloat = textLayoutBeside ? besideWidth : 0
+            let besidePanel: AureaModel.PanelKind? = textLayoutBeside ? AureaModel.PanelKind.textLayout : nil
+            let curveAlignment: Alignment = textLayoutBeside ? Alignment.bottomTrailing : Alignment.bottomLeading
+            let curveCardWidth: CGFloat = min(440, min(width * 0.62, width - inspectorWidth - 32))
             let aspect: CGFloat = model.compositionHeight > 0 ? CGFloat(model.compositionWidth) / CGFloat(model.compositionHeight) : 0
             // Fora da tela cheia o palco tem 8 pt de margem de cada lado.
             let sideMargin: CGFloat = model.fullscreen ? 0 : EditorLayout.previewSideMargin
@@ -81,7 +91,7 @@ struct EditorView: View {
                             // Omega conteúdo (área 06, P0-1): no modo de texto, o painel grande com a faixa de entrada.
                             if model.textModeActive && !floatingText { TextEditPanel().frame(width: sideWidth, height: max(1, geometry.size.height - EditorLayout.topBar)) }
                             else {
-                                ContextSheet(metrics: metrics, showsActivePanel: !floatingCurve, retainedPanel: textLayoutBeside ? .textLayout : nil)
+                                ContextSheet(metrics: metrics, showsActivePanel: !floatingCurve, retainedPanel: besidePanel)
                                     .frame(width: sideWidth, height: max(1, geometry.size.height - EditorLayout.topBar))
                             }
                         }
@@ -184,9 +194,9 @@ struct EditorView: View {
                     }
                 }
             }
-            .overlay(alignment: textLayoutBeside ? .bottomTrailing : .bottomLeading) {
+            .overlay(alignment: curveAlignment) {
                 if floatingCurve && !model.textModeActive {
-                    FloatingCurveCard(width: min(440, geometry.size.width * 0.62, geometry.size.width - inspectorWidth - 32))
+                    FloatingCurveCard(width: curveCardWidth)
                         .padding(.trailing, inspectorWidth)
                 }
             }

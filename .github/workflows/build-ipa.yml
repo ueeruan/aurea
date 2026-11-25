@@ -237,6 +237,7 @@ jobs:
               -allowProvisioningUpdates -authenticationKeyPath "$APPLE_KEY_PATH" \
               -authenticationKeyID "$APPLE_API_KEY_ID" -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID" \
               SWIFT_COMPILATION_MODE=singlefile COMPILER_INDEX_STORE_ENABLE=NO -IDEBuildingContinueBuildingAfterErrors=YES \
+              OTHER_SWIFT_FLAGS='$(inherited) -Xfrontend -solver-expression-time-threshold=120' \
               COMPILATION_CACHE_ENABLE_CACHING=YES -skipPackagePluginValidation -skipMacroValidation \
               archive 2>&1 | tee build-ios.log
             products=build/ios/Build/Products/Release-iphoneos
@@ -249,6 +250,7 @@ jobs:
               -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
               -derivedDataPath build/ios CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
               SWIFT_COMPILATION_MODE=singlefile COMPILER_INDEX_STORE_ENABLE=NO -IDEBuildingContinueBuildingAfterErrors=YES \
+              OTHER_SWIFT_FLAGS='$(inherited) -Xfrontend -solver-expression-time-threshold=120' \
               COMPILATION_CACHE_ENABLE_CACHING=YES -skipPackagePluginValidation -skipMacroValidation \
               build 2>&1 | tee build-ios.log
           fi

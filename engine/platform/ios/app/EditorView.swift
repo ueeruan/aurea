@@ -1075,7 +1075,7 @@ struct ContextSheet: View {
     @ObservedObject private var realCamera = RealCameraState.shared
     let metrics: EditorMetrics
     var showsActivePanel = true
-    var retainedPanel: PanelKind? = nil
+    var retainedPanel: AureaModel.PanelKind? = nil
 
     var body: some View {
         let panel = retainedPanel ?? (showsActivePanel ? model.panel : .none)

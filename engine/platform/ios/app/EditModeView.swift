@@ -48,7 +48,7 @@ struct EditModeView: View {
             let inlineText = texting && !floatingText
             let top: CGFloat = model.fullscreen ? 0 : texting ? 52 : 50
             let wide = geometry.size.width >= 600 && geometry.size.width > geometry.size.height && !inlineText && !model.fullscreen
-            let retainedPanel: PanelKind? = wide && floatingCurve && model.curveReturnPanel == .textLayout ? .textLayout : nil
+            let retainedPanel: AureaModel.PanelKind? = wide && floatingCurve && model.curveReturnPanel == .textLayout ? .textLayout : nil
             let inspecting = retainedPanel != nil || (!floatingCurve && model.panel != .none && model.panel != .dock)
             let available = max(0, geometry.size.height - top - 40)
             let lowerFloor: CGFloat = inlineText ? 180 : inspecting ? 220 : 170

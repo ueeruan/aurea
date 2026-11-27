@@ -1771,8 +1771,10 @@ struct EffectsView: View {
     private func applyTurbulencePreset(_ effect: EffectItem, reference: Bool) {
         guard let layer = model.primarySelection, model.selectedLayer?.locked != true else { return }
         let evolution: UInt32 = reference ? 5 : 3
-        let values: [(UInt32, Float)] = reference ? [(0, 0), (1, 15), (2, 15), (4, 1), (evolution, 0), (8, 0)]
-            : [(0, 15), (1, 15), (2, 1), (evolution, 0), (4, 0), (5, 0), (6, 0)]
+        // Arrays com tipo próprio: no ternário o Swift inferia (UInt32, Int) para (evolution, 0).
+        let referenceValues: [(UInt32, Float)] = [(0, 0), (1, 15), (2, 15), (4, 1), (evolution, 0), (8, 0)]
+        let classicValues: [(UInt32, Float)] = [(0, 15), (1, 15), (2, 1), (evolution, 0), (4, 0), (5, 0), (6, 0)]
+        let values: [(UInt32, Float)] = reference ? referenceValues : classicValues
         model.beginGesture("Preset Turbulência dinâmica")
         for (param, value) in values {
             model.engine.setEffect(effect.effectId, forLayer: layer, paramIndex: param, value: value)

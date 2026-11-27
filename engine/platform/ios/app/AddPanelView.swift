@@ -992,7 +992,7 @@ private enum AddBarDrawing {
                     model.openPanel(.captions)
                 } label: {
                     VStack(spacing: 2) {
-                        CupertinoIcon(CupertinoGlyph.CaptionsBubble, size: 19, color: AureaColors.accent)
+                        CupertinoGlyph.text(CupertinoGlyph.CaptionsBubble, size: 19, color: AureaColors.accent)
                         Text(AureaText.t("panel_legendas")).font(.aurea(size: 10, weight: .medium))
                             .foregroundStyle(AureaColors.accent).lineLimit(1).minimumScaleFactor(0.75)
                     }

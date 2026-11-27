@@ -1160,7 +1160,7 @@ struct CaptionsPanel: View {
                 let tint = selected ? AureaColors.accent : AureaColors.muted
                 Button { capTab = index } label: {
                     VStack(spacing: 2) {
-                        CupertinoIcon(glyph, size: 17, color: tint).accessibilityHidden(true)
+                        CupertinoGlyph.text(glyph, size: 17, color: tint).accessibilityHidden(true)
                         Text(AureaText.t(key)).font(.aurea(size: 11)).lineLimit(1).minimumScaleFactor(0.8).foregroundStyle(tint)
                     }
                     .frame(maxWidth: .infinity).frame(height: 48)

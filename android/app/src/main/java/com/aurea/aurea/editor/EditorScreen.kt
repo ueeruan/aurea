@@ -248,7 +248,7 @@ fun EditorScreen(store: EditorStore) {
     // (as setas ‹ › da timeline compacta) mantém o painel: o painel lê a
     // camada nova do store.
     LaunchedEffect(selectionSize) {
-        if (selectionSize != 1) ui.panel = null
+        if (selectionSize != 1 && ui.panel != EditorPanel.Captions) ui.panel = null
     }
     // Omega conteúdo (área 06, P0-7): o editor que a camada recém-criada pede
     // (desenho, Editar pontos) abre aqui; trocar de camada sai do modo de texto.

@@ -30,6 +30,24 @@ func fxEffectTypeId(_ key: String) -> UInt32 {
     return h
 }
 
+let fxColorStudioGradeType = fxEffectTypeId("aurea.color.studio_grade")
+let fxColorStudioLookType = fxEffectTypeId("aurea.color.studio_look")
+private let FxColorGradeType = fxEffectTypeId("aurea.color.grade")
+
+func fxColorParamSpecType(_ typeId: UInt32) -> UInt32 {
+    switch typeId {
+    case fxColorStudioGradeType, fxColorStudioLookType: return FxColorGradeType
+    default: return typeId
+    }
+}
+
+func fxColorStudioPrincipal(_ typeId: UInt32) -> [Int] {
+    switch typeId {
+    case fxColorStudioGradeType, fxColorStudioLookType: return FxTableById[typeId]?.principal ?? []
+    default: return []
+    }
+}
+
 /// A busca não distingue acento nem caixa ("saturacao" acha "Saturação").
 func fxNormalizeSearch(_ s: String) -> String {
     let folded = s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "pt_BR"))
@@ -90,7 +108,30 @@ private let FxCopyKeywords = "replicator repeater array randomize proximity stag
 private let FxCopyEffectTypes = Set(["aurea.3d.replicator", "aurea.repeat.arrange"].map { fxEffectTypeId($0) })
 func fxIsCopyLayoutEffect(_ type: UInt32) -> Bool { FxCopyEffectTypes.contains(type) }
 
+private let FxColorGradeParams: [Int: FxParamHuman] = [
+    1: FxParamHuman(label: "grade_temperature", decimals: 0),
+    2: FxParamHuman(label: "grade_tint", decimals: 0),
+    3: FxParamHuman(label: "grade_exposure", suffix: "EV", decimals: 2),
+    4: FxParamHuman(label: "grade_contrast", decimals: 0),
+    11: FxParamHuman(label: "grade_saturation", decimals: 0),
+    12: FxParamHuman(label: "grade_vibrance", decimals: 0),
+    76: FxParamHuman(label: "grade_intensity", decimals: 0),
+]
+
+private let FxPsykoParams = Dictionary(uniqueKeysWithValues: [
+    "fx_intensidade", "fx_frequencia", "psyko_color_cycles", "fxl_phase", "fxl_phase_speed",
+    "psyko_source_detail", "fx_saturacao", "fx_brilho",
+].enumerated().map { ($0.offset, FxParamHuman(label: $0.element)) })
+
 private let FxTable: [(key: String, effect: FxEffectHuman)] = [
+    ("aurea.stylize.psyko_blobs", FxEffectHuman(
+        keywords: "psyko blobs s_psykoblobs psychedelic color cycles manchas cores psicodelico",
+        principal: [0, 1, 2, 3, 4], params: FxPsykoParams.merging(
+            [8: FxParamHuman(label: "fxl_seed"), 9: FxParamHuman(label: "fxl_pattern_detail")]) { _, new in new })),
+    ("aurea.stylize.psyko_stripes", FxEffectHuman(
+        keywords: "psyko stripes strips psykostrips s_psykostripes psychedelic color cycles listras faixas cores psicodelico",
+        principal: [0, 1, 8, 2, 3, 4], params: FxPsykoParams.merging(
+            [8: FxParamHuman(label: "fxl_pattern_rotation")]) { _, new in new })),
     ("aurea.3d.replicator", FxEffectHuman(name: "fx_model_repeat", keywords: FxCopyKeywords, params: FxCopyParams)),
     ("aurea.repeat.arrange", FxEffectHuman(name: "fx_copy_arrange", keywords: FxCopyKeywords, params: FxCopyParams)),
     ("aurea.3d.toon", FxEffectHuman(name: "fx_model_toon", keywords: "cel toon cartoon anime pintura faixas modelo",
@@ -141,8 +182,8 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.transition.block_dissolve_reference", FxEffectHuman(name: "fx_ref_block_name", keywords: "block dissolve dissolver blocos transicao", principal: [0, 1, 2, 3, 4])),
     ("aurea.distort.wave_warp_reference", FxEffectHuman(name: "fx_name_wave_warp", keywords: "wave warp onda senoide agua", principal: [0, 1, 2, 3, 4, 5, 6, 7],
         params: [4: FxParamHuman(scale: 1, suffix: "Hz", decimals: 2)])),
-    ("aurea.distort.turbulent_displace_reference", FxEffectHuman(name: "fx_name_turbulence", keywords: "turbulent displace turbulencia ruido calor agua", principal: [0, 1, 2, 3, 4, 5],
-        params: [4: FxParamHuman(scale: 1, suffix: "", decimals: 1)])),
+    ("aurea.distort.turbulent_displace_reference", FxEffectHuman(name: "fx_name_turbulent_displace", keywords: "turbulent displace turbulencia ruido calor agua", principal: [0, 1, 2, 3, 4, 5],
+        params: [0: FxParamHuman(label: "fxl_displacement_type"), 4: FxParamHuman(scale: 1, suffix: "", decimals: 1)])),
     ("aurea.stylize.pixel_encoder", FxEffectHuman(keywords: "pixel encoder pixel_encoder megakrunch ascii letras grunge", principal: [0, 1, 2, 3, 4])),
     ("aurea.stylize.pix_dither", FxEffectHuman(keywords: "pixdither pix dither pontilhado paleta atkinson bayer", principal: [0, 1, 2])),
     ("aurea.time.low_fps", FxEffectHuman(keywords: "low fps stop motion travado quadros choppy tremido", principal: [0, 1, 3])),
@@ -268,6 +309,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     // Efeitos 3D (beta 12/10/2026): partes do objeto 3D, Shatter e Stroke.
     ("aurea.3d.part_transform", FxEffectHuman(name: "fx3d_name_part_transform",
         keywords: "animar parte 3d animate part mover girar escala objeto modelo forma keyframe peca", principal: Array(0...7))),
+    ("aurea.3d.spacing", FxEffectHuman(name: "fx3d_name_spacing", principal: [0])),
     ("aurea.3d.part_hide", FxEffectHuman(name: "fx3d_name_part_hide",
         keywords: "esconder partes 3d hide parts sumir ocultar visibilidade objeto modelo forma peca", principal: Array(0...3))),
     ("aurea.3d.part_texture", FxEffectHuman(name: "fx3d_name_part_texture",
@@ -579,8 +621,8 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             7: FxParamHuman(label: "fx_mistura", decimals: 0),
         ])),
     ("aurea.distort.turbulence", FxEffectHuman(
-        name: "fx_name_turbulence",
-        keywords: "turbulencia displacement deslocamento ruido organico fumaca turbulent displace",
+        name: "fx_name_turbulence_legacy",
+        keywords: "turbulencia displacement deslocamento ruido organico fumaca",
         principal: [12, 0, 1, 2, 4],
         params: [
             0: FxParamHuman(label: "fx_intensidade", suffix: "px", decimals: 0),
@@ -867,15 +909,17 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         name: "fx030_name_color_grade",
         keywords: "correcao de cor color grade grading lumetri resolve log slog vlog logc apple log lut rodas wheels lift gamma gain hsl curvas temperatura",
         principal: [0, 1, 2, 3, 4, 11, 12, 76],
-        params: [
-            1: FxParamHuman(label: "grade_temperature", decimals: 0),
-            2: FxParamHuman(label: "grade_tint", decimals: 0),
-            3: FxParamHuman(label: "grade_exposure", suffix: "EV", decimals: 2),
-            4: FxParamHuman(label: "grade_contrast", decimals: 0),
-            11: FxParamHuman(label: "grade_saturation", decimals: 0),
-            12: FxParamHuman(label: "grade_vibrance", decimals: 0),
-            76: FxParamHuman(label: "grade_intensity", decimals: 0),
-        ])),
+        params: FxColorGradeParams)),
+    ("aurea.color.studio_grade", FxEffectHuman(
+        name: "fx_studio_grade_name",
+        keywords: "estudio cor color studio colorista grade correcao grading balanço white balance wheels rodas curvas curves hsl exposição",
+        principal: [3, 1, 2, 4, 11, 76],
+        params: FxColorGradeParams)),
+    ("aurea.color.studio_look", FxEffectHuman(
+        name: "fx_studio_look_name",
+        keywords: "estudio cor look looks studio cc preset ffx after effects magic bullet film cinema lut color",
+        principal: [76, 70, 71],
+        params: FxColorGradeParams)),
     // Tempo amplo (0.3.0): o CC Wide Time do AE. Par do EffectsHuman.kt.
     ("aurea.time.wide_time", FxEffectHuman(
         name: "fx030_name_wide_time",
@@ -1124,6 +1168,14 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         principal: [0, 1, 2, 6, 3, 4],
         params: [5: FxParamHuman(suffix: "%", decimals: 0), 6: FxParamHuman(suffix: "%", decimals: 0)])),
     // Aprimorar (0.3.0): a restauração do Topaz (Proteus) com nome próprio.
+    ("aurea.hyper.upscale", FxEffectHuman(
+        keywords: "aurea detail melhorar qualidade upscale nitidez sharpen enhance anime resolução",
+        principal: [2, 1, 0])),
+    ("aurea.hyper.enchance", FxEffectHuman(
+        name: "hyper_preset_enchance",
+        keywords: "aurea enhance enchance reconstrução upscale 2x super resolution detalhes imagem vídeo",
+        principal: [0],
+        params: [0: FxParamHuman(label: "fxl_amount", suffix: "%", decimals: 0)])),
     ("aurea.enhance.video", FxEffectHuman(
         name: "fx030e_name",
         keywords: "aprimorar enhance topaz proteus restaurar melhorar qualidade upscale ruido denoise compressao deblock nitidez sharpen halo grao grain detalhe",
@@ -2196,7 +2248,8 @@ struct FxLayout {
 /// o de sempre (principais e "Avançado", `fxSplitPrincipal`). Com seção: as
 /// linhas soltas na ordem dos índices e cada seção (com pelo menos uma linha
 /// além do interruptor) na ordem do ordinal — as seções substituem o "Avançado".
-func fxEffectLayout(_ typeId: UInt32, _ visible: [EffectParamItem]) -> FxLayout {
+/// Os estúdios de cor trazem os controles principais para o topo e mantêm os demais nas seções.
+func fxEffectLayout(_ typeId: UInt32, _ visible: [EffectParamItem], quickControls: [Int] = []) -> FxLayout {
     guard visible.contains(where: { $0.section > 0 }) else {
         let slots = visible.map { FxParamSlot(index: Int($0.index), type: Int($0.type), min: $0.minValue, max: $0.maxValue,
                                               label: $0.label, unit: $0.unit, enumLabels: $0.enumLabels) }
@@ -2204,8 +2257,9 @@ func fxEffectLayout(_ typeId: UInt32, _ visible: [EffectParamItem]) -> FxLayout 
         let byIndex = Dictionary(visible.map { (Int($0.index), $0) }, uniquingKeysWith: { first, _ in first })
         return FxLayout(main: groups.main.compactMap { byIndex[$0.index] }, advanced: groups.rest.compactMap { byIndex[$0.index] }, sections: [])
     }
-    let loose = visible.filter { $0.section <= 0 }.sorted { $0.index < $1.index }
-    let grouped = Dictionary(grouping: visible.filter { $0.section > 0 }, by: \.section)
+    let remaining = quickControls.isEmpty ? visible : visible.filter { !quickControls.contains(Int($0.index)) }
+    let loose = remaining.filter { $0.section <= 0 }.sorted { $0.index < $1.index }
+    let grouped = Dictionary(grouping: remaining.filter { $0.section > 0 }, by: \.section)
     let sections: [FxSection] = grouped.keys.sorted().compactMap { ordinal in
         guard let members = grouped[ordinal], let head = members.first else { return nil }
         let toggle = members.first { Int($0.index) == head.sectionToggle && Int($0.type) == fxParamBool }
@@ -2213,7 +2267,9 @@ func fxEffectLayout(_ typeId: UInt32, _ visible: [EffectParamItem]) -> FxLayout 
         guard !rows.isEmpty else { return nil }
         return FxSection(ordinal: ordinal, key: head.sectionId, label: head.sectionLabel, toggle: toggle, open: head.sectionOpen, params: rows)
     }
-    return FxLayout(main: loose, advanced: [], sections: sections)
+    guard !quickControls.isEmpty else { return FxLayout(main: loose, advanced: [], sections: sections) }
+    let byIndex = Dictionary(visible.map { (Int($0.index), $0) }, uniquingKeysWith: { first, _ in first })
+    return FxLayout(main: quickControls.compactMap { byIndex[$0] }, advanced: loose, sections: sections)
 }
 
 /// A seção recolhida que contém o parâmetro `param` (0 = nenhuma).
@@ -2393,6 +2449,8 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.distort.warp", "fx_desc_distort_warp")
     put("aurea.distort.ripple_dissolve", "fx_desc_distort_ripple_dissolve")
     put("aurea.stylize.scanlines", "fx_desc_stylize_scanlines")
+    put("aurea.stylize.psyko_blobs", "psyko_blobs_desc")
+    put("aurea.stylize.psyko_stripes", "psyko_stripes_desc")
     put("aurea.stylize.grain", "fx_desc_stylize_grain")
     put("aurea.stylize.halftone", "fx_desc_stylize_halftone")
     put("aurea.stylize.minimax", "fx_desc_stylize_minimax")
@@ -2417,6 +2475,8 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.time.slice", "fx_desc_time_slice", [.video, .preComposicao], "timeslice fatias faixas tempo slit scan helice")
     put("aurea.time.wide_time", "fx030_desc_wide_time", FxAllTargets, "wide time cc tempo amplo rastro eco borrao quadros frente tras trail")
     put("aurea.color.grade", "fx030_desc_color_grade", FxAllTargets, "correcao de cor color grade grading lumetri resolve log lut rodas hsl curvas")
+    put("aurea.color.studio_grade", "fx_studio_grade_desc", FxAllTargets, "estudio cor color studio colorista grade correcao grading balanço white balance wheels rodas curvas curves hsl exposição")
+    put("aurea.color.studio_look", "fx_studio_look_desc", FxAllTargets, "estudio cor look looks studio cc preset ffx after effects magic bullet film cinema lut color")
     put("aurea.time.random_edits", "fx027_desc_random_edits", [.video, .preComposicao], "edicoes aleatorias random edits cortes embaralhar jump cut")
     put("aurea.generate.aurora", "fx030_desc_aurora", FxAllTargets, "aurora boreal northern lights ceu estrelas reflexo polar 3d camera")
     put("aurea.generate.constellation", "fx030c_desc", FxAllTargets, "constelacao plexus rede pontos linhas triangulos conexoes 3d camera")
@@ -2491,6 +2551,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.transition.disintegrate", "afx_desc_disintegrate", FxVisualTargets, "desintegrar disintegrate particulas particles fragmentos poeira dust cinzas dissolver explodir transicao")
     put("aurea.shape3d.layout", "fx_desc_shape3d_layout", [.cena3D], "forma 3d shape partes parts girar espalhar explodir atraso aleatorio")
     put("aurea.3d.part_transform", "fx3d_desc_part_transform", [.cena3D], "animar parte 3d animate part mover girar escala objeto modelo forma keyframe peca")
+    put("aurea.3d.spacing", "fx3d_desc_spacing", [.cena3D], "3d spacing espacamento separar afastar partes modelo spread separate parts exploded view")
     put("aurea.3d.part_hide", "fx3d_desc_part_hide", [.cena3D], "esconder partes 3d hide parts sumir ocultar visibilidade objeto modelo forma peca")
     put("aurea.3d.part_texture", "fx3d_desc_part_texture", [.cena3D], "trocar textura 3d swap texture imagem image material parte objeto modelo forma galeria")
     put("aurea.3d.explode", "fx3d_desc_explode", [.cena3D], "explosão explosao explodir explode explosion fratura fracture estilhaçar estilhacar shatter pedaços pedacos fragments desintegrar disintegrate montar assemble 3d modelo texto forma")
@@ -2746,7 +2807,7 @@ private let FxLabelFallback: [String: String] = ["Disposição": "fxf_arrangemen
 /// Rótulo, opções e unidade de um parâmetro no idioma do app, pela IDENTIDADE
 /// (typeId + índice → tabela gerada `EffectI18nTable`). Sem entrada, o texto do motor.
 func fxLocalizedParam(_ typeId: UInt32, index: Int, label: String, unit: String, options: [String]) -> (label: String, unit: String, options: [String]) {
-    let entry = EffectI18nTable.entries["\(typeId)#\(index)"]
+    let entry = EffectI18nTable.entries["\(fxColorParamSpecType(typeId))#\(index)"]
     let localizedUnit = FxUnitKeys[unit].map { AureaText.t($0) } ?? unit
     // Plugin (0.3.0): rótulo e opções do plugin.json, no idioma do app.
     if let decl = FxPluginTexts.param(typeId, index) {
@@ -2761,14 +2822,17 @@ func fxLocalizedParam(_ typeId: UInt32, index: Int, label: String, unit: String,
 }
 
 /// Título da seção do painel pela identidade (efeito + ordinal); sem entrada, o do motor.
-func fxLocalizedSection(_ typeId: UInt32, ordinal: Int, label: String) -> String {
-    guard ordinal > 0, let key = EffectI18nTable.sections["\(typeId)#\(ordinal)"] else { return label }
+func fxLocalizedSection(_ typeId: UInt32, ordinal: Int, sectionId: String, label: String) -> String {
+    guard ordinal > 0 else { return label }
+    let specType = fxColorParamSpecType(typeId)
+    if specType != typeId, sectionId == "window" { return AureaText.t("grade_window") }
+    guard let key = EffectI18nTable.sections["\(specType)#\(ordinal)"] else { return label }
     return AureaText.t(key)
 }
 
 /// Dica (ⓘ) do parâmetro pela identidade (efeito + índice); sem entrada, a do motor.
 func fxLocalizedTip(_ typeId: UInt32, index: Int, tip: String) -> String {
-    guard !tip.isEmpty, let key = EffectI18nTable.tips["\(typeId)#\(index)"] else { return tip }
+    guard !tip.isEmpty, let key = EffectI18nTable.tips["\(fxColorParamSpecType(typeId))#\(index)"] else { return tip }
     return AureaText.t(key)
 }
 

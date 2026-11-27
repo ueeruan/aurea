@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="psyko_color_cycles">Siklus warna</string>
+    <string name="psyko_source_detail">Detail gambar</string>
+    <string name="psyko_blobs_desc">Mewarnai ulang gambar dengan bercak organik dan warna yang berubah seiring waktu.</string>
+    <string name="psyko_stripes_desc">Mewarnai ulang gambar dengan garis berarah dan warna yang berubah seiring waktu.</string>
+</resources>

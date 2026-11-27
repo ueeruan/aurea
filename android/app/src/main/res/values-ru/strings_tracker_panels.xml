@@ -1,0 +1,5 @@
+<resources>
+    <string name="trk_motion_title">Трекер движения</string>
+    <string name="trk_video_required">Выберите видеослой.</string>
+    <string name="trk_back_to_result">К результату</string>
+</resources>

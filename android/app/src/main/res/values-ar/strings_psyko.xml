@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="psyko_color_cycles">دورات الألوان</string>
+    <string name="psyko_source_detail">تفاصيل الصورة</string>
+    <string name="psyko_blobs_desc">يعيد تلوين الصورة ببقع عضوية وألوان تتغير مع الوقت.</string>
+    <string name="psyko_stripes_desc">يعيد تلوين الصورة بخطوط موجهة وألوان تتغير مع الوقت.</string>
+</resources>

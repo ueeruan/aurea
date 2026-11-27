@@ -89,13 +89,12 @@ void Renderer::set_foreground_model_directory(std::string path) {
 
 DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
     DepthMapResult none; none.failed = planFinal_;
-    // Remover fundo: o recorte por quadro do cache (RendererBgRemove.cpp).
-    if (request.backgroundRemove) return bg_map(request);
     if (request.foreground && request.instance) {
-        // Rotobrush com traços: o recorte do Roto Brush (RendererRoto.cpp).
+        // Both cutout effects use the same propagation when brush strokes exist.
         ai::RotoStrokes strokes;
         if (ai::roto_instance_strokes(*request.instance, strokes)) return roto_map(request, strokes);
     }
+    if (request.backgroundRemove) return bg_map(request);
     // CAMADA DE AJUSTE: a profundidade da foto/vídeo que ela ajusta, levada
     // ao quadro (Renderer.cpp, depth_map_below).
     // O mesmo no fundo do Copiar fundo (os efeitos depois dele).

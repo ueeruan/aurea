@@ -4,6 +4,7 @@
 #include "aurea/project/Serialization.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Version.hpp"
+#include "aurea/hyper/Hyper.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -334,7 +335,19 @@ u64 project_key(const std::vector<u8>& projectBytes) noexcept {
         SaveOptions save;
         save.writeThumbnail = false;
         if (!ProjectSerializer::encode(project, save, bytes).ok() || bytes.empty()) return 0;
-        const u64 key = mix_bytes(kSeed, bytes.data(), bytes.size());
+        const EffectTypeId detail = effect_type_id(hyper::effect_keys::kHyperUpscale);
+        bool usesDetail = false;
+        project.timeline().for_each_composition([&](CompositionId, const Composition& comp) {
+            comp.layers().for_each([&](LayerId, const Layer& layer) {
+                usesDetail |= std::any_of(layer.effects.begin(), layer.effects.end(), [detail](const EffectInstance& effect) {
+                    return effect.enabled && effect.type == detail;
+                });
+            });
+        });
+        // Do not splice frames made with the previous Detail shader into a new export.
+        constexpr u64 kDetailRenderRevision = 2;
+        const u64 seed = usesDetail ? mix(kSeed, kDetailRenderRevision) : kSeed;
+        const u64 key = mix_bytes(seed, bytes.data(), bytes.size());
         return key ? key : 1;
     } catch (...) { return 0; }
 }
@@ -343,7 +356,7 @@ u64 request_key(u64 projectKey, CompositionId composition, const ExportSettings&
     if (!projectKey) return 0;
     // Campo a campo (nunca os bytes da struct: o preenchimento não é definido).
     const u64 fields[] = {
-        3u /* quality-preserving retry and shutter policy */, projectKey, composition.pack(), s.width, s.height, std::bit_cast<u64>(s.fps),
+        s.aiUpscale ? 5u : 3u /* preserve existing non-Detail export checkpoints */, projectKey, composition.pack(), s.width, s.height, std::bit_cast<u64>(s.fps),
         static_cast<u64>(s.videoCodec), s.videoBitrateMbps, s.rateMode, s.keyframeIntervalFrames,
         static_cast<u64>(s.audioCodec), s.audioBitrateKbps, s.audioSampleRate, s.audioChannels, s.container,
         static_cast<u64>(s.outputColorSpace), s.toneMapToSdr ? 1u : 0u, s.parallelSegments, s.motionBlurSamples,

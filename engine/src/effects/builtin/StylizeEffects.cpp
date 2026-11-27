@@ -773,6 +773,86 @@ public:
     bool is_identity(const EffectEval&) const noexcept override { return true; }
 };
 
+class PsykoColor final : public Effect {
+public:
+    explicit PsykoColor(bool stripes) noexcept : stripes_(stripes) {}
+
+    enum : u32 { kAmount, kFrequency, kColorCycles, kPhase, kPhaseSpeed, kSourceDetail,
+                 kSaturation, kBrightness, kSeedOrAngle, kPatternDetail };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo blobs{"aurea.stylize.psyko_blobs", "PsykoBlobs",
+                                      "Estilizar", EffectClass::Neighborhood};
+        static const EffectInfo stripes{"aurea.stylize.psyko_stripes", "PsykoStripes",
+                                        "Estilizar", EffectClass::Neighborhood};
+        return stripes_ ? stripes : blobs;
+    }
+
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_float("amount", "Intensidade", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("frequency", "Frequência", stripes_ ? 5.0f : 4.0f, 0.25f, 40.0f, kParamAnimatable);
+        p.add_float("color_cycles", "Ciclos de cor", 3.0f, 0.25f, 15.0f, kParamAnimatable);
+        p.add_float("phase", "Fase", 0.0f, -1.0f, 1.0f, kParamAnimatable);
+        p.add_float("phase_speed", "Velocidade da fase", 0.35f, -4.0f, 4.0f, kParamNone, "Hz");
+        p.add_float("source_detail", "Detalhe da imagem", 1.0f, 0.0f, 2.0f, kParamAnimatable);
+        p.add_float("saturation", "Saturação", 1.0f, 0.0f, 2.0f, kParamAnimatable);
+        p.add_float("brightness", "Brilho", 1.0f, 0.0f, 2.0f, kParamAnimatable);
+        if (stripes_) {
+            p.add_angle("angle", "Rotação do padrão", 35.0f);
+        } else {
+            p.add_int("seed", "Semente", 1, 0, 65535);
+            p.add_int("pattern_detail", "Detalhe do padrão", 1, 1, 6);
+        }
+    }
+
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return amount(e) <= 0.0f;
+    }
+
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_psyko_color_frag, work));
+    }
+
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        const auto read = [&](u32 index, f32 fallback, f32 low, f32 high) {
+            return std::clamp(finite_or(e.f(index), fallback), low, high);
+        };
+        const f64 fps = e.framesPerSecond > 0.0 ? e.framesPerSecond : 30.0;
+        const f64 seconds = e.time_frames() / fps;
+        const f64 timePhase = std::isfinite(seconds) ? seconds * read(kPhaseSpeed, 0.35f, -4.0f, 4.0f) : 0.0;
+        const f32 phase = static_cast<f32>(std::remainder(timePhase + read(kPhase, 0.0f, -1.0f, 1.0f), 1.0));
+
+        const f32 width = e.placement && e.placement->layerWidth ? static_cast<f32>(e.placement->layerWidth) : input.region.w;
+        const f32 height = e.placement && e.placement->layerHeight ? static_cast<f32>(e.placement->layerHeight) : input.region.h;
+        const f32 unit = std::max(1.0f, std::min(width, height));
+        EffectUniforms u = base_uniforms(input);
+        u.p0 = {amount(e), read(kFrequency, stripes_ ? 5.0f : 4.0f, 0.25f, 40.0f),
+                read(kColorCycles, 3.0f, 0.25f, 15.0f), read(kSourceDetail, 1.0f, 0.0f, 2.0f)};
+        u.p1 = {phase, read(kSaturation, 1.0f, 0.0f, 2.0f),
+                read(kBrightness, 1.0f, 0.0f, 2.0f), stripes_ ? 1.0f : 0.0f};
+        u.p2 = {(input.region.x - 0.5f * width) / unit, (input.region.y - 0.5f * height) / unit,
+                input.region.w / unit, input.region.h / unit};
+        if (stripes_) {
+            const f32 angle = std::remainder(finite_or(e.f(kSeedOrAngle), 35.0f), 360.0f) * kDeg2Rad;
+            u.p3 = {std::cos(angle), std::sin(angle), 0.0f, 0.0f};
+        } else {
+            // Keep seed offsets in the exact-integer range of the shader's float coordinates.
+            const u32 seed = static_cast<u32>(std::lround(read(kSeedOrAngle, 1.0f, 0.0f, 65535.0f)));
+            u.p3 = {static_cast<f32>((seed * 251u) % 997u), static_cast<f32>((seed * 127u) % 991u),
+                    std::round(read(kPatternDetail, 1.0f, 1.0f, 6.0f)), 0.0f};
+        }
+        return single_pass(ctx, ShaderId::effects_psyko_color_frag, input, u, "psyko-color", out);
+    }
+
+private:
+    static f32 amount(const EffectEval& e) noexcept {
+        return std::clamp(finite_or(e.f(kAmount), 100.0f) / 100.0f, 0.0f, 1.0f);
+    }
+
+    bool stripes_;
+};
+
 } // namespace
 
 void register_stylize_effects(EffectRegistry& r) {
@@ -782,6 +862,8 @@ void register_stylize_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<Scanlines>());
     (void)r.add(std::make_unique<SinusoidalScanlines>(false));
     (void)r.add(std::make_unique<SinusoidalScanlines>(true));
+    (void)r.add(std::make_unique<PsykoColor>(false));
+    (void)r.add(std::make_unique<PsykoColor>(true));
     (void)r.add(std::make_unique<Grain>());
     (void)r.add(std::make_unique<PhotographicGrain>());
     (void)r.add(std::make_unique<FilmProfileGrain>());

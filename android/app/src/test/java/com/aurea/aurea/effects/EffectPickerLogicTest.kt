@@ -251,7 +251,8 @@ class EffectPickerLogicTest {
         // Rastreio de câmera só para vídeo (tipo 1).
         assertTrue(EffectTool.CameraTrack in pickableTools(1))
         assertFalse(EffectTool.CameraTrack in pickableTools(4))
-        assertTrue(EffectTool.Captions in pickableTools(4) && EffectTool.Mask in pickableTools(4))
+        assertFalse(EffectTool.Captions in pickableTools(4))
+        assertTrue(EffectTool.Mask in pickableTools(4))
     }
 
     @Test

@@ -284,7 +284,6 @@ struct HomeView: View {
     @AppStorage("aurea.releaseNotes.read") private var readReleaseNotes = ""
     @State private var showReleaseNotes = false
     @StateObject private var notices = LiveNotices()
-    @State private var showDonationPrompt = false
     @State private var dialog: HomeProjectDialog?
     @State private var quick: OmegaQuickRequest?
     @State private var pendingProject: NewProjectDraft?
@@ -369,7 +368,6 @@ struct HomeView: View {
         #endif
         .fullScreenCover(isPresented: $showReleaseNotes, onDismiss: {
             readReleaseNotes = releaseNotesEdition
-            if model.donationPromptPending { showDonationPrompt = true }
         }) {
             OmegaReleaseNotes { showReleaseNotes = false }
         }
@@ -386,7 +384,6 @@ struct HomeView: View {
             if ProcessInfo.processInfo.environment["AUREA_PARITY_SCENE"] == "paywall" { return }
             #endif
             if readReleaseNotes != releaseNotesEdition { showReleaseNotes = true }
-            else if model.donationPromptPending { showDonationPrompt = true }
         }
         .onChange(of: model.screen) { screen in
             guard screen == .home else { return }
@@ -402,6 +399,12 @@ struct HomeView: View {
 
     // MARK: casca
 
+    private func communitySignIn() {
+        accountRecoveryEmail = nil
+        conta.entrando = true
+        showAccount = true
+    }
+
     private var main: some View {
         VStack(spacing: 0) {
             LiveNoticeBanners(notices: notices, banners: pluginTab || tab != .start)
@@ -412,14 +415,14 @@ struct HomeView: View {
                         selection = Set(arrangeHomeProjects(library.all, sort: defaults.sort, query: defaults.query).map(\.id))
                     }, onCancel: { selection = [] })
                     .transition(.opacity)
-                } else {
+                } else if pluginTab || tab != .community {
                     OmegaHomeTopBar(signedInEmail: conta.email, accountMenu: $accountMenu,
                                     onMenu: openDrawer,
                                     onImportAurea: pickProjectFile,
                                     onImportAe: pickAeProjectFile,
                                     onAccount: {
                                         if conta.logado { accountMenu = true }
-                                        else { conta.entrando = true; showAccount = true }
+                                        else { communitySignIn() }
                                     },
                                     accountEntries: accountEntries)
                     .transition(.opacity)
@@ -437,7 +440,7 @@ struct HomeView: View {
                                   onCreate: { showNewProject = true }, onProjects: { select(.projects) },
                                   onOpen: openProject, onMural: { select(.mural) },
                                   onReleaseNotes: { showReleaseNotes = true })
-                case .community: CommunityView(profileMode: false)
+                case .community: CommunityView(profileMode: false, onSignIn: communitySignIn)
                 case .profile: CommunityView(profileMode: true)
                 case .presets: OmegaPresetsTab(onQuickMenu: { quick = $0 })
                 case .models:
@@ -620,13 +623,6 @@ struct HomeView: View {
                        onConfirm: {
                            conta.excluirConta { ok in model.toast = AureaText.t(ok ? "conta_excluida" : "conta_excluir_falhou") }
                        }, onDismiss: { confirmDelete = false })
-        } else if showDonationPrompt {
-            AureaAlert(title: AureaText.t("donation_title"), message: AureaText.t("donation_launch_question"),
-                       confirmLabel: AureaText.t("donation_launch_yes"), cancelLabel: AureaText.t("donation_launch_later"),
-                       onConfirm: {
-                           model.donationPromptPending = false
-                           if let url = URL(string: AureaDonations.mercadoPago) { UIApplication.shared.open(url) }
-                       }, onDismiss: { showDonationPrompt = false; model.donationPromptPending = false })
         }
     }
 

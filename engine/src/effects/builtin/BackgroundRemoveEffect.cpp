@@ -12,6 +12,7 @@
 #include "BuiltinEffects.hpp"
 
 #include "aurea/ai/BackgroundRemoval.hpp"
+#include "aurea/ai/RotoMatte.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
 
 #include <algorithm>
@@ -46,6 +47,12 @@ public:
         // ou Pessoa (segmentador nativo; sem ele, o automático).
         static const char* const kModels[] = {"Automático", "Pessoa"};
         p.add_enum("model", "Modelo", kModels, 2, ai::kBgModelAuto);                                             // 10
+        ParamSpec strokes;
+        strokes.id = "strokes";
+        strokes.label = "Traços";
+        strokes.type = ParamType::Curve;
+        strokes.flags = kParamHidden;
+        p.add(strokes);                                                                                       // 11
     }
     bool is_identity(const EffectEval& e) const noexcept override { return e.f(kMix) <= 0; }
     void pipelines(std::vector<PipelineKey>& p, SurfaceFormat work) const override {
@@ -59,14 +66,14 @@ public:
         req.localTime = e.localTime;
         req.foreground = true;
         req.backgroundRemove = true;
-        req.smoothing = 0.0f;
+        req.smoothing = 0.5f; // Used by the brush path. The automatic matte stabilizes itself.
         req.bgModel = e.count > kModel ? e.e(kModel) : ai::kBgModelAuto;
         req.rotoEdgeRadius = e.count > kEdgeRadius ? std::max(0.f, e.f(kEdgeRadius)) : 0.f;
         req.rotoDecontaminate = e.count > kDecontaminate && e.f(kDecontaminate) > 0.f;
         const auto r = e.resources->depth_map(req);
         e.aux = r.texture;
         // x: 0 grade, 1 alfa refinado, 2 refinado com a cor do objeto; w: falhou.
-        e.auxInfo = {static_cast<f32>(r.rotoRefined), 0.f, 0.f, r.failed ? 1.f : 0.f};
+        e.auxInfo = {static_cast<f32>(r.rotoRefined), static_cast<f32>(e.resources->cutout_view(e.layer, e.instance)), 0.f, r.failed ? 1.f : 0.f};
         e.foregroundSourceTimeUs = r.sourceTimeUs;
     }
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32, LayerImage& out) const override {
@@ -77,7 +84,8 @@ public:
         u.p0 = {std::clamp((e.f(kThreshold) - e.f(kExpand)) * .01f, 0.f, 1.f), std::max(.001f, e.f(kFeather) * .005f),
                 e.b(kInvert) ? 1.f : 0.f, e.f(kMix) * .01f};
         // p1: mostrar máscara (pela visualização), tem máscara, visualização, contraste.
-        u.p1 = {0.f, e.aux.valid() ? 1.f : 0.f, static_cast<f32>(std::min(e.e(kView), 2u)), e.f(kContrast) * .01f};
+        const f32 view = e.auxInfo.y > 0.f ? e.auxInfo.y - 1.f : static_cast<f32>(std::min(e.e(kView), 2u));
+        u.p1 = {0.f, e.aux.valid() ? 1.f : 0.f, view, e.f(kContrast) * .01f};
         u.p2 = {input.region.x, input.region.y, input.region.w, input.region.h};
         const f32 lw = e.placement ? static_cast<f32>(e.placement->layerWidth) : input.region.w;
         const f32 lh = e.placement ? static_cast<f32>(e.placement->layerHeight) : input.region.h;
@@ -101,8 +109,9 @@ public:
     }
 
 private:
-    static constexpr u32 kThreshold = 0, kFeather = 1, kExpand = 2, kInvert = 3, kMix = 4, kView = 5, kContrast = 6,
-                         kSmooth = 7, kDecontaminate = 8, kEdgeRadius = 9, kModel = 10;
+    static constexpr u32 kThreshold = 0, kFeather = 1, kExpand = 2, kInvert = 3, kMix = 4,
+                         kView = ai::kBgRotoViewParam, kContrast = 6, kSmooth = 7,
+                         kDecontaminate = ai::kBgRotoDecontaminateParam, kEdgeRadius = ai::kBgRotoEdgeRadiusParam, kModel = 10;
 };
 
 } // namespace

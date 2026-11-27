@@ -398,11 +398,10 @@ std::unique_ptr<HyperStage> make_motion_stage(Path path) {
 }
 
 f64 cost_rife(const DeviceProfile& p) noexcept {
-    // Por MP de SAÍDA: a rede a 1/16 (Lite) dos pixels custa ~6× o SPAN por
-    // pixel da rede (medido no host) + o warp (~25 ms/MP numa CPU de celular).
+    // Por MP de SAÍDA: a rede a 1/16 (Lite) dos pixels e referência do Clean + warp.
     const f64 tile = p.tile ? p.tile : 96.0;
-    const f64 ms = p.liteMsPerTile > 0.0f ? p.liteMsPerTile : 300.0;
-    return ms * 1e6 / (tile * tile) * 6.0 / 16.0 + 25.0;
+    const f64 ms = p.liteMsPerTile > 0.0f ? p.liteMsPerTile : 870.0;
+    return ms * 1e6 / (tile * tile) * (6.0 / 2.9) / 16.0 + 25.0;
 }
 
 } // namespace neural

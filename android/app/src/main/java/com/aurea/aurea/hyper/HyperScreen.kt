@@ -11,6 +11,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -380,6 +381,7 @@ private fun RecipeStep(flow: HyperFlow) {
 private fun presetTitle(p: HyperPreset): Int = when (p) {
     HyperPreset.Restore -> R.string.hyper_preset_restore
     HyperPreset.Sharper -> R.string.hyper_preset_sharper
+    HyperPreset.Enchance -> R.string.hyper_preset_enchance
     HyperPreset.Fps60 -> R.string.hyper_preset_fps60
     HyperPreset.SlowMotion -> R.string.hyper_preset_slowmo
     HyperPreset.Anime -> R.string.hyper_preset_anime
@@ -389,6 +391,7 @@ private fun presetTitle(p: HyperPreset): Int = when (p) {
 private fun presetBody(p: HyperPreset): Int = when (p) {
     HyperPreset.Restore -> R.string.hyper_preset_restore_body
     HyperPreset.Sharper -> R.string.hyper_preset_sharper_body
+    HyperPreset.Enchance -> R.string.hyper_preset_enchance_body
     HyperPreset.Fps60 -> R.string.hyper_preset_fps60_body
     HyperPreset.SlowMotion -> R.string.hyper_preset_slowmo_body
     HyperPreset.Anime -> R.string.hyper_preset_anime_body
@@ -398,6 +401,7 @@ private fun presetBody(p: HyperPreset): Int = when (p) {
 private fun presetGlyph(p: HyperPreset): Char = when (p) {
     HyperPreset.Restore -> CupertinoGlyph.WandStars
     HyperPreset.Sharper -> CupertinoGlyph.Sparkles
+    HyperPreset.Enchance -> CupertinoGlyph.WandStars
     HyperPreset.Fps60 -> CupertinoGlyph.Hare
     HyperPreset.SlowMotion -> CupertinoGlyph.Tortoise
     HyperPreset.Anime -> CupertinoGlyph.Paintbrush
@@ -435,7 +439,7 @@ private fun RecipeCard(p: HyperPreset, selected: Boolean, variant: Int, onChoose
         if (p.variants.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                for (v in p.variants) Chip("${v}×", "hyper.receita.${p.id}.$v", on = selected && variant == v) { onChoose(v) }
+                for (v in p.variants) Chip(if (v == 0) stringResource(R.string.hyper_detail_same_size) else "${v}×", "hyper.receita.${p.id}.$v", on = selected && variant == v) { onChoose(v) }
             }
         }
     }
@@ -446,13 +450,22 @@ private fun AdjustPanel(flow: HyperFlow) {
     val r = flow.recipe
     val muted = AureaType.of(12f, color = AureaColors.Muted)
     Column(Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(12.dp)).background(AureaColors.Surface).padding(14.dp)) {
-        Section(R.string.hyper_adjust_upscale)
-        ChipRow(HyperRecipe.UpscaleFactors.map { if (it == 1) stringResource(R.string.common_off) else "${it}×" },
-            HyperRecipe.UpscaleFactors.indexOf(r.upscale), "hyper.ajuste.upscale") { flow.edit(r.copy(upscale = HyperRecipe.UpscaleFactors[it])) }
-        if (r.upscale > 1) {
+        val enchance = r.upscaleMode == HyperUpscaleMode.Enchance
+        val factors = if (enchance) listOf(1, 2) else HyperRecipe.UpscaleFactors
+        Section(if (enchance) R.string.hyper_preset_enchance else R.string.hyper_adjust_upscale)
+        ChipRow(factors.map { when (it) {
+            0 -> stringResource(R.string.hyper_detail_same_size)
+            1 -> stringResource(R.string.common_off)
+            else -> "${it}×"
+        } },
+            factors.indexOf(r.upscale), "hyper.ajuste.upscale") { flow.edit(r.copy(upscale = factors[it])) }
+        if (r.upscale != 1) {
             Spacer(Modifier.height(8.dp))
-            ChipRow(listOf(stringResource(R.string.hyper_mode_general), stringResource(R.string.hyper_mode_anime)), r.upscaleMode.ordinal,
-                "hyper.ajuste.modo") { flow.edit(r.copy(upscaleMode = HyperUpscaleMode.entries[it])) }
+            ChipRow(listOf(stringResource(R.string.hyper_mode_general), stringResource(R.string.hyper_mode_anime),
+                stringResource(R.string.hyper_preset_enchance)), r.upscaleMode.ordinal, "hyper.ajuste.modo", scrollable = true) {
+                val mode = HyperUpscaleMode.entries[it]
+                flow.edit(r.copy(upscaleMode = mode, upscale = if (mode == HyperUpscaleMode.Enchance) 2 else r.upscale))
+            }
         }
         Section(R.string.hyper_adjust_clean)
         SliderRow(stringResource(R.string.hyper_adjust_denoise), r.denoise, "hyper.ajuste.ruido") { flow.edit(r.copy(denoise = it)) }
@@ -500,8 +513,9 @@ private fun Section(title: Int) {
 }
 
 @Composable
-private fun ChipRow(labels: List<String>, selected: Int, tag: String, onSelect: (Int) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun ChipRow(labels: List<String>, selected: Int, tag: String, scrollable: Boolean = false, onSelect: (Int) -> Unit) {
+    val modifier = if (scrollable) Modifier.horizontalScroll(rememberScrollState()) else Modifier
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         labels.forEachIndexed { i, label -> Chip(label, "$tag.$i", on = i == selected) { onSelect(i) } }
     }
 }
@@ -717,7 +731,9 @@ private fun WorkingStep(flow: HyperFlow) {
     Text(stringResource(title), style = AureaType.TitleLarge, modifier = Modifier.semantics { heading() })
     Spacer(Modifier.height(14.dp))
     val info = HyperJobInfo.decode(flow.exporter.hyperSteps)?.takeIf { it.active }
-    for ((step, state) in visibleSteps(flow, info)) StepRow(step, state, info?.takeIf { it.present(step) }?.path(step))
+    for ((step, state) in visibleSteps(flow, info)) {
+        StepRow(step, state, info?.takeIf { it.present(step) }?.path(step), flow.recipe.upscaleMode)
+    }
     if (info != null && info.passCount > 1) {
         Spacer(Modifier.height(6.dp))
         Text(stringResource(R.string.hyper_pass, info.pass.coerceAtLeast(1), info.passCount), style = muted)
@@ -777,7 +793,7 @@ private fun visibleSteps(flow: HyperFlow, info: HyperJobInfo?): List<Pair<HyperS
         when (it) {
             HyperStep.Clean -> r.denoise > 0f || r.deblock || r.deinterlace > 0
             HyperStep.Stable -> r.stabilize
-            HyperStep.Upscale -> r.upscale > 1
+            HyperStep.Upscale -> r.upscale != 1
             HyperStep.Face -> r.face
             HyperStep.Motion -> r.targetFps > 0.0 || r.slowMotion > 1
             else -> true
@@ -808,8 +824,9 @@ private fun stepName(s: HyperStep): Int = when (s) {
 }
 
 @Composable
-private fun StepRow(step: HyperStep, state: HyperStepState, path: HyperPath?) {
-    val name = stringResource(stepName(step))
+private fun StepRow(step: HyperStep, state: HyperStepState, path: HyperPath?, mode: HyperUpscaleMode) {
+    val name = stringResource(if (step == HyperStep.Upscale && mode == HyperUpscaleMode.Enchance)
+        R.string.hyper_preset_enchance else stepName(step))
     // O caminho que a etapa usa DE FATO (Lite/Max caem para Turbo sem a rede no aparelho).
     val pathLabel = path?.takeIf { it != HyperPath.Auto && step in ProcessingSteps }?.let { stringResource(pathName(it)) }
     val stateText = stringResource(when (state) {

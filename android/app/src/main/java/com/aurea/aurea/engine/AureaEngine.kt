@@ -122,7 +122,7 @@ class AureaEngine private constructor() {
         @JvmStatic external fun nativeEffectRequiresHyper(typeId: Int): Boolean
         /** 1.0.2: opção paga de um efeito grátis (Flow Retime › Neural (IA)); só o AureaHyper libera. */
         @JvmStatic external fun nativeEffectOptionRequiresHyper(typeId: Int, paramIndex: Int, value: Float): Boolean
-        /** 0.5.4: criar texto 3D pede o mesmo acesso do AureaHyper (hyper::text3d_requires_access). */
+        /** Política compartilhada de acesso ao Texto 3D (hyper::text3d_requires_access). */
         @JvmStatic external fun nativeText3dRequiresHyper(): Boolean
         /** 16/11/2026: a assinatura avulsa que libera o efeito pago (null = grátis ou só AureaHyper). */
         @JvmStatic external fun nativeEffectProductId(typeId: Int): String?
@@ -832,6 +832,8 @@ class AureaEngine private constructor() {
     fun queryGizmo(layer: Long, length: Float, out: FloatArray, localSpace: Boolean = false): Boolean = nativeQueryGizmo(nativeHandle, layer, length, out, localSpace)
     fun gizmoMoveLocal(layer: Long, axis: Int, amount: Float, out: FloatArray): Boolean = nativeGizmoMoveLocal(nativeHandle, layer, axis, amount, out)
     fun previewGestureBasis(layer: Long): FloatArray? = FloatArray(13).takeIf { nativePreviewGestureBasis(nativeHandle, layer, it) }
+    fun pivotDragBasis(layer: Long): FloatArray? = FloatArray(14).takeIf { nativePivotDragBasis(nativeHandle, layer, it) }
+    private external fun nativePivotDragBasis(handle: Long, layer: Long, out: FloatArray): Boolean
     private external fun nativePreviewGestureBasis(handle: Long, layer: Long, out: FloatArray): Boolean
     /** Trackball: origem (2), eixos na vista A (9), frame F (9), Rotação XYZ (3). */
     fun queryTrackball(layer: Long): FloatArray? = FloatArray(23).takeIf { nativeQueryTrackball(nativeHandle, layer, it) }
@@ -1306,8 +1308,8 @@ class AureaEngine private constructor() {
     fun layerMediaPath(layer: Long): String? = nativeLayerMediaPath(nativeHandle, layer)
 
     /** "Substituir mídia": troca a fonte da camada de vídeo/imagem por um vídeo. id ou −código. */
-    fun replaceLayerVideo(layer: Long, source: String, name: String): Long =
-        nativeWork.run(-5L) { nativeReplaceLayerVideo(nativeHandle, layer, source, name) }
+    fun replaceLayerVideo(layer: Long, source: String, name: String, verifyUpgrade: Boolean = false): Long =
+        nativeWork.run(-5L) { nativeReplaceLayerVideo(nativeHandle, layer, source, name, verifyUpgrade) }
     /** "Substituir mídia" por uma foto (RGBA8 em buffer direto, como [importImage]). */
     fun replaceLayerImage(layer: Long, rgba: ByteBuffer, width: Int, height: Int, name: String, source: String,
                           orientation: Int = 1): Long =
@@ -2469,7 +2471,7 @@ class AureaEngine private constructor() {
     private external fun nativeClearTextSpans(handle: Long, layer: Long, start: Int, end: Int): Boolean
     private external fun nativeQueryTextAnimators(handle: Long, layer: Long): FloatArray?
     private external fun nativeLayerMediaPath(handle: Long, layer: Long): String?
-    private external fun nativeReplaceLayerVideo(handle: Long, layer: Long, source: String, name: String): Long
+    private external fun nativeReplaceLayerVideo(handle: Long, layer: Long, source: String, name: String, verifyUpgrade: Boolean): Long
     private external fun nativeReplaceLayerImage(
         handle: Long, layer: Long, rgba: ByteBuffer, width: Int, height: Int, name: String, source: String, orientation: Int,
     ): Long

@@ -2,6 +2,9 @@ package com.aurea.aurea.community
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
+import android.net.Uri
+import android.os.Build
 import android.util.LruCache
 import org.json.JSONObject
 import org.json.JSONArray
@@ -11,15 +14,21 @@ import java.io.InputStream
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URI
+import java.net.URL
 import java.net.URLEncoder
 
 internal data class CommunityProfile(val id: String, val username: String, val name: String, val bio: String = "",
     val avatar: String? = null, val verification: String = "", val followers: Int = 0, val following: Int = 0,
     val posts: Int = 0, val followed: Boolean = false, val blocked: Boolean = false)
-internal data class CommunityAsset(val id: String, val kind: String, val name: String, val bytes: Long)
+internal data class CommunityAsset(val id: String, val kind: String, val name: String, val bytes: Long) {
+    val isMedia: Boolean get() = kind == "image" || kind == "video"
+}
 internal data class CommunityPost(val id: String, val body: String, val createdAt: Long, val author: CommunityProfile,
-    val asset: CommunityAsset?, val likes: Int, val comments: Int, val liked: Boolean, val category: String = "")
-internal data class CommunityComment(val id: String, val body: String, val createdAt: Long, val author: CommunityProfile)
+    val asset: CommunityAsset?, val likes: Int, val comments: Int, val liked: Boolean, val category: String = "",
+    val media: CommunityAsset? = null)
+internal data class CommunityComment(val id: String, val body: String, val createdAt: Long, val author: CommunityProfile,
+    val replyName: String? = null)
+internal data class CommunityNotice(val id: String, val post: String, val kind: String, val name: String, val createdAt: Long, val unread: Boolean)
 internal class CommunityFailure(val code: String) : IOException(code)
 internal fun JSONObject.profile() = CommunityProfile(getString("id"), optString("username"), optString("name"),
     optString("bio"), optString("avatar").takeIf { it.isNotBlank() && it != "null" }, optString("verification"),
@@ -27,7 +36,9 @@ internal fun JSONObject.profile() = CommunityProfile(getString("id"), optString(
 internal fun JSONObject.asset() = CommunityAsset(getString("id"), getString("kind"), getString("name"), getLong("bytes"))
 internal fun JSONObject.post() = CommunityPost(getString("id"), optString("body"), getLong("createdAt"),
     getJSONObject("author").profile(), optJSONObject("asset")?.asset(), optInt("likes"), optInt("comments"),
-    optBoolean("liked"), optString("category"))
+    optBoolean("liked"), optString("category"), optJSONObject("media")?.asset())
+internal fun JSONObject.notice() = CommunityNotice(getString("id"), getString("post"), getString("kind"),
+    optString("name"), getLong("createdAt"), optBoolean("unread"))
 /** Item da Loja da Comunidade. `type`: plugin, effect ou preset; `format`: plugin ou preset. */
 internal data class StoreItem(val id: String, val type: String, val format: String, val name: String, val description: String,
     val tutorialUrl: String, val photos: Int, val pluginId: String?, val version: String, val presetKind: String?,
@@ -44,7 +55,8 @@ internal fun JSONObject.storeItem(): StoreItem {
         optInt("downloads"), optInt("likes"), optBoolean("liked"), optLong("bytes"), optString("status"), optString("reviewNote"),
         optBoolean("mine"), getJSONObject("author").profile(), optLong("createdAt"))
 }
-internal fun JSONObject.comment() = CommunityComment(getString("id"), getString("body"), getLong("createdAt"), getJSONObject("author").profile())
+internal fun JSONObject.comment() = CommunityComment(getString("id"), getString("body"), getLong("createdAt"), getJSONObject("author").profile(),
+    optString("replyName").takeIf { it.isNotBlank() && it != "null" })
 internal fun <T> JSONArray?.mapObjects(transform: (JSONObject) -> T): List<T> = if (this == null) emptyList() else (0 until length()).map { transform(getJSONObject(it)) }
 internal fun JSONObject.nextCursor(): String? = optString("cursor").takeIf { it.isNotEmpty() && it != "null" }
 
@@ -76,9 +88,15 @@ internal open class CommunityApi(private val token: String,
     private val root: String = "https://aurea-ai-discovery.aureaapp.workers.dev/api/community") {
     companion object : com.aurea.aurea.engine.TrimmableImageCache {
         init { com.aurea.aurea.engine.UiImageCaches.register(this) }
-        override fun releaseImages() = avatars.evictAll()
+        override fun releaseImages() {
+            avatars.evictAll()
+            mediaImages.evictAll()
+        }
         fun query(value: String): String = URLEncoder.encode(value, "UTF-8")
         private val avatars = object : LruCache<String, Bitmap>(4 * 1024 * 1024) {
+            override fun sizeOf(key: String, value: Bitmap) = value.allocationByteCount
+        }
+        private val mediaImages = object : LruCache<String, Bitmap>(16 * 1024 * 1024) {
             override fun sizeOf(key: String, value: Bitmap) = value.allocationByteCount
         }
     }
@@ -116,25 +134,110 @@ internal open class CommunityApi(private val token: String,
         request("/profiles/$id/block", if (blocked) "PUT" else "DELETE").getJSONObject("profile").profile()
     fun upload(file: File, kind: String, name: String = file.name): CommunityAsset {
         val max = if (kind == "avatar") 512L * 1024 else if (kind == "preset") 1024L * 1024 else 50L * 1024 * 1024
+        return uploadFile("/assets", file, kind, name, max)
+    }
+    fun uploadMedia(file: File, kind: String): CommunityAsset =
+        uploadFile("/media", file, kind, file.name, if (kind == "image") CommunityImageLimit else CommunityVideoLimit)
+
+    private fun uploadFile(path: String, file: File, kind: String, name: String, max: Long): CommunityAsset {
         if (file.length() !in 1..max) throw CommunityFailure("file_too_large")
-        val c = open("/assets?kind=$kind&name=${query(name)}", "POST")
+        val c = open("$path?kind=$kind&name=${query(name)}", "POST")
         try {
             c.doOutput = true; c.setFixedLengthStreamingMode(file.length()); c.setRequestProperty("Content-Type", "application/octet-stream")
             file.inputStream().use { input -> c.outputStream.use { input.copyTo(it) } }
             return response(c).asset()
         } finally { c.disconnect() }
     }
-    fun download(asset: CommunityAsset, target: File) {
-        if (asset.bytes !in 1..50L * 1024 * 1024 || !asset.id.matches(Regex("[a-f0-9-]{36}"))) throw CommunityFailure("invalid_file")
-        val c = open("/assets/${asset.id}", "GET")
+
+    open fun mediaUrl(asset: CommunityAsset): String? =
+        if (asset.id.matches(Regex("[a-f0-9-]{36}"))) "$root/media/${asset.id}" else null
+
+    fun shareText(post: CommunityPost): String {
+        val author = post.author.username.takeIf { it.isNotBlank() }?.let { "@$it" } ?: post.author.name
+        val link = post.media?.let(::mediaUrl) ?: post.asset
+            ?.takeIf { it.id.matches(Regex("[a-f0-9-]{36}")) }?.let { "$root/assets/${it.id}" }
+        return listOfNotNull(author.takeIf { it.isNotBlank() }, post.body.takeIf { it.isNotBlank() }, link)
+            .joinToString("\n\n")
+    }
+
+    private fun openMedia(asset: CommunityAsset): HttpURLConnection {
+        val url = mediaUrl(asset) ?: throw CommunityFailure("invalid_file")
+        fun request(url: URL) = (url.openConnection() as HttpURLConnection).apply {
+            connectTimeout = 8_000; readTimeout = 30_000; instanceFollowRedirects = false
+        }
+        val initial = request(URI(url).toURL())
+        try {
+            if (initial.responseCode !in 300..399) return initial
+            val location = initial.getHeaderField("Location") ?: throw CommunityFailure("invalid_file")
+            val cdn = URI(location)
+            if (cdn.scheme != "https" || cdn.host != "media.aureaeditor.com" || cdn.userInfo != null ||
+                (cdn.port != -1 && cdn.port != 443)) throw CommunityFailure("invalid_file")
+            initial.disconnect()
+            return request(cdn.toURL())
+        } catch (e: Exception) {
+            initial.disconnect()
+            throw e
+        }
+    }
+
+    fun postImage(asset: CommunityAsset, maxSide: Int): Bitmap? {
+        if (asset.bytes !in 1..CommunityImageLimit) return null
+        val key = "${asset.id}:$maxSide"
+        mediaImages.get(key)?.let { return it }
+        val c = openMedia(asset)
+        return try {
+            if (c.responseCode != 200) return null
+            val data = c.inputStream.use { it.readBounded(CommunityImageLimit.toInt()) }
+            if (data.size.toLong() != asset.bytes) return null
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
+            val sample = com.aurea.aurea.engine.ImageMemoryPolicy.sampleSize(
+                bounds.outWidth, bounds.outHeight, maxSide, maxSide.toLong() * maxSide,
+            ) ?: return null
+            BitmapFactory.decodeByteArray(data, 0, data.size, BitmapFactory.Options().apply { inSampleSize = sample })
+                ?.also { mediaImages.put(key, it) }
+        } catch (_: OutOfMemoryError) {
+            mediaImages.evictAll(); null
+        } finally { c.disconnect() }
+    }
+
+    fun videoPoster(asset: CommunityAsset, maxSide: Int): Bitmap? {
+        if (Build.VERSION.SDK_INT < 27 || asset.kind != "video" || asset.bytes !in 1..CommunityVideoLimit) return null
+        val url = mediaUrl(asset) ?: return null
+        val key = "video:${asset.id}:$maxSide"
+        mediaImages.get(key)?.let { return it }
+        val retriever = MediaMetadataRetriever()
+        return try {
+            if (url.startsWith("file://")) retriever.setDataSource(Uri.parse(url).path ?: return null)
+            else retriever.setDataSource(url, emptyMap())
+            retriever.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, maxSide, maxSide)
+                ?.also { mediaImages.put(key, it) }
+        } catch (_: OutOfMemoryError) {
+            mediaImages.evictAll()
+            null
+        } finally {
+            retriever.release()
+        }
+    }
+    fun download(asset: CommunityAsset, target: File): String {
+        val max = when (asset.kind) {
+            "image" -> CommunityImageLimit
+            "video" -> CommunityVideoLimit
+            else -> 50L * 1024 * 1024
+        }
+        if (asset.bytes !in 1..max || !asset.id.matches(Regex("[a-f0-9-]{36}"))) throw CommunityFailure("invalid_file")
+        val c = if (asset.isMedia) openMedia(asset) else open("/assets/${asset.id}", "GET")
         try {
             if (c.responseCode != 200) throw CommunityFailure("community_unavailable")
+            val mime = c.contentType.orEmpty().substringBefore(';').lowercase()
+            if (asset.isMedia && !mime.startsWith(asset.kind + "/")) throw CommunityFailure("invalid_file")
             c.inputStream.use { input -> target.outputStream().use { out ->
                 val buf = ByteArray(64 * 1024); var total = 0L
                 while (true) { val n = input.read(buf); if (n < 0) break; total += n
                     if (total > asset.bytes) throw CommunityFailure("invalid_file"); out.write(buf, 0, n) }
                 if (total != asset.bytes) throw CommunityFailure("invalid_file")
             } }
+            return mime
         } catch (e: Exception) { target.delete(); throw e } finally { c.disconnect() }
     }
     // ------------------------------------------------------------------

@@ -31,11 +31,16 @@
 #include "aurea/vector/Vector.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <deque>
+#include <iomanip>
+#include <limits>
+#include <locale>
 #include <span>
+#include <sstream>
 #include <unordered_map>
 
 namespace aurea::ae {
@@ -56,6 +61,121 @@ u16 suffix(std::string_view m, std::string_view effect) noexcept {
 }
 
 bool animated(const Node& n) noexcept { return n.keys.size() > 1 || !n.expression.empty(); }
+
+using LookBytes = std::span<const u8>;
+
+u32 look_u32(LookBytes from, usize pos) noexcept {
+    return (u32(from[pos]) << 24) | (u32(from[pos + 1]) << 16) |
+           (u32(from[pos + 2]) << 8) | u32(from[pos + 3]);
+}
+
+f64 look_number(LookBytes from, usize pos) noexcept {
+    return std::bit_cast<f64>((u64(look_u32(from, pos)) << 32) | look_u32(from, pos + 4));
+}
+
+std::string_view look_tag(LookBytes from) noexcept {
+    return {reinterpret_cast<const char*>(from.data()), 4};
+}
+
+struct LookRecipe {
+    std::vector<LookBytes> tools;
+    std::unordered_map<u32, f64> strength;
+    f64 mix = 100.0;
+};
+
+bool read_look_recipe(LookBytes data, LookRecipe& recipe) {
+    if (data.size() < 8 || look_tag(data) != "MBL2") return false;
+    constexpr u32 maxTools = 256, maxRecords = 4096;
+    u32 declaredTools = kInvalidIndex;
+    u32 records = 0;
+    // The header word is not a record count. Strength and color-management
+    // records can follow the nominal end of the stream.
+    usize pos = 8;
+    while (data.size() - pos >= 8) {
+        if (++records > maxRecords) return false;
+        const auto tag = look_tag(data.subspan(pos));
+        // A zero tag at the end can carry a four-byte trailer in these files.
+        if (tag == std::string_view("\0\0\0\0", 4) && data.size() - pos == 8) {
+            pos += 8;
+            break;
+        }
+        if (!std::all_of(tag.begin(), tag.end(), [](char c) { return c >= ' ' && c <= '~'; })) return false;
+        const u32 len = look_u32(data, pos + 4);
+        if (len > data.size() - pos - 8) return false;
+        const auto record = data.subspan(pos, 8 + len);
+        const auto body = record.subspan(8);
+        pos += record.size();
+        if (tag == "tool" || tag == "cust" || tag == "lutc") {
+            if (recipe.tools.size() == maxTools) return false;
+            recipe.tools.push_back(record);
+        } else if (tag == "#tls") {
+            if (len != 4 || declaredTools != kInvalidIndex) return false;
+            declaredTools = look_u32(body, 0);
+            if (declaredTools > maxTools) return false;
+        } else if (tag == "strn") {
+            if (len != 8) return false;
+            const f64 value = look_number(body, 0);
+            if (!std::isfinite(value) || value < 0.0 || value > 1.0) return false;
+            recipe.mix = value * 100.0;
+        } else if (tag == "Tstr") {
+            if (len != 12) return false;
+            const u32 at = look_u32(body, 0);
+            const f64 value = look_number(body, 4);
+            if (at >= maxTools || !std::isfinite(value) || value < 0.0 || value > 100.0 ||
+                !recipe.strength.emplace(at, value / 100.0).second) return false;
+        }
+    }
+    const usize tail = data.size() - pos;
+    if (tail != 0 && tail != 4) return false;
+    if (declaredTools == kInvalidIndex ? recipe.tools.empty() : declaredTools != recipe.tools.size()) return false;
+    return std::all_of(recipe.strength.begin(), recipe.strength.end(),
+        [&](const auto& entry) { return entry.first < recipe.tools.size(); });
+}
+
+std::string look_cube(LookBytes from, u32& side, f64& intensity, f32& gamma) {
+    if (from.size() < 164 || look_tag(from.subspan(128)) != "lutc" || look_u32(from, 136) != 2) return {};
+    side = look_u32(from, 156);
+    if (side < 2 || side > 65 || from.size() != 164 + 12u * side * side * side) return {};
+    intensity = look_number(from, 148);
+    gamma = std::bit_cast<f32>(look_u32(from, 160));
+    if (!std::isfinite(intensity) || !std::isfinite(gamma) || gamma <= 0.f) return {};
+    std::ostringstream cube;
+    cube.imbue(std::locale::classic());
+    cube << "LUT_3D_SIZE " << side << '\n' << std::setprecision(std::numeric_limits<f32>::max_digits10);
+    for (usize pos = 164; pos < from.size(); pos += 12) {
+        // The grid is red-fastest, but each sample is stored as BGR in little-endian floats.
+        for (usize offset : {8u, 4u, 0u}) {
+            const usize i = pos + offset;
+            const f32 value = std::bit_cast<f32>(u32(from[i]) | (u32(from[i + 1]) << 8) |
+                                                (u32(from[i + 2]) << 16) | (u32(from[i + 3]) << 24));
+            if (!std::isfinite(value) || std::abs(value) > 65504.0f) return {};
+            cube << value << (offset == 0 ? '\n' : ' ');
+        }
+    }
+    return std::move(cube).str();
+}
+
+// Map the hue and chroma of a tint to the Aurea color wheel.
+Vec2 look_tint(f64 r, f64 g, f64 b, f64 amount) noexcept {
+    const f64 high = std::max({r, g, b}), low = std::min({r, g, b});
+    const f64 chroma = high - low;
+    if (chroma <= 1e-6) return {};
+    const f64 hue = high == r ? (g - b) / chroma : high == g ? 2.0 + (b - r) / chroma : 4.0 + (r - g) / chroma;
+    const f64 angle = hue * 1.0471975511965976;
+    const f64 scale = std::clamp(chroma * amount / 100.0, 0.0, 1.0);
+    return {static_cast<f32>(scale * std::cos(angle)), static_cast<f32>(scale * std::sin(angle))};
+}
+
+std::string_view look_tool_name(std::string_view id) noexcept {
+    constexpr std::pair<std::string_view, std::string_view> names[] = {
+        {"crv2", "Curves"}, {"csta", "Colorista"}, {"grad", "Gradient"}, {"lnsd", "Lens Distortion"},
+        {"edgs", "Edge Softness"}, {"spex", "Spot Exposure"}, {"diff", "Diffusion"}, {"haze", "Haze/Flare"},
+        {"mjo2", "Mojo II"}, {"cmix", "Channel Mixer"}, {"fgrn", "Film Grain"}, {"chab", "Chromatic Aberration"},
+        {"lgg2", "Lift/Gamma/Gain"}, {"wmcl", "Warm/Cool"}, {"2stp", "2-Strip Process"},
+    };
+    for (const auto& [code, name] : names) if (id == code) return name;
+    return id;
+}
 
 /// Propriedade de animador de texto sem equivalente parada no padrão do AE: não
 /// muda nada no resultado, então não entra no relatório. Os presets antigos
@@ -206,7 +326,189 @@ struct Applier {
             rep.skip("efeito", shown, rule->reason ? rule->reason : "efeito sem equivalente no Aurea");
             return;
         }
+        if (std::string_view(rule->key) == effect_keys::kLookStudio) {
+            apply_look(n, shown);
+            return;
+        }
         apply_effect(n, shown, rule, -1);
+    }
+
+    void apply_look(const Node& n, const std::string& shown) {
+        LookRecipe recipe;
+        if (!read_look_recipe(n.lookData, recipe)) {
+            rep.skip("efeito", shown, n.lookData.empty()
+                ? "receita Looks ausente ou em formato ainda não suportado"
+                : "receita Looks incompleta ou inválida");
+            return;
+        }
+
+        const EffectTypeId type = effect_type_id(effect_keys::kLookStudio);
+        const ParameterRegistry* specs = host.registry().params(type);
+        if (!specs) { rep.skip("efeito", shown, "efeito sem equivalente no Aurea"); return; }
+        std::unordered_map<std::string_view, ParamValue> values;
+        std::string cube;
+        CurveData curves = CurveData::identity();
+        bool haveCurves = false;
+        u32 side = 0;
+        f64 lutIntensity = 100.0, saturation = 100.0, exposure = 0.0, temperature = 0.0, tint = 0.0;
+        const auto set = [&](std::string_view key, f64 value) { values[key] = ParamValue::scalar(static_cast<f32>(value)); };
+        const auto unsupported = [&](std::string_view tool) {
+            rep.skip("parametro", shown + " · " + std::string(look_tool_name(tool)), "ajuste do Looks ainda sem conversão completa");
+        };
+        bool hasActiveTools = false;
+        for (u32 i = 0; i < recipe.tools.size(); ++i) {
+            const auto record = recipe.tools[i];
+            const auto tag = look_tag(record);
+            auto body = record.subspan(8);
+            const auto strength = recipe.strength.find(i);
+            const f64 blend = strength == recipe.strength.end() ? 1.0 : strength->second;
+            if (blend <= 0.0) continue;
+            hasActiveTools = true;
+            if (tag == "lutc") {
+                u32 size = 0;
+                f64 intensity = 100;
+                f32 gamma = 0;
+                auto decoded = look_cube(body, size, intensity, gamma);
+                if (decoded.empty() || !cube.empty()) { unsupported("LUT"); continue; }
+                cube = std::move(decoded);
+                side = size;
+                lutIntensity = std::clamp(intensity, 0.0, 100.0) * blend;
+                if (std::abs(gamma - 2.2f) > 0.001f) unsupported("Gamma da LUT");
+                continue;
+            }
+            const usize nameSize = tag == "cust" ? 128 : 0;
+            if (body.size() < nameSize + 12) { unsupported("Ferramenta"); continue; }
+            body = body.subspan(nameSize);
+            const auto name = look_tag(body);
+            if (!std::all_of(name.begin(), name.end(), [](char c) { return c >= ' ' && c <= '~'; })) {
+                unsupported("Ferramenta");
+                continue;
+            }
+            const u32 width = look_u32(body, 8);
+            if (width > 256 || body.size() != 12 + 8u * width) { unsupported(name); continue; }
+            // Low byte identifies the stage. The state of additional flags is unverified.
+            if ((look_u32(body, 4) & ~0xffu) != 0) { unsupported(name); continue; }
+            f64 p[256]{};
+            bool finite = true;
+            for (u32 j = 0; j < width; ++j) {
+                p[j] = look_number(body, 12 + 8 * j);
+                finite &= std::isfinite(p[j]) && std::abs(p[j]) < 1e6;
+            }
+            if (!finite) { unsupported(name); continue; }
+            if (name == "expo" && width == 1) {
+                exposure += p[0] * blend;
+                set("exposure", exposure);
+            } else if (name == "wmcl" && width == 3) {
+                temperature += p[0] * 100.0 * blend;
+                tint += p[1] * 100.0 * blend;
+                exposure += p[2] * blend;
+                set("temperature", temperature);
+                set("tint", tint);
+                set("exposure", exposure);
+            } else if (name == "lgg2" && width == 12) {
+                const f64 strength = std::clamp(p[1], 0.0, 100.0) * blend / 100.0;
+                exposure += p[2] * strength;
+                set("exposure", exposure);
+                if (std::any_of(p + 3, p + 12, [](f64 v) { return std::abs(v - 1.0) > 1e-6; })) unsupported(name);
+            } else if (name == "husa" && width == 5) {
+                saturation *= 1.0 + (p[1] / 100.0 - 1.0) * blend;
+                set("saturation", saturation);
+                if (p[0] != 0.0 || std::abs(p[2] - 0.2126) + std::abs(p[3] - 0.7152) + std::abs(p[4] - 0.0722) > 0.001)
+                    unsupported("Matiz e pesos de saturação");
+            } else if (name == "cont" && width == 3) {
+                set("contrast", p[0] * 100.0 * blend);
+                set("pivot", p[1] * 100.0);
+                exposure += p[2] * blend;
+                set("exposure", exposure);
+            } else if (name == "crv2" && width > 130 && !haveCurves) {
+                constexpr u32 offsets[] = {37, 68, 99, 130};
+                bool supported = true;
+                for (u32 channel = 0; channel < 4; ++channel) {
+                    const u32 offset = offsets[channel];
+                    const f64 points = p[offset];
+                    if (points < 0.0 || points > 15.0 || std::trunc(points) != points || offset + 2 * points >= width) {
+                        supported = false;
+                        continue;
+                    }
+                    for (u32 j = 0; j < static_cast<u32>(points); ++j) {
+                        const auto x = static_cast<f32>(std::clamp(p[offset + 1 + j * 2], 0.0, 1.0));
+                        const auto y = static_cast<f32>(std::clamp(x + p[offset + 2 + j * 2] * blend, 0.0, 1.0));
+                        auto& lane = curves.channel[channel];
+                        const auto at = std::lower_bound(lane.begin(), lane.end(), x,
+                            [](const CurveData::Point& point, f32 t) { return point.x < t; });
+                        if (at != lane.end() && at->x == x) at->y = y;
+                        else lane.insert(at, CurveData::Point{x, y});
+                    }
+                }
+                haveCurves = !curves.is_identity();
+                if (!supported || std::any_of(p + 1, p + 36, [](f64 v) { return v != 0.0; }))
+                    unsupported("Curvas paramétricas");
+            } else if (name == "csta" && (width == 202 || width == 216 || width == 228)) {
+                const f64 strength = std::clamp(p[1], 0.0, 100.0) * blend / 100.0;
+                exposure += p[2] * strength;
+                set("exposure", exposure);
+                saturation *= 1.0 + (p[12] / 100.0 - 1.0) * strength;
+                set("saturation", saturation);
+                constexpr std::string_view bands[3][8] = {
+                    {"red_hue", "orange_hue", "yellow_hue", "green_hue", "aqua_hue", "blue_hue", "purple_hue", "magenta_hue"},
+                    {"red_sat", "orange_sat", "yellow_sat", "green_sat", "aqua_sat", "blue_sat", "purple_sat", "magenta_sat"},
+                    {"red_lum", "orange_lum", "yellow_lum", "green_lum", "aqua_lum", "blue_lum", "purple_lum", "magenta_lum"}
+                };
+                for (u32 field = 0; field < 3; ++field)
+                    for (u32 color = 0; color < 8; ++color)
+                        set(bands[field][color], p[13 + field * 8 + color] * strength);
+                unsupported("Ajustes avançados Colorista");
+            } else if (name == "lenv" && width == 7) {
+                set("vignette", -std::clamp(p[1], 0.0, 100.0) * blend);
+                set("vignette_mid", p[0]);
+                if (p[3] != 0 || p[4] != 0 || p[5] != 1 || p[6] != 0) unsupported("Geometria da vinheta");
+            } else if (name == "duto" && width == 9) {
+                const Vec2 highlight = look_tint(p[0], p[1], p[2], p[3] * blend);
+                const Vec2 shadow = look_tint(p[4], p[5], p[6], p[7] * blend);
+                values["highlight_tint"] = ParamValue::vec2(highlight.x, highlight.y);
+                values["shadow_tint"] = ParamValue::vec2(shadow.x, shadow.y);
+                set("tint_balance", (p[8] - 50.0) * 2.0);
+            } else if (name != "spex" || width != 12 || p[0] != 0.0 || p[7] != 1.0 || p[8] != 1.0 || p[9] != 1.0) {
+                unsupported(name);
+            }
+        }
+        if (values.empty() && cube.empty() && !haveCurves && hasActiveTools && recipe.mix > 0) return;
+        const u32 id = host.add_effect(lid, type);
+        refresh();
+        EffectInstance* fx = w.layer ? w.layer->find_effect(EffectId{id, 0}) : nullptr;
+        if (id == kInvalidIndex || !fx) {
+            rep.skip("efeito", shown, "o Aurea recusou este efeito nesta camada");
+            return;
+        }
+        fx->enabled = (n.flags & 1u) != 0 || n.flags == 0;
+        set("mix", recipe.mix);
+        if (haveCurves) {
+            const u32 index = specs->find("curves");
+            if (index < fx->params.size() && fx->params[index].constant.ref < fx->curves.size())
+                fx->curves[fx->params[index].constant.ref] = std::move(curves);
+        }
+        if (!cube.empty()) {
+            const AssetId asset = host.store_look_lut(cube);
+            if (asset.valid()) {
+                values["lut"].ref = asset.pack();
+                set("lut_size", side);
+                set("lut_dims", 3);
+                set("lut_intensity", lutIntensity);
+            } else {
+                rep.skip("parametro", shown + " · LUT", "não foi possível salvar a tabela de cor no projeto");
+            }
+        }
+        for (const auto& [key, value] : values) {
+            const u32 index = specs->find(key);
+            if (index >= specs->count() || index >= fx->params.size()) continue;
+            const auto& spec = specs->at(index);
+            fx->params[index].constant = value;
+            for (f32& channel : fx->params[index].constant.v) channel = std::clamp(channel, spec.minValue, spec.maxValue);
+        }
+        rep.note("efeito", shown, "receita Looks convertida em ajustes editáveis do Aurea; a ordem e o espaço de cor podem variar");
+        ++rep.effects;
+        ++rep.changes;
+        ++applied;
     }
 
     /// Cria o efeito do Aurea da regra e aplica os parâmetros do nó. `onlyAe`

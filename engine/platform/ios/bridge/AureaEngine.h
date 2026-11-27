@@ -292,6 +292,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSArray<NSNumber*>*)gestureScale3D:(int)kind scaleX:(float)x scaleY:(float)y scaleZ:(float)z axis:(int)axis factor:(float)factor NS_SWIFT_NAME(gestureScale3D(_:scaleX:scaleY:scaleZ:axis:factor:));
 - (NSArray<NSNumber*>*)fitCanvas:(NSArray<NSNumber*>*)values fill:(BOOL)fill NS_SWIFT_NAME(fitCanvas(_:fill:));
 - (NSArray<NSNumber*>*)previewGestureBasis:(long long)layer;
+- (NSArray<NSNumber*>*)pivotDragBasis:(long long)layer;
 - (NSArray<NSNumber*>*)previewGestureValue:(NSArray<NSNumber*>*)basis dx:(float)dx dy:(float)dy rotate:(BOOL)rotate;
 
 /// `cache` e `documents` são as pastas do app. `documents` é onde o .aurea e a
@@ -1217,6 +1218,7 @@ NS_SWIFT_NAME(AureaEngine)
 /// "Substituir mídia" (EngineMedia.cpp): vídeo ou foto novo na MESMA camada
 /// (transform, keyframes, efeitos, máscaras e tempo ficam). Id ou −Errc.
 - (long long)replaceLayer:(long long)layerId withVideo:(NSString*)path name:(NSString*)name;
+- (long long)replaceLayer:(long long)layerId withVideo:(NSString*)path name:(NSString*)name verifyUpgrade:(BOOL)verifyUpgrade;
 - (long long)replaceLayer:(long long)layerId withImageFile:(NSString*)path name:(NSString*)name;
 /// Arquivo de origem da camada de vídeo/áudio/imagem ("" = nenhum).
 - (NSString*)layerSourcePath:(long long)layerId;

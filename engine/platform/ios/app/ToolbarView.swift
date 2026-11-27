@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 import PhotosUI
 import AVFoundation
+import UniformTypeIdentifiers
 
 // =============================================================================
 // Omega chrome (área 02): glifos, papéis de cor e popups ancorados da moldura
@@ -137,6 +138,8 @@ struct TopBarView: View {
     @State private var layerMenu = false
     @State private var projectMore = false
     @State private var replaceTarget: LayerRef?
+    @State private var improveSourceTarget: Int64?
+    @State private var pickingBetterSource = false
     /// A barra da camada entra descendo da borda de cima em 100 ms (a `action_bar_show` da referência).
     @State private var layerEnter: CGFloat = 0
     private var parent: Int64 { (model.detail["parentId"] as? NSNumber)?.int64Value ?? 0 }
@@ -163,6 +166,10 @@ struct TopBarView: View {
                 replaceTarget = nil
                 if let (url, video) = items.first { model.replaceMedia(layer: target.id, url: url, video: video) }
             }
+        }
+        .fileImporter(isPresented: $pickingBetterSource, allowedContentTypes: [.movie, .video]) { result in
+            model.completeVideoSourcePicker(layer: improveSourceTarget, result: result)
+            improveSourceTarget = nil
         }
         // Omega chrome: pedidos do painel de Ajustes, que mora na raiz do app (fora da casca).
         .onChange(of: requests.commandSearch) { on in
@@ -198,7 +205,8 @@ struct TopBarView: View {
         case .curve: return AureaText.t("panel_easing_curve")
         case .presets: return AureaText.t("panel_presets")
         case .particles: return AureaText.t("panel_particulas")
-        case .tracking: return AureaText.t("panel_rastreio")
+        case .tracking: return AureaText.t("trk_motion_title")
+        case .cameraTracking: return AureaText.t("cam_tracker_title")
         case .captions: return AureaText.t("panel_legendas")
         case .vector: return AureaText.t(model.vectorFace == .fill ? "panel_cor_preenchimento" : "fn_vec_paths_title")
         case .filters: return AureaText.t("grade_title_filters")
@@ -546,8 +554,21 @@ struct TopBarView: View {
                 }
             case .replaceMedia:
                 out.append(.header(AureaText.t("sh_menu_media")))
-                out.append(.item(AureaText.t("layer_replace_media"), glyph: CupertinoGlyph.Arrow2Squarepath, sublabel: AureaText.t("layer_replace_media_detail"),
-                                 enabled: !row.locked) { replaceTarget = LayerRef(id: row.id) })
+                let replace = MenuEntry.item(AureaText.t("layer_replace_media"), glyph: CupertinoGlyph.Arrow2Squarepath,
+                                                  sublabel: AureaText.t("layer_replace_media_detail"), enabled: !row.locked) {
+                    replaceTarget = LayerRef(id: row.id)
+                }
+                if row.kind == 1 {
+                    let better = MenuEntry.item(AureaText.t("layer_improve_source"), glyph: CupertinoGlyph.Sparkles,
+                                                     sublabel: AureaText.t("layer_improve_source_detail"), enabled: !row.locked,
+                                                     tag: "layer.menu.improveSource") {
+                        if model.status.playing != 0 { model.pause() }
+                        improveSourceTarget = row.id
+                        pickingBetterSource = true
+                    }
+                    out.append(.item(AureaText.t("layer_replace_media"), glyph: CupertinoGlyph.Arrow2Squarepath,
+                                     submenu: [better, replace], enabled: !row.locked))
+                } else { out.append(replace) }
             // 0.4.5: Remover fundo — o efeito na camada e, no vídeo, a análise do clipe.
             case .removeBackground:
                 out.append(.item(AureaText.t("bg_remove_action"), glyph: CupertinoGlyph.PersonCropCircle,
@@ -1085,6 +1106,28 @@ private struct TransportIconButton: View {
     }
 }
 
+/// Keep Space available for typing while any UIKit text field is active.
+struct PlaybackShortcut: ViewModifier {
+    let enabled: Bool
+    @State private var editingInput: ObjectIdentifier?
+
+    func body(content: Content) -> some View {
+        content.keyboardShortcut(enabled && editingInput == nil ? KeyboardShortcut(.space, modifiers: []) : nil)
+            .onReceive(NotificationCenter.default.publisher(for: UITextField.textDidBeginEditingNotification), perform: beganEditing)
+            .onReceive(NotificationCenter.default.publisher(for: UITextView.textDidBeginEditingNotification), perform: beganEditing)
+            .onReceive(NotificationCenter.default.publisher(for: UITextField.textDidEndEditingNotification), perform: endedEditing)
+            .onReceive(NotificationCenter.default.publisher(for: UITextView.textDidEndEditingNotification), perform: endedEditing)
+    }
+
+    private func beganEditing(_ note: Notification) {
+        if let responder = note.object as? UIResponder { editingInput = ObjectIdentifier(responder) }
+    }
+
+    private func endedEditing(_ note: Notification) {
+        if let responder = note.object as? UIResponder, editingInput == ObjectIdentifier(responder) { editingInput = nil }
+    }
+}
+
 private struct PreRenderPlayControl: View {
     @EnvironmentObject private var model: AureaModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1131,6 +1174,7 @@ private struct PreRenderPlayControl: View {
             }.frame(width: side, height: EditorLayout.transport).contentShape(Rectangle())
             .opacity(pressed ? 0.65 : 1)
         }.buttonStyle(.plain)
+            .modifier(PlaybackShortcut(enabled: !model.textModeActive))
             .highPriorityGesture(DragGesture(minimumDistance: 0)
                 .onChanged { value in
                     if began == nil {

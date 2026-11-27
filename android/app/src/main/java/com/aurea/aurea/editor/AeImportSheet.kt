@@ -198,6 +198,9 @@ private fun aeReportString(key: String): Int? = when (key) {
     "ae_err_internal" -> R.string.ae_err_internal
     "ae_reason_effect_unknown" -> R.string.ae_reason_effect_unknown
     "ae_reason_param_unknown" -> R.string.ae_reason_param_unknown
+    "ae_reason_looks_invalid" -> R.string.ae_reason_looks_invalid
+    "ae_reason_looks_missing" -> R.string.ae_reason_looks_missing
+    "ae_reason_looks_tool_partial" -> R.string.ae_reason_looks_tool_partial
     "ae_reason_media_missing" -> R.string.ae_reason_media_missing
     "ae_reason_text_document" -> R.string.ae_reason_text_document
     "ae_reason_params_approx" -> R.string.ae_reason_params_approx

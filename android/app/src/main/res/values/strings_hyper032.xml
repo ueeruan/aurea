@@ -22,7 +22,7 @@
     <string name="hyper_adjust_stable_on">Estabilizar</string>
     <string name="hyper_adjust_strength">Força</string>
     <string name="hyper_adjust_target_fps">Quadros por segundo</string>
-    <string name="hyper_adjust_upscale">Resolução</string>
+    <string name="hyper_adjust_upscale">Aurea Detail</string>
     <string name="hyper_always">Sempre</string>
     <string name="hyper_audio_muted">Câmera lenta: o vídeo sai sem som (o áudio não é esticado).</string>
     <string name="hyper_back_to_preview">Voltar à prévia</string>
@@ -56,7 +56,7 @@
     <string name="hyper_feature_motion">60 fps e câmera lenta 2×, 4× ou 8× com quadros novos</string>
     <string name="hyper_feature_offline">Tudo no aparelho: o vídeo não é enviado</string>
     <string name="hyper_feature_stable">Estabilização, com opção de gravar como keyframes</string>
-    <string name="hyper_feature_upscale">Upscale 2× ou 4× (vídeo real ou anime)</string>
+    <string name="hyper_feature_upscale">Aurea Detail mantém o tamanho original ou amplia em 2× ou 4×.</string>
     <string name="hyper_frames">quadro %1$d de %2$d</string>
     <string name="hyper_keep">Manter</string>
     <string name="hyper_locked_badge">Assinatura mensal</string>
@@ -66,7 +66,7 @@
     <string name="hyper_locked_intro">O AureaHyper restaura e melhora vídeos no próprio aparelho: mais nitidez, menos ruído, mais quadros e imagem estável.</string>
     <string name="hyper_locked_not_owned">Esta conta ainda não tem o AureaHyper.</string>
     <string name="hyper_locked_offline">Não deu para confirmar o acesso agora. Conecte-se à internet e tente de novo.</string>
-    <string name="hyper_locked_payment_note">Assinatura mensal ligada à sua conta Aurea. O AureaHyper libera também todos os efeitos pagos e o Texto 3D.</string>
+    <string name="hyper_locked_payment_note">Assinatura mensal ligada à sua conta Aurea. O AureaHyper libera também todos os efeitos pagos.</string>
     <string name="hyper_locked_signed_out">Entre na sua conta Aurea para conferir se ela tem o AureaHyper.</string>
     <string name="hyper_measure_again">Medir o aparelho de novo</string>
     <string name="hyper_meter_almost">Quase pronto…</string>
@@ -91,13 +91,15 @@
     <string name="hyper_path_turbo">Turbo</string>
     <string name="hyper_path_turbo_body">Mais rápido, na GPU. Funciona em qualquer aparelho.</string>
     <string name="hyper_preset_anime">Anime</string>
-    <string name="hyper_preset_anime_body">Dobra a resolução com a rede feita para desenhos e anime.</string>
+    <string name="hyper_preset_anime_body">Amplia desenhos e anime com contornos mais definidos.</string>
     <string name="hyper_preset_fps60">60 fps</string>
     <string name="hyper_preset_fps60_body">Cria quadros entre os originais para um movimento mais suave.</string>
     <string name="hyper_preset_restore">Restaurar vídeo antigo</string>
     <string name="hyper_preset_restore_body">Tira ruído e blocos, corrige entrelaçado, dobra a resolução e realça rostos.</string>
-    <string name="hyper_preset_sharper">Mais nítido</string>
-    <string name="hyper_preset_sharper_body">Aumenta a resolução com detalhes novos.</string>
+    <string name="hyper_preset_sharper">Aurea Detail</string>
+    <string name="hyper_preset_sharper_body">Realça detalhes e melhora contornos em um único passe na GPU.</string>
+    <string name="hyper_preset_enchance">AureaEnchance</string>
+    <string name="hyper_preset_enchance_body">Reconstrói detalhes em 2× usando filtros aprendidos na GPU.</string>
     <string name="hyper_preset_slowmo">Câmera lenta</string>
     <string name="hyper_preset_slowmo_body">Deixa o vídeo mais lento criando quadros novos, sem engasgos.</string>
     <string name="hyper_preset_stabilize">Estabilizar</string>
@@ -126,7 +128,7 @@
     <string name="hyper_step_of">%1$d de %2$d</string>
     <string name="hyper_step_prepare">Preparar</string>
     <string name="hyper_step_stable">Estabilizar</string>
-    <string name="hyper_step_upscale">Aumentar resolução</string>
+    <string name="hyper_step_upscale">Aurea Detail</string>
     <string name="hyper_time_hours">%1$d h %2$d min</string>
     <string name="hyper_time_left">faltam %1$s</string>
     <string name="hyper_time_minutes">%1$d min</string>
@@ -146,4 +148,5 @@
     <string name="licenses_oss_intro">O Aurea usa software e modelos de código aberto. Toque num item para ler a licença como ela vem no app.</string>
     <string name="licenses_oss_title">Licenças de código aberto</string>
     <string name="licenses_read_failed">Não foi possível ler este arquivo.</string>
+    <string name="hyper_detail_same_size">Mesmo tamanho</string>
 </resources>

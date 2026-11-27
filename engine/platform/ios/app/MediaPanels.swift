@@ -28,7 +28,6 @@ struct CaptionBlockStyleView: View {
     @State private var blockHighlight = true
     @State private var blockUppercase = false
     @State private var blockLook = CaptionLook()
-    @State private var blockTemplate: String?
     @State private var fontsOpen = false
     private func edit(_ op: String, _ fields: [String: Any] = [:]) {
         error = captionEdit(model, layer: track.layer, op: op, ids: Array(selected), fields: fields) ? nil : AureaText.t("ios_caption_edit_invalid")
@@ -50,12 +49,17 @@ struct CaptionBlockStyleView: View {
         }
     }
 
-    /// Modelos e aparência só dos blocos marcados (os mesmos controles da faixa).
+    /// Aparência só dos blocos marcados.
     private var blockStyleControls: some View {
         let own = track.segments.contains { selected.contains($0.id) && $0.look != nil }
         return VStack(alignment: .leading, spacing: 0) {
             Text(AureaText.t("cap046_block_style_n", selected.count)).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 6)
-            CaptionTemplateRow(selected: blockTemplate, enabled: true) { applyBlockTemplate($0) }
+            Text(AureaText.t("caption_star_motion")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted)
+            CaptionChips(options: ["caption_star_cut", "pn_caption_style_highlight", "edt_tp_pop"].map { AureaText.t($0) },
+                         selected: blockStyle == 5 ? 2 : blockHighlight ? 1 : 0) { index in
+                blockStyle = [0, 2, 5][index]; blockHighlight = index != 0; pushBlockStyle()
+            }
+            CaptionAction(label: AureaText.t("caption_star_impact")) { applyBlockTemplate("comic") }
             blockToggle("pn_caption_highlight_word", blockHighlight) { blockHighlight = $0; pushBlockStyle() }
             blockToggle("pn_caption_uppercase", blockUppercase) { blockUppercase = $0; pushBlockStyle() }
             CaptionCustomizeView(look: $blockLook, highlight: blockHighlight, preview: CaptionPreview(json: model.engine.captionPreview(blockOptionsJSON)),
@@ -89,22 +93,21 @@ struct CaptionBlockStyleView: View {
     private func loadBlockStyle() {
         let first = track.segments.first { selected.contains($0.id) }
         loadBlock(json: first?.look ?? model.engine.captionOptions(track.layer))
-        blockTemplate = nil
     }
     private func pushBlockStyle() {
         guard !selected.isEmpty else { return }
         edit("look", ["options": blockOptionsJSON])
     }
-    private func blockCustomized() { blockTemplate = nil; pushBlockStyle() }
+    private func blockCustomized() { pushBlockStyle() }
     private func applyBlockTemplate(_ id: String) {
         let json = model.engine.captionOptions(blockOptionsJSON, withTemplate: id)
         guard !json.isEmpty else { return }
-        loadBlock(json: json); blockTemplate = id; pushBlockStyle()
+        loadBlock(json: json); pushBlockStyle()
     }
 }
 
 @MainActor
-struct TrackingPanel: View {
+struct CameraTrackerPanel: View {
     @EnvironmentObject private var model: AureaModel
     @State private var mode: UInt32 = 1
     @State private var status: [String: Any] = [:]
@@ -122,33 +125,29 @@ struct TrackingPanel: View {
     @State private var shotType: UInt32 = 0
     @State private var lens = false
     private let objectTitles = ["cam_create_null_anchor", "cam_create_camera_shape", "cam_create_camera_text", "cam_create_camera_solid"]
-    private let timer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
     private var state: Int { (status["state"] as? NSNumber)?.intValue ?? 0 }
     var body: some View {
         VStack(spacing: 0) {
-            PanelHeader(title: AureaText.t("panel_rastreio"), onBack: { model.panel = .none })
-            Picker(AureaText.t("panel_rastreio"), selection: $model.cameraTrackerVisible) {
-                Text(AureaText.t("cam_mode_2d")).tag(false)
-                Text(AureaText.t("panel_camera_3d")).tag(true)
-            }.pickerStyle(.segmented).frame(minHeight: 44).padding(.horizontal, 14)
+            PanelHeader(title: AureaText.t("cam_tracker_title"), onBack: { model.panel = .none })
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    if model.cameraTrackerVisible { cameraSection } else { MotionTrackingSection() }
-                }.padding(.init(top: 12, leading: 18, bottom: 24, trailing: 18))
-            }.id(model.cameraTrackerVisible)
-        }.foregroundStyle(AureaColors.text).background(AureaColors.editorPanel)
-            .onAppear { restore(); reload() }.onReceive(timer) { _ in reload() }
-            .onChange(of: model.primarySelection) { _ in restore(); reload() }
-            .onChange(of: model.cameraTrackerVisible) { camera in
-                if camera && model.pointPick != nil { model.cancelMotionPick() }
+                VStack(alignment: .leading, spacing: 5) {
+                    if model.selectedLayer?.kind == 1 { cameraSection }
+                    else { note(AureaText.t("trk_video_required")) }
+                }.padding(.init(top: 10, leading: 14, bottom: 20, trailing: 14))
             }
-            .onDisappear { model.cameraFeatures = []; model.cameraSelection = nil }
+        }.foregroundStyle(AureaColors.text).background(AureaColors.editorPanel)
+            .accessibilityIdentifier("tracker.camera.panel")
+            .onAppear { restore(); reload() }
+            .onChange(of: model.primarySelection) { _ in restore(); reload() }
+            .onChange(of: model.cameraTrackerProgress) { _ in reload() }
+            .onDisappear { model.cameraFeatures = []; model.cameraTarget = []; model.cameraSelection = nil }
             .sheet(isPresented: $showReconstruction) {
                 if let sourceLayer {
                     CameraReconstructionView(source: sourceLayer).environmentObject(model)
                 }
             }
     }
+
     @ViewBuilder private var cameraSection: some View {
         if state == 2 {
             // Funções (F9): os passos à vista — "2. Posicionar na cena" e "3. Refazer a análise".
@@ -246,12 +245,16 @@ struct TrackingPanel: View {
                 solveOptions
                 action("cam_resolve", "cam_resolve_desc") {
                     if !model.engine.refineCameraTrack(false, motion: cameraMotion, fov: knownFov, shotType: shotType, lens: lens ? 1 : 0) { model.toast = AureaText.t("app_cam_refine_failed") }
+                    else if let sourceLayer { model.monitorCameraTracker(source: sourceLayer) }
                     reload()
                 }
                 if model.cameraSelectedCount > 0 {
                     action("cam_delete_resolve", "cam_delete_resolve_desc") {
                         // Par do Android: falhou = avisa e mantém a seleção.
-                        if model.engine.refineCameraTrack(true, motion: cameraMotion, fov: knownFov, shotType: shotType, lens: lens ? 1 : 0) { model.cameraSelectedCount = 0 }
+                        if model.engine.refineCameraTrack(true, motion: cameraMotion, fov: knownFov, shotType: shotType, lens: lens ? 1 : 0) {
+                            model.cameraSelectedCount = 0
+                            if let sourceLayer { model.monitorCameraTracker(source: sourceLayer) }
+                        }
                         else { model.toast = AureaText.t("app_cam_refine_failed") }
                         reload()
                     }
@@ -264,7 +267,8 @@ struct TrackingPanel: View {
                 note(state == 4 ? AureaText.t("panel_analise_cancelada") : AureaText.t("ios_camera_solve_failed", AureaEngineText.reason(status["message"] as? String)))
                 Spacer().frame(height: 8)
             }
-            action("panel_analisar_camera", "panel_acha_movimento_camera_video_roda_segundo", run: analyze)
+            action("panel_analisar_camera", "panel_acha_movimento_camera_video_roda_segundo", primary: true, run: analyze)
+                .accessibilityIdentifier("tracker.camera.analyze")
             DisclosureGroup(AureaText.t(analyzeOptions ? "trk_hide_advanced" : "trk_show_advanced"), isExpanded: $analyzeOptions) {
                 qualityPicker
                 solveOptions
@@ -277,13 +281,18 @@ struct TrackingPanel: View {
         Text(text).font(.aurea(size: 12)).lineSpacing(2).foregroundStyle(AureaColors.muted)
     }
     private func reload() {
-        guard sourceLayer == model.primarySelection else { status = [:]; model.cameraFeatures = []; return }
+        guard let sourceLayer, sourceLayer == model.primarySelection else { status = [:]; model.cameraFeatures = []; model.cameraTarget = []; return }
         status = model.engine.cameraTrackingStatus()
-        if state == 2 && model.cameraTrackerVisible { model.refreshCameraTrackPoints() } else { model.cameraFeatures = []; model.cameraTarget = [] }
+        if state == 2 { model.refreshCameraTrackPoints() } else { model.cameraFeatures = []; model.cameraTarget = [] }
     }
     private func restore() {
         guard let id = model.primarySelection else { sourceLayer = nil; return }
-        if model.engine.restoreCameraTrack(forLayer: id) { sourceLayer = id; model.cameraSelectedCount = 0 }
+        if model.cameraTrackerSource == id && model.cameraTrackerProgress != nil {
+            sourceLayer = id
+        } else {
+            sourceLayer = model.engine.restoreCameraTrack(forLayer: id) ? id : nil
+            model.cameraSelectedCount = 0
+        }
     }
     private func analyze() {
         guard model.landmarkProgress == nil else { return }
@@ -296,6 +305,7 @@ struct TrackingPanel: View {
             return
         }
         sourceLayer = id
+        model.monitorCameraTracker(source: id)
         reload()
     }
     private var solveSummary: String {
@@ -341,14 +351,56 @@ struct TrackingPanel: View {
             }
         }
     }
-    private func action(_ title: String, _ subtitle: String, enabled: Bool = true, run: @escaping () -> Void) -> some View {
+    private func action(_ title: String, _ subtitle: String, enabled: Bool = true, primary: Bool = false, run: @escaping () -> Void) -> some View {
         Button(action: run) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(AureaText.t(title)).font(.aurea(size: 14, weight: .semibold))
+                    .foregroundStyle(primary ? AureaColors.accent : AureaColors.text)
                 Text(AureaText.t(subtitle)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
             }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 12)
-                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
+                .background(primary ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
         }.buttonStyle(AureaPressStyle()).disabled(!enabled)
+    }
+}
+
+@MainActor
+struct MotionTrackerPanel: View {
+    @EnvironmentObject private var model: AureaModel
+    var body: some View {
+        VStack(spacing: 0) {
+            PanelHeader(title: AureaText.t("trk_motion_title"), onBack: { model.panel = .none })
+            ScrollView {
+                if model.selectedLayer?.kind == 1 { MotionTrackingSection().padding(14) }
+                else { Text(AureaText.t("trk_video_required")).foregroundStyle(AureaColors.muted).padding(14) }
+            }
+        }.foregroundStyle(AureaColors.text).background(AureaColors.editorPanel)
+            .accessibilityIdentifier("tracker.motion.panel")
+            .onDisappear { if model.pointPick != nil { model.cancelMotionPick() } }
+    }
+}
+
+@MainActor
+struct TrackerStageProgress: View {
+    @EnvironmentObject private var model: AureaModel
+    var body: some View {
+        let camera = model.cameraTrackerProgress
+        let motion = (model.motionStatus["state"] as? NSNumber)?.intValue == 1
+        let motionProgress = (model.motionStatus["progress"] as? NSNumber)?.doubleValue ?? 0
+        if let raw = camera ?? (motion ? motionProgress : model.landmarkProgress.map { Double($0) }), raw.isFinite {
+            let progress = min(1, max(0, raw))
+            let label = camera != nil ? (progress < 0.5 ? "cam_stage_features" : "cam_stage_solve")
+                : "trk_motion_title"
+            VStack(alignment: .leading, spacing: 4) {
+                Text(AureaText.t(label)).font(.aurea(size: 12, weight: .semibold))
+                ProgressView(value: progress).tint(AureaColors.accent)
+                Text(AureaText.t("edt_track_analyzing", Int((progress * 100).rounded())))
+                    .font(.aurea(size: 11)).foregroundStyle(AureaColors.muted)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8).frame(maxWidth: 230, alignment: .leading)
+            .background(AureaColors.editorPanelHigh, in: RoundedRectangle(cornerRadius: 12))
+            .accessibilityElement(children: .combine).accessibilityIdentifier("stage.tracker.progress")
+            .allowsHitTesting(false)
+        }
     }
 }
 
@@ -361,64 +413,83 @@ private struct MotionTrackingSection: View {
     @State private var crop: UInt32 = 1
     @State private var tool = 0
     @State private var advanced = false
-    private let timer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
+    @State private var setup = false
     private func n(_ key: String) -> Double { (model.motionStatus[key] as? NSNumber)?.doubleValue ?? 0 }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(AureaText.t("trk_smart_title")).font(.aurea(size: 14, weight: .bold))
             if let progress = model.landmarkProgress {
                 ProgressView(value: progress)
                 Text(AureaText.t("ios_analyzing_pct", Int(progress * 100)))
                 button(AureaText.t("common_cancel")) { model.cancelLandmarks() }
-            } else if n("state") != 1 && model.pointPick == nil {
-                button(AureaText.t("trk_tool_point")) { model.beginMotionPick(0, confirm: true) }
-                Button(AureaText.t("trk_auto_point")) { model.beginMotionPick(0, auto: true) }
-                    .frame(minHeight: 44).accessibilityIdentifier("tracking.autoPoint")
-                button(AureaText.t("trk_object") + " · " + AureaText.t("hyper_title")) {
-                    model.beginMotionPick(2, rectangle: true, confirm: true, modelOverride: 2)
+            } else if n("state") != 1 && n("state") != 5 && model.pointPick == nil {
+                if n("state") == 2 {
+                    Button(AureaText.t(setup ? "trk_back_to_result" : "panel_analisar_novo")) { setup.toggle() }
+                        .frame(minHeight: 44)
                 }
-                Text(AureaText.t("trk_object_hint")).foregroundStyle(AureaColors.muted)
-                button(AureaText.t("trk_surface_quick") + " · " + AureaText.t("hyper_title")) {
-                    model.beginMotionPick(2, rectangle: true, confirm: true, modelOverride: 3)
-                }
-                Text(AureaText.t("trk_surface_hint")).foregroundStyle(AureaColors.muted)
-                button(AureaText.t("trk_face") + " · " + AureaText.t("hyper_title")) { model.trackLandmarks(face: true) }
-                    .accessibilityIdentifier("tracking.face")
-                button(AureaText.t("trk_body") + " · " + AureaText.t("hyper_title")) { model.trackLandmarks(face: false) }
-                    .accessibilityIdentifier("tracking.body")
-                Picker(AureaText.t("trk_backward"), selection: $model.motionBackward) {
-                    Text(AureaText.t("trk_direction_forward")).tag(false)
-                    Text(AureaText.t("trk_direction_backward")).tag(true)
-                }
-                DisclosureGroup(AureaText.t(advanced ? "trk_hide_advanced" : "trk_show_advanced"), isExpanded: $advanced) {
-                    let tools = ["trk_tool_point", "trk_tool_two_points", "trk_tool_planar", "trk_tool_corner_pin", "trk_tool_stabilizer"]
+                if n("state") != 2 || setup {
+                    Text(AureaText.t("fn_tool_tracking_desc")).foregroundStyle(AureaColors.muted)
+                    let tools = ["trk_tool_point", "trk_tool_two_points", "trk_object", "trk_surface_quick", "trk_tool_corner_pin", "trk_tool_stabilizer", "trk_tool_planar"]
                     Picker(AureaText.t("trk_title"), selection: $tool) {
                         ForEach(tools.indices, id: \.self) { i in Text(AureaText.t(tools[i])).tag(i) }
-                    }.pickerStyle(.menu)
-                    let title = AureaText.t(tools[tool]) + ((2...3).contains(tool) ? " · " + AureaText.t("hyper_title") : "")
-                    button(title) { model.beginMotionPick(UInt32(tool), confirm: true) }
-                    if tool == 0 {
-                        button(AureaText.t("editor_estabilizar_pelo_ponto")) { model.beginPointPick(stabilize: true) }
+                    }.pickerStyle(.menu).accessibilityIdentifier("tracker.motion.method")
+                    if tool != 5 {
+                        Picker(AureaText.t("trk_backward"), selection: $model.motionBackward) {
+                            Text(AureaText.t("trk_direction_forward")).tag(false)
+                            Text(AureaText.t("trk_direction_backward")).tag(true)
+                        }.pickerStyle(.segmented)
                     }
-                    Text(AureaText.t(tool == 4 ? "edt_track_global_motion" : "edt_track_pick_points"))
-                        .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
-                    Picker(AureaText.t("trk_motion"), selection: $model.motionModel) {
-                        Text(AureaText.t("trk_auto")).tag(UInt32(0)); Text(AureaText.t("trk_motion_position")).tag(UInt32(1))
-                        Text(AureaText.t("trk_motion_prs")).tag(UInt32(2)); Text(AureaText.t("trk_motion_perspective")).tag(UInt32(3))
+                    let mode = UInt32(tool <= 1 ? tool : tool == 4 ? 3 : tool == 5 ? 4 : 2)
+                    let title = AureaText.t(tools[tool]) + ((2...4).contains(tool) || tool == 6 ? " · " + AureaText.t("hyper_title") : "")
+                    let hint = tool == 2 ? "trk_object_hint" : tool == 3 ? "trk_surface_hint"
+                        : tool == 5 ? "edt_track_global_motion" : "edt_track_pick_points"
+                    Button {
+                        if (2...3).contains(tool) {
+                            model.beginMotionPick(2, rectangle: true, confirm: true, modelOverride: UInt32(tool))
+                        } else {
+                            model.beginMotionPick(mode, confirm: true)
+                        }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(title).font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.accent)
+                            Text(AureaText.t(hint)).foregroundStyle(AureaColors.muted)
+                        }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                            .background(AureaColors.accentDim, in: RoundedRectangle(cornerRadius: 12))
+                    }.buttonStyle(AureaPressStyle()).accessibilityIdentifier("tracker.motion.start")
+                    if tool <= 1 {
+                        Button(AureaText.t("trk_auto_point")) { model.beginMotionPick(mode, auto: true) }
+                            .frame(minHeight: 44).accessibilityIdentifier("tracking.autoPoint")
                     }
-                    Text(AureaText.t("trk_feature_radius", Int(model.motionFeature)))
-                    Slider(value: $model.motionFeature, in: 6...48)
-                    Text(AureaText.t("trk_search_radius", Int(model.motionSearch)))
-                    Slider(value: $model.motionSearch, in: 16...192)
-                    if (0...1).contains(tool) {
-                        Text(AureaText.t("trk_min_confidence", Int((model.motionConfidence * 100).rounded())))
-                        Slider(value: $model.motionConfidence, in: 0.4...0.95)
-                        Toggle(AureaText.t("trk_validate_backward"), isOn: $model.motionValidateBack)
-                    }
+                    DisclosureGroup(AureaText.t(advanced ? "trk_hide_advanced" : "trk_show_advanced"), isExpanded: $advanced) {
+                        Button(AureaText.t("trk_restore")) { model.restoreMotion() }.frame(minHeight: 44)
+                        if tool == 0 {
+                            button(AureaText.t("editor_estabilizar_pelo_ponto")) { model.beginPointPick(stabilize: true) }
+                        }
+                        HStack {
+                            Button(AureaText.t("trk_face") + " · " + AureaText.t("hyper_title")) { model.trackLandmarks(face: true) }
+                                .frame(minHeight: 44).accessibilityIdentifier("tracking.face")
+                            Button(AureaText.t("trk_body") + " · " + AureaText.t("hyper_title")) { model.trackLandmarks(face: false) }
+                                .frame(minHeight: 44).accessibilityIdentifier("tracking.body")
+                        }
+                        Picker(AureaText.t("trk_motion"), selection: $model.motionModel) {
+                            Text(AureaText.t("trk_auto")).tag(UInt32(0)); Text(AureaText.t("trk_motion_position")).tag(UInt32(1))
+                            Text(AureaText.t("trk_motion_prs")).tag(UInt32(2)); Text(AureaText.t("trk_motion_perspective")).tag(UInt32(3))
+                        }
+                        if tool <= 1 {
+                            Text(AureaText.t("trk_feature_radius", Int(model.motionFeature)))
+                            Slider(value: $model.motionFeature, in: 6...48)
+                                .accessibilityLabel(AureaText.t("trk_feature_radius", Int(model.motionFeature)))
+                            Text(AureaText.t("trk_search_radius", Int(model.motionSearch)))
+                            Slider(value: $model.motionSearch, in: 16...192)
+                                .accessibilityLabel(AureaText.t("trk_search_radius", Int(model.motionSearch)))
+                            Text(AureaText.t("trk_min_confidence", Int((model.motionConfidence * 100).rounded())))
+                            Slider(value: $model.motionConfidence, in: 0.4...0.95)
+                                .accessibilityLabel(AureaText.t("trk_min_confidence", Int((model.motionConfidence * 100).rounded())))
+                            Toggle(AureaText.t("trk_validate_backward"), isOn: $model.motionValidateBack)
+                        }
+                    }.accessibilityIdentifier("tracking.advanced")
                 }
-                .accessibilityIdentifier("tracking.advanced")
-                button(AureaText.t("trk_restore")) { model.restoreMotion() }
             }
+
             if model.pointPick != nil {
                 Text(AureaText.t("ios_motion_points_selected", model.motionPicked))
                 button(AureaText.t("trk_track_selection")) { model.confirmMotionPoints() }
@@ -441,7 +512,7 @@ private struct MotionTrackingSection: View {
                 button(AureaText.t("common_apply")) { model.finishMotionRepair(true) }
                 button(AureaText.t("common_cancel")) { model.finishMotionRepair(false) }
             }
-            if n("state") == 2 && model.landmarkProgress == nil {
+            if n("state") == 2 && model.landmarkProgress == nil && !setup && model.pointPick == nil {
                 if let source = model.primarySelection { MotionTrackReview(source: source, revision: n("confidence"), planar: (2...3).contains(n("tool"))) }
                 if n("tool") != 4 { Toggle(AureaText.t("trk_show_trails"), isOn: $model.motionTrailVisible) }
                 Text(AureaText.t("trk_stats", Int(n("validFrames")), Int(n("frames")), Int(n("confidence") * 100), String(format: "%.2f", n("error"))))
@@ -478,8 +549,8 @@ private struct MotionTrackingSection: View {
             }
         }.font(.aurea(size: 12)).tint(AureaColors.accent)
             .onAppear { model.refreshMotionStatus() }
-            .onChange(of: model.primarySelection) { _ in model.refreshMotionStatus() }
-            .onReceive(timer) { _ in model.refreshMotionStatus() }
+            .onChange(of: model.primarySelection) { _ in setup = false; model.refreshMotionStatus() }
+            .onChange(of: n("state")) { state in if state == 1 { setup = false } }
     }
     private func button(_ title: String, run: @escaping () -> Void) -> some View {
         Button(action: run) { Text(title).font(.aurea(size: 14, weight: .semibold)).frame(maxWidth: .infinity, alignment: .leading).padding(12).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12)) }.buttonStyle(AureaPressStyle())
@@ -956,8 +1027,12 @@ enum CaptionTranscriber {
 struct CaptionsPanel: View {
     @State private var communityOpen = false
     @EnvironmentObject private var model: AureaModel
-    /// 0.5.3: a aba — 0 Criar, 1 Transcrição, 2 Legendas, 3 Estilo (par do CaptionsPanel.kt).
     @State private var capTab = 0
+    @State private var showTranscript = false
+    @State private var presetsOnBlocks = false
+    @State private var savePresetOpen = false
+    @State private var presetName = ""
+    @State private var personalPresets: [CaptionLocalPreset] = []
     /// Estilo: faixa toda (falso) ou só as legendas escolhidas na aba Legendas.
     @State private var styleOnChosen = false
     @State private var minDurationSec: Float = 0.8
@@ -1006,13 +1081,16 @@ struct CaptionsPanel: View {
     private var path: String { model.engine.layerMediaPath(id) }
     var body: some View {
         VStack(spacing: 0) {
-            PanelHeader(title: AureaText.t("panel_legendas"), onBack: { model.panel = .none })
-            HStack(spacing: 0) {
+            PanelHeader(title: AureaText.t("caption_star_title"), onBack: { model.panel = .none })
+            if model.primarySelection != nil && ([1, 3].contains(model.selectedLayer?.kind ?? 0) || captionTrack != nil) {
+                captionTabs
+            }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if model.primarySelection == nil || (![1, 3].contains(model.selectedLayer?.kind ?? 0) && captionTrack == nil) {
                         Text(AureaText.t("sh_add_captions_need_speech")).font(.aurea(size: 13))
-                        ForEach(model.editingLayers.filter { $0.kind == 1 || $0.kind == 3 }) { layer in
+                        let tracks = Set(model.captionTracks.map(\.layer))
+                        ForEach(model.editingLayers.filter { tracks.contains($0.id) || $0.kind == 1 || $0.kind == 3 }) { layer in
                             CaptionAction(label: layer.name) {
                                 model.select(layerId: layer.id)
                                 model.panel = .captions
@@ -1022,20 +1100,19 @@ struct CaptionsPanel: View {
                     Spacer().frame(height: 24)
                 }.padding(.horizontal, 18).padding(.vertical, 10)
             }
-            AureaColors.contentStrongLine.frame(width: 0.7)
-            PanelIconTabs(tabs: [
-                PanelIconTab(glyph: CupertinoGlyph.Waveform, label: AureaText.t("fn_cap_tab_create"), id: "captions.tab.create"),
-                PanelIconTab(glyph: CupertinoGlyph.DocText, label: AureaText.t("fn_cap_tab_transcript"), id: "captions.tab.transcript"),
-                PanelIconTab(glyph: CupertinoGlyph.CaptionsBubble, label: AureaText.t("fn_cap_tab_list"), id: "captions.tab.list"),
-                PanelIconTab(glyph: CupertinoGlyph.Paintbrush, label: AureaText.t("tx_tab_style"), id: "captions.tab.style"),
-            ], selected: capTab, group: AureaText.t("panel_legendas")) { capTab = $0 }
-            }
         }.foregroundStyle(AureaColors.text).background(AureaColors.editorPanel)
-        // Com a faixa pronta o painel abre na lista (o centro do trabalho); sem ela, em Criar.
-        .onAppear { loadOptions(); if captionTrack != nil && captionTrack?.layer == model.primarySelection { capTab = 2 } }
-        // 0.3.5: `.task(id:)` roda ao aparecer e a cada troca de camada com a view NOVA;
-        // o `onChange(of: id) { _ in open() }` lia o `id`/`path` antigos (legendas da camada anterior).
-        .task(id: id) { communityOpen = false; open(); loadTrackOptions() }
+        .onAppear { loadOptions() }
+        .task(id: id) {
+            communityOpen = false; showTranscript = false; presetsOnBlocks = false; capTab = 0
+            open(); loadTrackOptions()
+        }
+        .alert(AureaText.t("caption_star_save"), isPresented: $savePresetOpen) {
+            TextField(AureaText.t("edt_cp_name"), text: $presetName)
+                .accessibilityIdentifier("captions.preset.name")
+            Button(AureaText.t("edt_cp_save_private"), action: savePreset)
+                .disabled(presetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button(AureaText.t("common_cancel"), role: .cancel) { }
+        }
         .sheet(isPresented: $communityOpen) {
             let project = model.projectGeneration
             let target = captionTrack?.layer
@@ -1069,10 +1146,33 @@ struct CaptionsPanel: View {
             importSRT(.success(url))
         }
     }
-    /// Funções (F9, 13/11/2026): um assunto por aba — Gerar · Estilo · Posição · Blocos
-    /// (antes ≈ 22 assuntos numa rolagem, com um "Mais opções" que repetia o SRT).
+    private var captionTabs: some View {
+        let tabs: [(Character, String, String)] = [
+            (CupertinoGlyph.CaptionsBubble, "fn_cap_tab_list", "list"),
+            (CupertinoGlyph.Paintbrush, "tx_tab_style", "style"),
+            (CupertinoGlyph.Gear, "caption_star_setup", "setup"),
+            (CupertinoGlyph.Sparkles, "home_presets_short", "presets"),
+        ]
+        return HStack(spacing: 4) {
+            ForEach(tabs.indices, id: \.self) { index in
+                let (glyph, key, identifier) = tabs[index]
+                let selected = capTab == index
+                let tint = selected ? AureaColors.accent : AureaColors.muted
+                Button { capTab = index } label: {
+                    VStack(spacing: 2) {
+                        CupertinoIcon(glyph, size: 17, color: tint).accessibilityHidden(true)
+                        Text(AureaText.t(key)).font(.aurea(size: 11)).lineLimit(1).minimumScaleFactor(0.8).foregroundStyle(tint)
+                    }
+                    .frame(maxWidth: .infinity).frame(height: 48)
+                    .background(selected ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
+                    .contentShape(Rectangle())
+                }.buttonStyle(AureaPressStyle()).accessibilityAddTraits(selected ? .isSelected : [])
+                .accessibilityIdentifier("captions.tab.\(identifier)")
+            }
+        }.padding(.horizontal, 12).padding(.vertical, 4)
+    }
+
     private var controls: some View {
-        let idle = busy == nil
         return VStack(alignment: .leading, spacing: 0) {
             // Estado do trabalho (vale em qualquer aba).
             if let busy {
@@ -1082,17 +1182,40 @@ struct CaptionsPanel: View {
             if let error { note(error, color: AureaColors.danger) }
             if let notice { note(notice, color: AureaColors.muted) }
             switch capTab {
-            case 0: createTab
-            case 1:
-                CaptionTranscriptView(words: words, fillers: fillers, struckOn: removeFillers, source: transcriptSource, busy: !idle,
+            case 0: captionsTab
+            case 1: styleTab
+            case 2: createTab
+            default: presetsTab
+            }
+        }
+    }
+    private var captionsTab: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !words.isEmpty {
+                CaptionChips(options: [AureaText.t("fn_cap_tab_list"), AureaText.t("fn_cap_tab_transcript")],
+                             selected: showTranscript ? 1 : 0) { showTranscript = $0 == 1 }
+            }
+            if showTranscript && !words.isEmpty {
+                CaptionTranscriptView(words: words, fillers: fillers, struckOn: removeFillers, source: transcriptSource, busy: busy != nil,
                                       onSeek: seek(to:), onEdit: { edit($0, text: $1) }, onReplace: replaceInTranscript, onCreate: createFromWords)
-            case 2:
-                if let captionTrack {
-                    CaptionListView(track: captionTrack, onOwnStyle: { styleOnChosen = true; capTab = 3 })
-                } else {
-                    note(AureaText.t("cap053_no_captions"), color: AureaColors.muted)
+            } else if let captionTrack {
+                CaptionAction(label: AureaText.t("caption_star_to_layers"), primary: true, enabled: busy == nil) {
+                    guard captionEdit(model, layer: captionTrack.layer, op: "to_layers", ids: []) else {
+                        error = AureaText.t("caption_star_to_layers_failed")
+                        return
+                    }
+                    model.captionSelection = []
+                    model.select(layerId: captionTrack.layer, openOptions: false)
+                    model.panel = .none
                 }
-            default: styleTab
+                .accessibilityIdentifier("captions.convertToLayers")
+                CaptionListView(track: captionTrack, onOwnStyle: { styleOnChosen = true; capTab = 1 })
+            } else {
+                note(AureaText.t("cap053_no_captions"), color: AureaColors.muted)
+                CaptionAction(label: AureaText.t("panel_gerar_legendas"), primary: true, enabled: busy == nil) {
+                    if words.isEmpty { transcribe() } else { apply() }
+                }
+                CaptionAction(label: AureaText.t("cap053_import"), enabled: busy == nil, action: pickSRT)
             }
         }
     }
@@ -1110,10 +1233,6 @@ struct CaptionsPanel: View {
             label("cap041_offline_model")
             qualityControls
             sectionTitle("cap053_create_title")
-            label("cap046_templates")
-            CaptionTemplateRow(selected: templateId, enabled: idle) { applyTemplate($0) }
-            label("pn_caption")
-            CaptionChips(options: [AureaText.t("pn_caption_grouped"), AureaText.t("pn_caption_one_per_word")], selected: mode) { mode = $0 }
             if mode == 0 { groupingControls }
             label("cap053_min_duration")
             let mins: [Float] = [0.5, 0.8, 1.2, 2]
@@ -1124,7 +1243,6 @@ struct CaptionsPanel: View {
             CaptionChips(options: gaps.map(String.init), selected: gaps.firstIndex(of: gapFrames) ?? -1) { gapFrames = gaps[$0] }
             captionToggle("cap053_break_sentence", value: $breakOnSentence)
             captionToggle("pn_caption_break_pauses", value: $breakOnPause)
-            captionToggle("pn_caption_uppercase", value: live($uppercase))
             captionToggle("pn_caption_remove_fillers", value: $removeFillers)
             note(AureaText.t("cap053_create_note"), color: AureaColors.muted)
             HStack(spacing: 8) {
@@ -1140,24 +1258,29 @@ struct CaptionsPanel: View {
             }.padding(.vertical, 8)
         }
     }
-    /// ESTILO: faixa toda ou só as escolhidas; modelos, aparência, texto e caixa, posição.
     private var styleTab: some View {
         let chosen = model.captionSelection
         let onChosen = styleOnChosen && !chosen.isEmpty && captionTrack != nil
         let idle = busy == nil
         return VStack(alignment: .leading, spacing: 0) {
-            if captionTrack != nil {
+            if captionTrack != nil && !chosen.isEmpty {
                 label("cap053_apply_to")
                 CaptionChips(options: [AureaText.t("cap053_scope_track"), AureaText.t("cap053_scope_selected", chosen.count)],
-                             selected: onChosen ? 1 : 0, enabled: { $0 == 0 || !chosen.isEmpty }) { styleOnChosen = $0 == 1 }
-                if chosen.isEmpty { note(AureaText.t("cap053_scope_hint"), color: AureaColors.muted) }
+                             selected: onChosen ? 1 : 0) { styleOnChosen = $0 == 1 }
             }
             if onChosen, let captionTrack {
                 CaptionBlockStyleView(track: captionTrack, selected: chosen)
             } else {
-                label("cap046_templates")
-                CaptionTemplateRow(selected: templateId, enabled: idle) { applyTemplate($0) }
-                CaptionAction(label: AureaText.t("home_community_title"), enabled: idle && captionTrack != nil) { communityOpen = true }
+                label("pn_caption_words_per_caption")
+                CaptionChips(options: (1...8).map(String.init), selected: mode == 1 ? 0 : maxWords - 1,
+                             enabled: { _ in idle }) { setWordsPerBlock($0 + 1) }
+                savePresetButton
+                label("caption_star_motion")
+                CaptionChips(options: ["caption_star_cut", "pn_caption_style_highlight", "edt_tp_pop"].map { AureaText.t($0) },
+                             selected: style == 5 ? 2 : highlight ? 1 : 0, enabled: { _ in idle }) { index in
+                    style = [0, 2, 5][index]; highlight = index != 0; customized()
+                }
+                CaptionAction(label: AureaText.t("caption_star_impact"), enabled: idle) { applyTemplate("comic") }
                 captionToggle("pn_caption_highlight_word", value: live($highlight))
                 captionToggle("pn_caption_uppercase", value: live($uppercase))
                 CaptionCustomizeView(look: $look, highlight: highlight, preview: preview, openFonts: { fontsOpen = true }, onChange: customized, startOpen: true)
@@ -1172,6 +1295,88 @@ struct CaptionsPanel: View {
                     selected: [Float(0.045), 0.065, 0.09].firstIndex(where: { abs($0 - size) < 0.001 }) ?? -1) { size = [0.045, 0.065, 0.09][$0]; pushLive() }
             }
         }
+    }
+
+    private var presetsTab: some View {
+        let chosen = model.captionSelection
+        let onBlocks = presetsOnBlocks && !chosen.isEmpty && captionTrack != nil
+        return VStack(alignment: .leading, spacing: 8) {
+            label("cap046_templates")
+            if !chosen.isEmpty {
+                CaptionChips(options: [AureaText.t("cap053_scope_track"), AureaText.t("cap053_scope_selected", chosen.count)],
+                             selected: onBlocks ? 1 : 0) { presetsOnBlocks = $0 == 1 }
+            }
+            CaptionTemplateRow(selected: onBlocks ? nil : templateId, enabled: busy == nil) { template in
+                if onBlocks, let track = captionTrack {
+                    let base = track.segments.first { chosen.contains($0.id) }?.look ?? model.engine.captionOptions(track.layer)
+                    let options = model.engine.captionOptions(base, withTemplate: template)
+                    error = captionEdit(model, layer: track.layer, op: "look", ids: Array(chosen), fields: ["options": options])
+                        ? nil : AureaText.t("ios_caption_edit_invalid")
+                } else { applyTemplate(template) }
+            }
+            sectionTitle("edt_cp_tab_mine")
+            savePresetButton
+            if personalPresets.isEmpty {
+                note(AureaText.t("caption_star_empty_presets"), color: AureaColors.muted)
+            }
+            ForEach(personalPresets) { preset in
+                CaptionAction(label: preset.name, enabled: busy == nil && captionTrack != nil) {
+                    guard let track = captionTrack else { return }
+                    if model.engine.applyCaptionBundle(track.layer, data: preset.bundle) {
+                        error = nil; model.captionSelection = []
+                        model.refreshModel(force: true); loadTrackOptions()
+                    } else { error = AureaText.t("app_caption_preset_incompatible") }
+                }
+            }
+            CaptionAction(label: AureaText.t("home_community_title"), enabled: busy == nil && captionTrack != nil) {
+                communityOpen = true
+            }
+        }.task {
+            personalPresets = await Task.detached(priority: .utility) { CaptionLocalPreset.list() }.value
+        }
+    }
+
+    private var savePresetButton: some View {
+        CaptionAction(label: AureaText.t("caption_star_save"), enabled: busy == nil && captionTrack != nil) {
+            presetName = ""; savePresetOpen = true
+        }
+    }
+
+    private func savePreset() {
+        guard let track = captionTrack else { return }
+        let name = String(presetName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        guard !name.isEmpty else { return }
+        let project = model.projectGeneration
+        let bundle = model.engine.saveCaptionBundle(track.layer, name: name)
+        Task {
+            do {
+                let presets = try await Task.detached(priority: .utility) {
+                    try CaptionLocalPreset.save(bundle)
+                    return CaptionLocalPreset.list()
+                }.value
+                guard model.projectGeneration == project else { return }
+                error = nil; personalPresets = presets; capTab = 3
+            } catch {
+                guard model.projectGeneration == project else { return }
+                self.error = AureaText.t("caption_star_save_failed")
+            }
+        }
+    }
+
+    private func setWordsPerBlock(_ count: Int) {
+        guard busy == nil else { return }
+        if let track = captionTrack {
+            guard captionEdit(model, layer: track.layer, op: "layout", ids: [], fields: ["words": count]) else {
+                error = AureaText.t("caption_star_reflow_failed")
+                return
+            }
+            model.captionSelection = []
+            loadTrackOptions()
+        } else {
+            mode = count == 1 ? 1 : 0
+            maxWords = count
+        }
+        error = nil
     }
     private func sectionTitle(_ key: String) -> some View {
         Text(AureaText.t(key)).font(.aurea(size: 15, weight: .bold)).foregroundStyle(AureaColors.text).padding(.top, 10).accessibilityAddTraits(.isHeader)
@@ -1255,8 +1460,6 @@ struct CaptionsPanel: View {
             CaptionChips(options: ["1", "2"], selected: maxLines - 1) { maxLines = $0 + 1 }
             label("pn_caption_chars_per_line")
             CaptionChips(options: ["12", "18", "24", "32", "42"], selected: [12, 18, 24, 32, 42].firstIndex(of: maxChars) ?? -1) { maxChars = [12, 18, 24, 32, 42][$0] }
-            label("pn_caption_words_per_caption")
-            CaptionChips(options: (1...8).map(String.init), selected: maxWords - 1) { maxWords = $0 + 1 }
         }
     }
     private func label(_ key: String) -> some View {
@@ -1280,7 +1483,7 @@ struct CaptionsPanel: View {
         guard !source.isEmpty else { return }
         loading = Task {
             let cached = await Task.detached(priority: .userInitiated) { CaptionTranscriber.load(source) }.value
-            guard !Task.isCancelled, model.projectGeneration == project, model.primarySelection == sourceId, words.isEmpty else { return }
+            guard !Task.isCancelled, model.projectGeneration == project, id == sourceId, words.isEmpty else { return }
             setWords(cached, from: cached.isEmpty ? nil : AureaText.t("i18n_caption_source_cache"))
         }
     }
@@ -1335,7 +1538,7 @@ struct CaptionsPanel: View {
                     guard let text = String(data: bytes, encoding: .utf8) else { throw CocoaError(.fileReadInapplicableStringEncoding) }
                     return engine.parseSRT(text).compactMap(CaptionWord.init)
                 }.value
-                guard !Task.isCancelled, jobRevision == revision, model.projectGeneration == project, model.primarySelection == sourceId else { return }
+                guard !Task.isCancelled, jobRevision == revision, model.projectGeneration == project, id == sourceId else { return }
                 if parsed.isEmpty { error = AureaText.t("ios_srt_unreadable"); return }
                 error = nil; setWords(parsed, from: "SRT"); persist()
             } catch { if !Task.isCancelled && jobRevision == revision { self.error = error.localizedDescription } }
@@ -1366,14 +1569,14 @@ struct CaptionsPanel: View {
                 }
                 try Task.checkCancellation()
                 guard jobRevision == revision else { return }
-                guard model.projectGeneration == project, model.primarySelection == sourceId else { busy = nil; return }
+                guard model.projectGeneration == project, id == sourceId else { busy = nil; return }
                 busy = nil
                 if result.isEmpty { error = AureaText.t("app_caption_no_speech"); return }
                 setWords(result, from: AureaText.t("cap041_cloud_source")); persist(); apply()
             } catch {
                 guard jobRevision == revision else { return }
                 busy = nil
-                guard !Task.isCancelled, model.projectGeneration == project, model.primarySelection == sourceId else { return }
+                guard !Task.isCancelled, model.projectGeneration == project, id == sourceId else { return }
                 notice = AureaText.t("cap041_cloud_fallback")
                 transcribeOnDevice()
             }
@@ -1420,7 +1623,7 @@ struct CaptionsPanel: View {
                 } onCancel: { _ = engine.captionProgress(true) }
                 try Task.checkCancellation()
                 guard jobRevision == revision else { return }
-                guard model.projectGeneration == project, model.primarySelection == sourceId else { busy = nil; return }
+                guard model.projectGeneration == project, id == sourceId else { busy = nil; return }
                 setWords(result, from: AureaText.t("i18n_caption_source_whisper")); busy = nil; persist(); apply()
             } catch {
                 if jobRevision == revision {
@@ -1452,7 +1655,7 @@ struct CaptionsPanel: View {
             }.value
             guard !Task.isCancelled, jobRevision == revision, model.projectGeneration == project else { return }
             model.refreshModel(force: true)
-            guard model.primarySelection == sourceId else { busy = nil; return }
+            guard id == sourceId else { busy = nil; return }
             busy = nil; error = result.isEmpty ? nil : AureaEngineText.sentence(result); captionCount = Int(engine.captionCount(sourceId))
         }
     }
@@ -1526,6 +1729,38 @@ struct CaptionsPanel: View {
         let keep = removeFillers
         load(json: json); removeFillers = keep
         if optionsJSON != before { templateId = nil }
+    }
+}
+
+private struct CaptionLocalPreset: Identifiable, Sendable {
+    let id: String
+    let name: String
+    let bundle: String
+
+    private static var directory: URL {
+        AureaPaths.documents.appendingPathComponent("caption-presets/mine", isDirectory: true)
+    }
+
+    static func save(_ bundle: String) throws {
+        let data = Data(bundle.utf8)
+        guard data.count <= 128 * 1024,
+              var options = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              options["schema"] as? Int == 1 else { throw CocoaError(.fileWriteInapplicableStringEncoding) }
+        options["reflowWords"] = true
+        let saved = try JSONSerialization.data(withJSONObject: options)
+        guard saved.count <= 128 * 1024 else { throw CocoaError(.fileWriteOutOfSpace) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try saved.write(to: directory.appendingPathComponent(UUID().uuidString + ".json"), options: .atomic)
+    }
+
+    static func list() -> [Self] {
+        let urls = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.fileSizeKey])) ?? []
+        return urls.filter { $0.pathExtension == "json" }.compactMap { url in
+            guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 128 * 1024,
+                  let data = try? Data(contentsOf: url), let options = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let name = options["name"] as? String else { return nil }
+            return Self(id: url.lastPathComponent, name: name, bundle: String(decoding: data, as: UTF8.self))
+        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 }
 
@@ -1657,7 +1892,7 @@ struct CaptionSampleView: View {
 enum CaptionTemplates {
     static let names: [String: String] = [
         "highlight": "pn_caption_style_highlight", "classic": "pn_caption_style_classic", "box": "panel_caixa",
-        "neon": "pn_caption_style_neon", "karaoke": "pn_karaoke", "pop": "pn_pop", "soft": "pack_text_4", "glow": "pack_text_5",
+        "neon": "pn_caption_style_neon", "karaoke": "pn_karaoke", "pop": "edt_tp_pop", "soft": "pack_text_4", "glow": "pack_text_5",
         "gold": "cap046_tpl_gold", "bubble": "cap046_tpl_bubble", "mint": "cap046_tpl_mint",
         "comic": "cap046_tpl_comic", "tag": "cap046_tpl_tag", "minimal": "cap046_tpl_minimal",
     ]

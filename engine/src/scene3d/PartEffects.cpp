@@ -48,11 +48,54 @@ void move_subtree(const SceneAsset& asset, u32 node, const Mat4& delta, std::vec
     }
 }
 
+void space_parts(const SceneAsset& asset, f32 amount, std::vector<Mat4>& nodeWorld) {
+    if (amount <= 0.0f) return;
+
+    struct Part { u32 node; Vec3 center; };
+    std::vector<Part> parts;
+    Aabb bounds, rigBounds;
+    for (u32 i = 0; i < asset.nodes.size() && i < nodeWorld.size(); ++i) {
+        const Node& node = asset.nodes[i];
+        if (!node.inScene || node.mesh < 0 || static_cast<usize>(node.mesh) >= asset.meshes.size()) continue;
+        const Aabb posed = asset.meshes[static_cast<usize>(node.mesh)].bounds.transformed(nodeWorld[i]);
+        if (!posed.valid()) continue;
+        bounds.add(posed);
+        if (node.skin >= 0 && static_cast<usize>(node.skin) < asset.skins.size()) rigBounds.add(posed);
+        else parts.push_back(Part{i, posed.center()});
+    }
+    // Meshes sharing an armature move together so joints and skin weights remain intact.
+    if (rigBounds.valid()) parts.push_back(Part{kInvalidIndex, rigBounds.center()});
+    if (parts.size() < 2) return;
+    const Vec3 center = bounds.center();
+    const Vec3 extent = bounds.extent();
+    const f32 size = std::max({extent.x, extent.y, extent.z, 1e-4f});
+    for (usize i = 0; i < parts.size(); ++i) {
+        const Part& part = parts[i];
+        // Give concentric pieces distinct directions even when their mesh centers coincide.
+        const f32 y = 1.0f - 2.0f * (static_cast<f32>(i) + 0.5f) / static_cast<f32>(parts.size());
+        const f32 ring = std::sqrt(std::max(0.0f, 1.0f - y * y));
+        const f32 angle = static_cast<f32>(i) * 2.39996323f;
+        const Vec3 spread{ring * std::cos(angle), y, ring * std::sin(angle)};
+        const Vec3 delta = ((part.center - center) * 1.4f + spread * (size * 0.14f)) * amount;
+        if (part.node != kInvalidIndex) {
+            nodeWorld[part.node].col[3] = nodeWorld[part.node].col[3] + Vec4{delta, 0.0f};
+        } else {
+            std::vector<bool> move(nodeWorld.size(), false);
+            for (usize n = 0; n < asset.nodes.size() && n < move.size(); ++n)
+                move[n] = asset.nodes[n].inScene && asset.nodes[n].mesh >= 0 && asset.nodes[n].skin >= 0;
+            for (const Skin& skin : asset.skins) for (const i32 joint : skin.joints)
+                if (joint >= 0 && static_cast<usize>(joint) < move.size()) move[static_cast<usize>(joint)] = true;
+            for (usize n = 0; n < move.size(); ++n)
+                if (move[n]) nodeWorld[n].col[3] = nodeWorld[n].col[3] + Vec4{delta, 0.0f};
+        }
+    }
+}
+
 } // namespace
 
 bool is_part3d_effect(u32 effectType) noexcept {
     return effectType == effect_type_id(effect_keys::kPart3DTransform) || effectType == effect_type_id(effect_keys::kPart3DHide)
-        || effectType == effect_type_id(effect_keys::kPart3DTexture);
+        || effectType == effect_type_id(effect_keys::kPart3DTexture) || effectType == effect_type_id(effect_keys::kSpacing3D);
 }
 
 void part_nodes(const SceneAsset& asset, std::vector<u32>& out, bool includeJoints) {
@@ -86,8 +129,9 @@ void part_names(const SceneAsset& asset, std::vector<std::string>& out, bool inc
 bool has_part_effects(const Layer& layer) noexcept {
     const EffectTypeId move = effect_type_id(effect_keys::kPart3DTransform);
     const EffectTypeId hide = effect_type_id(effect_keys::kPart3DHide);
+    const EffectTypeId spacing = effect_type_id(effect_keys::kSpacing3D);
     for (const auto& effect : layer.effects)
-        if (effect.enabled && (effect.type == move || effect.type == hide)) return true;
+        if (effect.enabled && (effect.type == move || effect.type == hide || effect.type == spacing)) return true;
     return false;
 }
 
@@ -106,12 +150,15 @@ void apply_part_effects(const SceneAsset& asset, const Layer& layer, f64 localTi
     if (parts.empty()) return;
     const EffectTypeId move = effect_type_id(effect_keys::kPart3DTransform);
     const EffectTypeId hide = effect_type_id(effect_keys::kPart3DHide);
+    const EffectTypeId spacing = effect_type_id(effect_keys::kSpacing3D);
     // 100% de posição = o tamanho do objeto (o maior lado da caixa).
     const Vec3 extent = asset.bounds.valid() ? asset.bounds.extent() : Vec3{1, 1, 1};
     const f32 size = std::max({extent.x, extent.y, extent.z, 1e-3f});
     for (const auto& effect : layer.effects) {
         if (!effect.enabled) continue;
-        if (effect.type == move) {
+        if (effect.type == spacing) {
+            space_parts(asset, std::clamp(param_at(layer, effect, 0, localTime, 32.0f, false), 0.0f, 1000.0f) * 0.01f, nodeWorld);
+        } else if (effect.type == move) {
             const i32 p = part_index(param_at(layer, effect, 0, localTime, 1.0f, true), parts.size());
             if (p < 0) continue;
             const u32 node = parts[static_cast<usize>(p)];

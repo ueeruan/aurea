@@ -1,7 +1,7 @@
 // =============================================================================
 //  Aurea / engine / EngineHyper.cpp — a API do AureaHyper (0.3.2).
 //
-//  * O MEDIDOR (hyper_device_profile): um quadro de FSR 1 480p -> 1080p na GPU
+//  * O MEDIDOR (hyper_device_profile): um quadro de Aurea Detail 480p → 1080p na GPU
 //    (os mesmos passes do efeito Hyper Upscale), um tile da rede Lite no
 //    Vulkan e na CPU com a conferência entre os dois (driver que erra cai
 //    para o próximo caminho), RAM, ABI, GLES3, NPU (a plataforma diz) e o
@@ -18,7 +18,6 @@
 // =============================================================================
 #include "aurea/Engine.hpp"
 
-#include "aurea/ai/Upscaler.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Thread.hpp"
 #include "aurea/core/Time.hpp"
@@ -204,7 +203,7 @@ struct PassProject {
 
 Status build_project(const EffectRegistry& registry, const hyper::PassPlan& pass, const hyper::Recipe& r,
                      const Probed& src, const PassProject& opt, std::vector<u8>& bytes, CompositionId& comp,
-                     Project* keep = nullptr) {
+                     Project* keep = nullptr, bool still = false) {
     auto created = Project::create_new(pass.renderW, pass.renderH, pass.fps, "AureaHyper");
     if (!created.ok()) return created.status();
     Project project = std::move(*created);
@@ -215,8 +214,16 @@ Status build_project(const EffectRegistry& registry, const hyper::PassPlan& pass
     if (!c) return Errc::InvalidState;
     c->set_background_choice(Color{0, 0, 0, 1});
     c->set_duration(FrameIndex{static_cast<i64>(pass.frames)});
-    const AssetId asset = project.add_asset(video_asset(src));
-    const LayerId lid = c->add_layer(LayerKind::Video, "Hyper");
+    Asset input = video_asset(src);
+    if (still) {
+        input = Asset{};
+        input.kind = AssetKind::Image;
+        input.name = "Hyper";
+        input.video.width = src.info.width;
+        input.video.height = src.info.height;
+    }
+    const AssetId asset = project.add_asset(std::move(input));
+    const LayerId lid = c->add_layer(still ? LayerKind::Image : LayerKind::Video, "Hyper");
     Layer* l = c->layer(lid);
     if (!l) return Errc::OutOfMemory;
     l->source = asset;
@@ -234,10 +241,13 @@ Status build_project(const EffectRegistry& registry, const hyper::PassPlan& pass
             add_effect(registry, *l, hyper::effect_keys::kHyperClean,
                        {{"denoise", opt.denoise ? r.denoise * 100.0f : 0.0f}, {"deblock", r.deblock ? 1.0f : 0.0f},
                         {"deinterlace", static_cast<f32>(r.deinterlace)}, {"frames", 2.0f}});
-        if (opt.upscale)
-            add_effect(registry, *l, hyper::effect_keys::kHyperUpscale,
-                       {{"scale", r.upscale == 4 ? 1.0f : 0.0f}, {"mode", r.upscaleMode == hyper::UpscaleMode::Anime ? 1.0f : 0.0f},
-                        {"sharpness", 50.0f}});
+        if (opt.upscale) {
+            const bool added = r.upscaleMode == hyper::UpscaleMode::Enchance
+                ? add_effect(registry, *l, hyper::effect_keys::kHyperEnchance, {})
+                : add_effect(registry, *l, hyper::effect_keys::kHyperUpscale,
+                    {{"scale", r.upscale == 4 ? 1.0f : 0.0f}, {"mode", r.upscaleMode == hyper::UpscaleMode::Anime ? 1.0f : 0.0f}});
+            if (!added) return Status{Errc::InvalidState, "Aurea upscale effect unavailable"};
+        }
         if (opt.motion) {
             const f32 slow = pass.slowMotion >= 8 ? 3.0f : pass.slowMotion >= 4 ? 2.0f : pass.slowMotion >= 2 ? 1.0f : 0.0f;
             add_effect(registry, *l, hyper::effect_keys::kHyperMotion, {{"slow_motion", slow}, {"duplicates", 1.0f}});
@@ -345,7 +355,6 @@ const char* step_label(hyper::Step s) noexcept {
 /// O passo que representa uma passagem na tela (o mais caro dela).
 hyper::Step pass_step(const hyper::PassPlan& p) noexcept {
     for (const hyper::StageDescriptor* d : p.graph)
-        if (d->kind == hyper::StageKind::Upscale) return hyper::Step::Upscale;
     for (const hyper::StageDescriptor* d : p.graph)
         if (d->kind == hyper::StageKind::Face) return hyper::Step::Face;
     if (!p.graph.empty()) return hyper::Step::Clean;
@@ -357,7 +366,7 @@ hyper::Step pass_step(const hyper::PassPlan& p) noexcept {
 
 std::string profile_path(const std::string& cacheDir) {
     if (cacheDir.empty()) return {};
-    return cacheDir + "/hyper/device-profile.json";
+    return cacheDir + "/hyper/detail-device-profile.json";
 }
 
 /// Renderizador offline de poucos quadros (o quadro antes/depois e o medidor).
@@ -484,7 +493,7 @@ hyper::DeviceProfile Engine::hyper_device_profile(bool remeasure) noexcept {
         return p;
     const u64 began = monotonic_ns();
     std::string note;
-    // --- Turbo: FSR 1, 480p -> 1080p (o efeito Hyper Upscale de verdade) ------
+    // --- Aurea Detail: 480p → 1080p no mesmo renderizador do app ------
     {
         Project project;
         if (auto created = Project::create_new(1920, 1080, 30.0, "medidor"); created.ok()) project = std::move(*created);
@@ -515,7 +524,7 @@ hyper::DeviceProfile Engine::hyper_device_profile(bool remeasure) noexcept {
                 l->transform.position = Vec3{960.0f, 540.0f, 0};
                 const f32 s = 1080.0f / static_cast<f32>(px.height);
                 l->transform.scale = Vec3{s, s, 1};
-                add_effect(effectRegistry_, *l, hyper::effect_keys::kHyperUpscale, {{"scale", 1.0f}, {"sharpness", 50.0f}});
+                add_effect(effectRegistry_, *l, hyper::effect_keys::kHyperUpscale, {{"scale", 1.0f}});
             }
             c->set_duration(FrameIndex{30});
         }
@@ -541,83 +550,15 @@ hyper::DeviceProfile Engine::hyper_device_profile(bool remeasure) noexcept {
             }
         }
     }
-    // --- Lite: um tile da rede (Vulkan e CPU) com a conferência ---------------
 #if defined(AUREA_HYPER_HAS_NEURAL)
-    // As redes (src/hyper/neural): a referência do SPAN Lite na CPU e no
-    // Vulkan (fp32/fp16) e o tempo de um tile no melhor backend.
-    {
+    // Only an explicit remeasurement needs a benchmark of optional neural tools.
+    // Opening Detail runs the spatial benchmark alone.
+    if (remeasure) {
         const hyper::NeuralMeter meter = hyper::measure_neural(p, nullptr);
         hyper::apply_neural_meter(meter, p);
-        p.vulkan = p.vulkan || meter.vulkanOk;
         if (!meter.note.empty()) note += meter.note + "; ";
     }
-    if (p.liteMsPerTile <= 0.0f)
 #endif
-    {
-        constexpr u32 kTile = 64;
-        std::vector<u8> rgb(static_cast<usize>(kTile) * kTile * 3);
-        for (u32 y = 0; y < kTile; ++y)
-            for (u32 x = 0; x < kTile; ++x) {
-                u8* q = &rgb[(static_cast<usize>(y) * kTile + x) * 3];
-                const bool line = ((x + y) % 11) < 2 || (x % 17) == 0;
-                q[0] = line ? 20 : static_cast<u8>(180 + (x & 31));
-                q[1] = line ? 30 : static_cast<u8>(140 + (y & 31));
-                q[2] = line ? 40 : 90;
-            }
-        struct Out { std::vector<u8> px; u32 w; };
-        auto run = [&](ai::Upscaler::Backend backend, Out& out, f64& ms) -> Status {
-            ai::Upscaler up;
-            if (const Status s = up.load(2, 2, 128, backend); !s.ok()) return s;
-            if (backend != ai::Upscaler::Backend::Auto && up.backend() != backend) return Status{Errc::NotSupported, "backend recusado"};
-            out.w = kTile * 2;
-            out.px.assign(static_cast<usize>(out.w) * out.w * 3, 0);
-            static const std::atomic<bool> never{false};
-            f64 best = 1e9;
-            for (int pass = 0; pass < 2; ++pass) {
-                const u64 t0 = monotonic_ns();
-                const Status s = up.run(rgb.data(), kTile, kTile, kTile * 3, never,
-                    [](void* o, const ai::Upscaler::Tile& t) {
-                        auto& dst = *static_cast<Out*>(o);
-                        for (u32 r = 0; r < t.height; ++r)
-                            std::memcpy(&dst.px[(static_cast<usize>(t.y + r) * dst.w + t.x) * 3], t.rgb + static_cast<usize>(r) * t.stride,
-                                        static_cast<usize>(t.width) * 3);
-                        return true;
-                    }, &out);
-                if (!s.ok()) return s;
-                best = std::min(best, static_cast<f64>(monotonic_ns() - t0) / 1e6);
-            }
-            ms = best;
-            return OkStatus;
-        };
-        Out cpu{}, vk{};
-        f64 cpuMs = 0, vkMs = 0;
-        const Status cpuOk = run(ai::Upscaler::Backend::Cpu, cpu, cpuMs);
-        const Status vkOk = run(ai::Upscaler::Backend::Vulkan, vk, vkMs);
-        p.vulkan = p.vulkan || vkOk.ok();
-        if (vkOk.ok() && cpuOk.ok()) {
-            // fp16 do driver: o tile tem de sair igual ao da CPU (tolerância de meia precisão).
-            u64 sum = 0;
-            u32 worst = 0;
-            for (usize i = 0; i < cpu.px.size(); ++i) {
-                const u32 d = static_cast<u32>(std::abs(static_cast<i32>(cpu.px[i]) - static_cast<i32>(vk.px[i])));
-                sum += d;
-                worst = std::max(worst, d);
-            }
-            const f64 mean = static_cast<f64>(sum) / std::max<usize>(1, cpu.px.size());
-            p.vulkanFp16 = mean <= 2.0 && worst <= 40;
-            if (!p.vulkanFp16) {
-                char b[96];
-                std::snprintf(b, sizeof(b), "vulkan: tile diferente da CPU (media %.2f, pior %u): recusado; ", mean, worst);
-                note += b;
-            }
-        } else if (!vkOk.ok()) {
-            note += "vulkan: rede indisponivel; ";
-        }
-        if (!cpuOk.ok()) note += "cpu: rede indisponivel; ";
-        // O tile medido é 64²: o da produção é 128² (4x a área útil).
-        if (p.vulkanFp16 && vkOk.ok()) p.liteMsPerTile = static_cast<f32>(vkMs * 4.0);
-        else if (cpuOk.ok()) p.liteMsPerTile = static_cast<f32>(cpuMs * 4.0);
-    }
     p.thermalAfter = thermal_unit(caps_.thermal().level);
     p.npu = config_.hyperNpuAvailable;
     p.measured = true;
@@ -733,21 +674,18 @@ Status Engine::hyper_preview_frame(const hyper::Recipe& recipeIn, const char* so
             }
         }
         u32 aw = first.renderW, ah = first.renderH;
-        // Etapas Lite/Max (o grafo, aqui mesmo, num quadro).
-        std::vector<const hyper::StageDescriptor*> stages;
-        for (const hyper::PassPlan& p : plan->passes)
-            for (const hyper::StageDescriptor* d : p.graph) stages.push_back(d);
-        if (!stages.empty()) {
+        // Process each frame through the same render/graph order as export.
+        const auto run_graph = [&](const hyper::PassPlan& pass) -> Status {
+            if (pass.graph.empty()) return OkStatus;
             hyper::FrameBuffer in;
             if (const Status s = in.resize(aw, ah); !s.ok()) return s;
             std::vector<u8> rgb;
             rgba_to_rgb24(afterPx, rgb);
             if (!hyper::rgb24_to_nv12(rgb.data(), aw * 3, aw, ah, in)) return Errc::InvalidState;
-            hyper::Recipe gr = recipe;
-            gr.upscale = static_cast<u64>(std::min(aw, ah)) * 2 >= std::min(outW, outH) ? 2u : recipe.upscale;
             hyper::HyperGraph graph;
             static const std::atomic<bool> never{false};
-            if (const Status s = graph.start(profile, gr, stages, hyper::StageFormat{aw, ah, first.fps}, outW, outH, &never, nullptr, nullptr);
+            if (const Status s = graph.start(profile, recipe, pass.graph, hyper::StageFormat{aw, ah, pass.fps},
+                                             pass.outW, pass.outH, &never, nullptr, nullptr);
                 !s.ok()) return s;
             auto pushed = graph.try_push(in.view());
             if (!pushed.ok()) return pushed.status();
@@ -771,15 +709,43 @@ Status Engine::hyper_preview_frame(const hyper::Recipe& recipeIn, const char* so
                 afterPx[i * 4 + 3] = 255;
             }
             graph.shutdown();
+            return OkStatus;
+        };
+        if (const Status s = run_graph(first); !s.ok()) return s;
+        for (usize i = 1; i < plan->passes.size(); ++i) {
+            const hyper::PassPlan& pass = plan->passes[i];
+            ImagePixels frame{aw, ah, std::move(afterPx)};
+            Probed input;
+            input.info.width = aw;
+            input.info.height = ah;
+            PassProject opt;
+            opt.upscale = pass.renderUpscale;
+            Project project;
+            std::vector<u8> bytes;
+            CompositionId comp;
+            if (const Status s = build_project(effectRegistry_, pass, recipe, input, opt, bytes, comp, &project, true);
+                !s.ok()) return s;
+            {
+                std::lock_guard<std::mutex> rl(renderMutex_);
+                if (exportActive_.load(std::memory_order_acquire)) return Errc::Busy;
+                MiniRender mr(*gpu_);
+                if (const Status s = mr.init(effectRegistry_, config_.mediaFactory, &memory_, pass.renderW, pass.renderH);
+                    !s.ok()) return s;
+                const auto lookup = [](void* ctx, AssetId) -> const ImagePixels* { return static_cast<const ImagePixels*>(ctx); };
+                if (const Status s = mr.render(project, comp, FrameIndex{0}, lookup, &frame, nullptr); !s.ok()) return s;
+                if (const Status s = mr.read(afterPx); !s.ok()) return s;
+            }
+            aw = pass.renderW;
+            ah = pass.renderH;
+            if (const Status s = run_graph(pass); !s.ok()) return s;
         }
-        // Uma Turbo depois da rede (passagem 2) mostraria o mesmo upscale: o
-        // "depois" já tem o tamanho de saída. Diferença de tamanho: ajusta.
+        // A neural Clean pass can place Detail in a second render pass. Apply
+        // Detail to the processed frame before resizing to the comparison UI.
         u32 bw = outW, bh = outH;
         shrink_rgba(beforePx, bw, bh, 1920);
         shrink_rgba(afterPx, aw, ah, 1920);
         if (aw != bw || ah != bh) {
-            // Mesmo quadro, densidades diferentes (passagem Turbo pendente): o
-            // "depois" é reamostrado para o tamanho do "antes".
+            // Match the two comparison surfaces if the plans rounded their sizes differently.
             std::vector<u8> fitted(static_cast<usize>(bw) * bh * 4);
             for (u32 y = 0; y < bh; ++y)
                 for (u32 x = 0; x < bw; ++x) {
@@ -941,11 +907,13 @@ void Engine::hyper_job_main() noexcept {
         h.steps.current = s;
         h.steps.stepProgress = std::clamp(frac, 0.0f, 1.0f);
         h.steps.progress = h.unitsTotal ? static_cast<f32>(static_cast<f64>(h.unitsDone) / h.unitsTotal) : 0.0f;
+        const char* label = s == hyper::Step::Upscale && recipe.upscaleMode == hyper::UpscaleMode::Enchance
+            ? "AureaEnchance" : step_label(s);
         if (h.steps.passCount > 1 && s != hyper::Step::Stable && s != hyper::Step::Prepare)
-            std::snprintf(h.steps.message, sizeof(h.steps.message), "%s (%u/%u)%s%s", step_label(s), h.steps.pass + 1,
+            std::snprintf(h.steps.message, sizeof(h.steps.message), "%s (%u/%u)%s%s", label, h.steps.pass + 1,
                           h.steps.passCount, extra && *extra ? " · " : "", extra ? extra : "");
         else
-            std::snprintf(h.steps.message, sizeof(h.steps.message), "%s%s%s", step_label(s), extra && *extra ? " · " : "",
+            std::snprintf(h.steps.message, sizeof(h.steps.message), "%s%s%s", label, extra && *extra ? " · " : "",
                           extra ? extra : "");
     };
     auto finish = [&](Status result) {
@@ -978,6 +946,7 @@ void Engine::hyper_job_main() noexcept {
         key = fnv_str(key, source);
         key = fnv_str(key, output);
         key = fnv_str(key, AUREA_VERSION_LABEL);
+        if (recipe.upscale != 1) key = fnv_str(key, "adaptive-detail-v3");
         {
             std::error_code ec;
             const auto bytes = std::filesystem::file_size(fs_path(source), ec);
@@ -1083,8 +1052,6 @@ void Engine::hyper_job_main() noexcept {
             ov.compFps = pass.fps;
             ov.graph = pass.graph;
             ov.graphRecipe = recipe;
-            if (std::any_of(pass.graph.begin(), pass.graph.end(), [](const hyper::StageDescriptor* d) { return d->kind == hyper::StageKind::Upscale; }))
-                ov.graphRecipe.upscale = static_cast<u64>(std::min(pass.renderW, pass.renderH)) * 2 >= std::min(pass.outW, pass.outH) ? 2u : 4u;
             ov.profile = hyper_cached_profile();
             ov.outputWidth = pass.graph.empty() ? 0 : pass.outW;
             ov.outputHeight = pass.graph.empty() ? 0 : pass.outH;
@@ -1145,8 +1112,7 @@ void Engine::hyper_job_main() noexcept {
                 auto mark = [&](hyper::Step s) { h.steps.done[static_cast<usize>(s)] = true; };
                 if (pass.renderClean || std::any_of(pass.graph.begin(), pass.graph.end(),
                         [](const hyper::StageDescriptor* d) { return d->kind == hyper::StageKind::Clean; })) mark(hyper::Step::Clean);
-                if (pass.renderUpscale || std::any_of(pass.graph.begin(), pass.graph.end(),
-                        [](const hyper::StageDescriptor* d) { return d->kind == hyper::StageKind::Upscale; })) mark(hyper::Step::Upscale);
+                if (pass.renderUpscale) mark(hyper::Step::Upscale);
                 if (std::any_of(pass.graph.begin(), pass.graph.end(),
                         [](const hyper::StageDescriptor* d) { return d->kind == hyper::StageKind::Face; })) mark(hyper::Step::Face);
                 if (pass.renderMotion) mark(hyper::Step::Motion);

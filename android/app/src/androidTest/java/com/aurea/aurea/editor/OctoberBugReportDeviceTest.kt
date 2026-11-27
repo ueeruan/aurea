@@ -3,6 +3,7 @@ package com.aurea.aurea.editor
 import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.Color
+import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -14,12 +15,14 @@ import com.aurea.aurea.ui.theme.AureaTheme
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TestName
 import java.io.File
 import java.nio.ByteBuffer
 
 /** Real GPU checks of the October fixes, exclusively in the isolated uitest app. */
 class OctoberBugReportDeviceTest {
     @get:Rule val compose = createComposeRule()
+    @get:Rule val testName = TestName()
     private lateinit var store: EditorStore
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
 
@@ -30,14 +33,16 @@ class OctoberBugReportDeviceTest {
             AureaTheme { EditorScreen(store) }
         }
         compose.waitUntil(30000) { ::store.isInitialized && store.engineReady }
-        compose.runOnIdle { store.newProject(320, 240, 30f, "October bug report") }
-        compose.waitUntil(15000) { store.project.title == "October bug report" }
+        val projectTitle = "October ${testName.methodName}"
+        compose.runOnIdle { store.newProject(320, 240, 30f, projectTitle) }
+        compose.waitUntil(15000) { store.project.title == projectTitle && !store.projectOperationBusy }
     }
 
-    private fun capture(name: String): ByteArray {
+    private fun capture(name: String, preview: Boolean = false): ByteArray {
         val buffer = ByteBuffer.allocateDirect(320 * 240 * 4)
         val size = IntArray(2)
-        val count = store.engineForStress.captureFrame(320, buffer, size)
+        val engine = store.engineForStress
+        val count = if (preview) engine.capturePreviewFrame(320, buffer, size) else engine.captureFrame(320, buffer, size)
         assertEquals(320 * 240 * 4, count)
         val pixels = ByteArray(count).also { buffer.rewind(); buffer.get(it) }
         val bitmap = Bitmap.createBitmap(320, 240, Bitmap.Config.ARGB_8888)
@@ -90,8 +95,7 @@ class OctoberBugReportDeviceTest {
         assertTrue("Glow must change the rendered 3D text", changed(d, glow) > 100)
     }
 
-    @Test fun rotoBrushSelectsTheTouchedObjectAfterRotationAndPerspective() {
-        launch()
+    private fun importRotoFixture(): Long {
         val engine = store.engineForStress
         val bitmap = Bitmap.createBitmap(160, 120, Bitmap.Config.ARGB_8888)
         bitmap.setPixels(IntArray(160 * 120) { i ->
@@ -106,9 +110,57 @@ class OctoberBugReportDeviceTest {
         var layer = 0L
         compose.runOnIdle {
             layer = engine.importImage(rgba, 160, 120, "Touched object", source.absolutePath)
-            assertTrue(layer > 0); store.select(layer)
+            assertTrue(layer > 0)
         }
         compose.waitUntil(10000) { store.layers.any { it.id == layer } }
+        compose.runOnIdle { store.select(layer) }
+        compose.waitUntil(10000) { store.primary == layer && store.detail?.id == layer && store.busyMessage == null }
+        return layer
+    }
+
+    @Test fun backgroundRemovalHasAnOnCanvasBrushWithoutAddingAnotherEffect() {
+        launch()
+        val layer = importRotoFixture()
+        val type = effectTypeId("aurea.key.background_remove")
+        compose.onNodeWithTag("layer.panel.effects").performClick()
+        compose.runOnIdle { assertTrue(store.removeBackground(layer)) }
+        compose.waitUntil(10000) { compose.onAllNodesWithTag("fx.roto.paint").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("fx.roto.paint").performClick()
+        compose.onNodeWithTag("fx.roto.object").assertExists()
+        compose.onNodeWithTag("fx.roto.background").assertExists()
+        compose.onNodeWithTag("editor.stage").performTouchInput { click(center) }
+        val effect = store.effects.single { it.typeId == type }.effectId
+        compose.waitUntil(10000) { store.engineForStress.rotoStatus(layer, effect)[5] == 1L }
+        compose.onNodeWithTag("fx.roto.done").performClick()
+        compose.runOnIdle { assertEquals(listOf(type), store.effects.map { it.typeId }) }
+    }
+
+    @Test fun backgroundAnalysisProgressIsVisibleInPreviewWithoutTheEffectPanel() {
+        launch()
+        val file = File(context.cacheDir, "cutout-preview-vfr.mp4")
+        InstrumentationRegistry.getInstrumentation().context.assets.open("preview-vfr.mp4").use { input ->
+            file.outputStream().use { input.copyTo(it) }
+        }
+        val engine = store.engineForStress
+        var layer = 0L
+        compose.runOnIdle {
+            layer = engine.importVideo(file.absolutePath, "Cutout progress")
+            assertTrue(layer > 0)
+            store.select(layer, openOptions = false)
+        }
+        compose.waitUntil(10000) { store.layers.any { it.id == layer } && store.primary == layer }
+        compose.runOnIdle { assertTrue(store.removeBackground(layer)) }
+        val badge = "stage.cutout.progress"
+        compose.waitUntil(15000) { compose.onAllNodesWithTag(badge).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag(badge).assertIsDisplayed()
+        compose.onNodeWithTag("fx.roto.paint").assertDoesNotExist()
+        compose.runOnIdle { engine.bgRemoveCancel() }
+    }
+
+    @Test fun rotoBrushSelectsTheTouchedObjectAfterRotationAndPerspective() {
+        launch()
+        val engine = store.engineForStress
+        val layer = importRotoFixture()
         compose.runOnIdle {
             store.addEffect(effectTypeId("aurea.key.rotobrush"), listOf(layer))
         }
@@ -150,7 +202,7 @@ class OctoberBugReportDeviceTest {
             val blue = image[(backgroundY * 320 + backgroundX) * 4 + 2].toInt() and 255
             assertTrue("Roto kept the distant background (blue=$blue)", blue < 20)
             assertTrue(engine.rotoSetView(layer, effect, 2))
-            val overlay = capture("october-roto-overlay-${if (perspective) "3d" else "2d"}")
+            val overlay = capture("october-roto-overlay-${if (perspective) "3d" else "2d"}", preview = true)
             val p = (backgroundY * 320 + backgroundX) * 4
             val red = overlay[p].toInt() and 255
             val overlayBlue = overlay[p + 2].toInt() and 255

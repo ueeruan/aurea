@@ -1,7 +1,7 @@
 // =============================================================================
 //  Aurea / text / Captions.cpp — ver Captions.hpp
 // =============================================================================
-#include "aurea/text/Captions.hpp"
+#include "CaptionReflow.hpp"
 
 #include "aurea/animation/Curve.hpp"
 #include "aurea/text/TextAnimator.hpp"
@@ -1065,6 +1065,27 @@ void apply_caption_animation(const CaptionOptions& opt, TextData& t, TrackSet& t
 }
 
 
+void resolve_caption_block(const CaptionOptions& track, const CaptionSegment& segment, u32 shortSide,
+                           TextData& t, TrackSet& tracks) {
+    const CaptionOptions options = caption_block_options(track, segment);
+    if (segment.look) apply_caption_block_look(track, options, shortSide, t);
+    t.content = options.uppercase ? upper_text(segment.text) : segment.text;
+
+    std::vector<i64> starts;
+    starts.reserve(segment.words.size());
+    for (const auto& word : segment.words) starts.push_back(word.start);
+    TextData timedText;
+    TrackSet timedTracks;
+    apply_caption_animation(options, timedText, timedTracks, starts, segment.end);
+    const u32 animatorBase = static_cast<u32>(t.animators.size());
+    for (auto& animator : timedText.animators) t.animators.push_back(std::move(animator));
+    for (u32 i = 0; i < timedTracks.size(); ++i) {
+        Track& keyframes = timedTracks.at(i);
+        keyframes.effectIndex += animatorBase;
+        tracks.add(std::move(keyframes));
+    }
+}
+
 // -----------------------------------------------------------------------------
 // 0.5.3: edição no jeito do Premiere (lista de legendas, transcrição, arquivos)
 // -----------------------------------------------------------------------------
@@ -1125,6 +1146,57 @@ std::vector<std::string> lines_of(const std::string& text) {
     return v;
 }
 } // namespace
+
+bool reflow_caption_track(std::vector<CaptionSegment>& segments, const CaptionOptions& options, f64 fps) {
+    if (!std::isfinite(fps) || fps <= 0.0) return false;
+    CaptionOptions layout = options;
+    layout.uppercase = false; // Case is a display option. Keep the authored words.
+    u64 nextId = 1;
+    for (const auto& segment : segments) nextId = std::max(nextId, segment.id + 1);
+    std::vector<CaptionSegment> result;
+    for (usize first = 0; first < segments.size();) {
+        const auto& start = segments[first];
+        if (start.words.empty()) { result.push_back(start); ++first; continue; }
+        usize last = first + 1;
+        while (last < segments.size() && !start.look && !segments[last].look &&
+               !segments[last].words.empty() && segments[last - 1].end == segments[last].start) ++last;
+        const i64 limit = segments[last - 1].end;
+        std::vector<CaptionWord> words;
+        for (usize i = first; i < last; ++i) {
+            for (const auto& token : segments[i].words)
+                words.push_back({token.text, static_cast<f64>(token.start) / fps, static_cast<f64>(token.end) / fps});
+        }
+        const auto groups = group_captions(words, layout);
+        if (groups.empty()) return false;
+        i64 previousEnd = start.start;
+        for (usize i = 0; i < groups.size(); ++i) {
+            const auto& group = groups[i];
+            const i64 begin = i == 0 ? start.start : std::llround(group.start * fps);
+            const i64 nextStart = i + 1 < groups.size() ? std::llround(groups[i + 1].start * fps) : limit;
+            if (begin < previousEnd || begin >= nextStart) return false;
+            CaptionSegment segment;
+            segment.id = i == 0 ? start.id : nextId++;
+            segment.start = begin;
+            segment.end = std::clamp<i64>(std::llround(group.end * fps), begin + 1, nextStart);
+            segment.text = group.text;
+            segment.look = start.look;
+            for (u32 j = 0; j < group.count; ++j) {
+                const auto& word = words[group.first + j];
+                const i64 wordStart = std::clamp<i64>(std::llround(word.start * fps), begin, segment.end - 1);
+                const i64 wordEnd = std::clamp<i64>(std::llround(word.end * fps), wordStart + 1, segment.end);
+                segment.words.push_back({word.text, wordStart, wordEnd});
+            }
+            previousEnd = segment.end;
+            result.push_back(std::move(segment));
+            if (result.size() > 100000) return false;
+        }
+        first = last;
+    }
+    apply_caption_gap(result, layout.gapFrames);
+    if (!valid_caption_track(result)) return false;
+    segments = std::move(result);
+    return true;
+}
 
 void apply_caption_gap(std::vector<CaptionSegment>& segments, u32 gapFrames) {
     if (gapFrames == 0) return;

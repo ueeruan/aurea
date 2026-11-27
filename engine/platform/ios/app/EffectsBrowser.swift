@@ -232,7 +232,7 @@ enum FxEffectTool: CaseIterable {
     var category: String {
         switch self {
         case .captions: return "Texto"
-        case .cameraTrack: return "Rastreio"
+        case .cameraTrack, .tracking: return "Rastreio"
         case .mask: return "Máscara"
         default: return "Ferramentas"
         }
@@ -262,7 +262,7 @@ enum FxEffectTool: CaseIterable {
         case .cameraTrack: return "fxui_tool_camera_track"
         case .mask: return "fxui_tool_mask"
         case .animation: return "la_animators"
-        case .tracking: return "panel_rastreio"
+        case .tracking: return "trk_motion_title"
         case .preciseCut: return "fn_tool_precise_cut"
         case .puppet: return "fx_name_puppet"
         case .rigMocap: return "fn_tool_rig"
@@ -276,7 +276,8 @@ enum FxEffectTool: CaseIterable {
     var glyph: Character {
         switch self {
         case .captions: return CupertinoGlyph.CaptionsBubble
-        case .cameraTrack, .tracking: return ShellGlyph.Viewfinder
+        case .cameraTrack: return CupertinoGlyph.Camera
+        case .tracking: return ShellGlyph.Viewfinder
         case .mask: return CupertinoGlyph.PencilOutline
         case .animation: return CupertinoGlyph.Sparkles
         case .preciseCut: return CupertinoGlyph.Scissors
@@ -292,7 +293,8 @@ enum FxEffectTool: CaseIterable {
     var panel: AureaModel.PanelKind {
         switch self {
         case .captions: return .captions
-        case .cameraTrack, .tracking: return .tracking
+        case .cameraTrack: return .cameraTracking
+        case .tracking: return .tracking
         case .mask: return .mask
         case .animation: return .animation          // F3: painel próprio (camada, texto, prontas, explodir)
         case .preciseCut: return .clipEdit          // slip/roll/slide e congelar quadro
@@ -315,7 +317,8 @@ func fxEffectToolOf(_ typeId: UInt32) -> FxEffectTool? { FxEffectTool.allCases.f
 func fxPickableTools(layerKind: UInt32, vector: Bool = false, importedModel: Bool = false) -> [FxEffectTool] {
     FxEffectTool.allCases.filter { tool in
         switch tool {
-        case .captions, .mask, .layerOptions: return true
+        case .captions: return false
+        case .mask, .layerOptions: return true
         case .cameraTrack, .tracking: return layerKind == 1
         case .preciseCut: return layerKind == 1 || layerKind == 3
         case .puppet: return layerKind == 2
@@ -362,8 +365,13 @@ func fxPickerEntryEnglishName(_ entry: EffectCatalogItem) -> String {
 func fxOpenEffectTool(_ tool: FxEffectTool, in model: AureaModel) {
     switch tool {
     case .mask: model.addMaskTool()
-    case .cameraTrack: model.cameraTrackerVisible = true
-    case .tracking: model.cameraTrackerVisible = false
+    case .cameraTrack, .tracking:
+        guard let layer = model.selectedLayer, layer.kind == 1, !layer.locked else { return }
+        if model.pointPick != nil { model.cancelMotionPick() }
+        if !model.effects.contains(where: { $0.typeId == tool.typeId }) {
+            model.mutate { $0.addEffect(tool.typeId, toLayer: layer.id, at: UInt32.max) }
+            model.refreshModel(force: true)
+        }
     case .puppet: model.openPuppetTool(); return     // põe o Fantoche e abre Efeitos
     case .rigMocap: model.face3D = .rig; Panel3DRequest.tab = .rig
     case .shapeOperators: VectorPanelRequest.tab = VectorPanelRequest.operators; model.vectorFace = .paths
@@ -655,14 +663,14 @@ func fxPickerEntries(_ model: AureaModel, layerHasAudio: Bool) -> [EffectCatalog
         (textLayer || $0.typeId != fxEffectTypeId("aurea.text.animator_pro")) &&
         (textLayer || $0.typeId != fxEffectTypeId("aurea.text.prism"))
     }
-    let all = effects + fxToolsForSelection(model).map(fxToolCatalogItem)
+    let all = fxDistinctEffects(effects + fxToolsForSelection(model).map(fxToolCatalogItem))
     return fxArrangeCatalog(all, fxEffectCategories(all))
 }
 
 /// O nome de uma variação (preset) pelo id estável; sem tradução, o nome do motor.
 func fxPresetName(_ typeId: UInt32, _ pid: String, _ fallback: String) -> String {
     if typeId == fxEffectTypeId("aurea.3d.explode") { return fxExplodePresetKey(pid).map { AureaText.t($0) } ?? fallback }
-    if typeId == fxEffectTypeId("aurea.color.grade") {
+    if fxColorParamSpecType(typeId) == fxEffectTypeId("aurea.color.grade") {
         let looks = ["cinema", "warm", "cool", "vintage", "mono", "noir", "vivid", "faded", "sunset", "teal", "film", "anime", "matte"]
         return looks.contains(pid) ? AureaText.t("look_" + pid) : fallback
     }
@@ -907,7 +915,7 @@ private let fxTagByKey: [UInt32: [String]] = {
         ("outline", ["aurea.stylize.stroke_outline", "aurea.stylize.border", "aurea.stylize.find_edges", "aurea.stylize.find_edges_reference", "aurea.3d.stroke",
                      "aurea.draw.drawing_progress", "aurea.light.saber", "aurea.transition.ballpoint"]),
         ("3d", ["aurea.distort.sphere_wrap", "aurea.distort.cylinder_wrap", "aurea.generate.raster_extrude",
-                "aurea.3d.part_transform", "aurea.3d.part_hide", "aurea.3d.part_texture", "aurea.3d.shatter",
+                "aurea.3d.part_transform", "aurea.3d.part_hide", "aurea.3d.part_texture", "aurea.3d.spacing", "aurea.3d.shatter",
                 "aurea.3d.explode", "aurea.3d.stroke", "aurea.shape3d.layout", "aurea.generate.aurora", "aurea.generate.constellation",
                 "aurea.ai.depth_map", FxEffectTool.cameraTrack.key, "aurea.distort.hollow_box"]),
         ("transition", ["aurea.transition.luma_dissolve", "aurea.distort.ripple_dissolve", "aurea.glitch.dissolve_shake",
@@ -919,7 +927,8 @@ private let fxTagByKey: [UInt32: [String]] = {
                     "aurea.motion.swing", "aurea.motion.wiggle", "aurea.motion.twitch", "aurea.motion.oscillate.cycles"]),
         ("repeat", ["aurea.pattern.checkerboard", "aurea.pattern.hexagonal", "aurea.stylize.mosaic",
                     "aurea.distort.tile_shift", "aurea.distort.hex_tile_rotate", "aurea.distort.hex_tile_shift"]),
-        ("color", ["aurea.time.warp_rgb", "aurea.color.color_offset", "aurea.color.threshold_rgb", "aurea.color.rgb_split", "aurea.color.grade",
+        ("color", ["aurea.color.studio_grade", "aurea.color.studio_look",
+                   "aurea.time.warp_rgb", "aurea.color.color_offset", "aurea.color.threshold_rgb", "aurea.color.rgb_split", "aurea.color.grade",
                    "aurea.color.shift_channels"]),
         ("distort", ["aurea.glitch.datamosh", "aurea.distort.displacement_map"]),
         ("glitch", ["aurea.stylize.pixel_sort", "aurea.stylize.jpeg_damage", "aurea.color.rgb_split", "aurea.stylize.pixel_encoder",

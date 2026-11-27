@@ -24,7 +24,8 @@ EffectInstance* roto_instance(Composition* comp, u64 layerId, u32 effectId, Laye
     layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || (layer->kind != LayerKind::Image && layer->kind != LayerKind::Video)) return nullptr;
     EffectInstance* e = layer->find_effect(EffectId{effectId, 0});
-    if (!e || e->type != effect_type_id(effect_keys::kRotobrush)) return nullptr;
+    if (!e || (e->type != effect_type_id(effect_keys::kRotobrush) &&
+               e->type != effect_type_id(effect_keys::kBackgroundRemove))) return nullptr;
     return e;
 }
 
@@ -68,8 +69,10 @@ i64 roto_source_frame(const Project& project, const Composition& comp, const Lay
 
 bool Engine::roto_add_stroke(u64 layerId, u32 effectId, bool background, f32 radius, const f32* xy, u32 count, bool click) noexcept try {
     if (!xy || count == 0 || !(radius > 0.0f) || !std::isfinite(radius)) return false;
+    std::lock_guard<std::mutex> rl(renderMutex_);
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = nullptr;
     EffectInstance* e = roto_instance(comp, layerId, effectId, l);
@@ -77,7 +80,7 @@ bool Engine::roto_add_stroke(u64 layerId, u32 effectId, bool background, f32 rad
     if (!e || !specs || l->locked) return false;
     bridge::LayerDetailPOD pod{};
     if (!fill_layer_detail_locked(layerId, pod) || pod.sourceWidth == 0 || pod.sourceHeight == 0) return false;
-    const FrameIndex t = playback_.current();
+    const FrameIndex t = editing_frame_locked();
     // Invert the projected source plane, including its homogeneous W. An
     // affine inverse of a 3D/camera transform puts strokes away from the finger.
     bool perspective = false;
@@ -152,8 +155,8 @@ bool Engine::roto_add_stroke(u64 layerId, u32 effectId, bool background, f32 rad
     if (auto* fg = renderer_.foreground_service()) fg->retry_failed();
     // "Atualizar outros quadros": depois de uma propagação, o traço novo refaz
     // os quadros que dependem dele.
-    if (auto* roto = renderer_.roto_service(); roto && roto->progress().total > 0 && l->kind == LayerKind::Video)
-        (void)renderer_.roto_propagate(*project_, *comp, *l, *e, &media_);
+    renderer_.bg_cancel_analysis(*project_, *l, *e);
+    (void)renderer_.roto_propagate(*project_, *comp, *l, *e, &media_, true);
     request_render();
     return true;
 } catch (...) {
@@ -161,16 +164,19 @@ bool Engine::roto_add_stroke(u64 layerId, u32 effectId, bool background, f32 rad
 }
 
 bool Engine::roto_undo_stroke(u64 layerId, u32 effectId) noexcept try {
+    std::lock_guard<std::mutex> rl(renderMutex_);
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = nullptr;
     EffectInstance* e = roto_instance(comp, layerId, effectId, l);
     const ParameterRegistry* specs = e ? effectRegistry_.params(e->type) : nullptr;
-    if (!e || !specs) return false;
+    if (!e || !specs || l->locked) return false;
     CurveData* curve = roto_curve(*e, *specs);
     ai::RotoStrokes strokes;
     if (!curve || !ai::roto_decode(*curve, strokes) || strokes.empty()) return false;
-    const i64 frame = roto_source_frame(*project_, *comp, *l, playback_.current());
+    const i64 frame = roto_source_frame(*project_, *comp, *l, editing_frame_locked());
     // Só o traço DESTE quadro: desfazer não apaga um traço invisível de outro.
     usize at = strokes.size();
     for (usize i = strokes.size(); i-- > 0;) if (strokes[i].frame == frame) { at = i; break; }
@@ -181,8 +187,7 @@ bool Engine::roto_undo_stroke(u64 layerId, u32 effectId) noexcept try {
     ai::roto_encode(strokes, *curve);
     project_->mark_dirty();
     if (auto* fg = renderer_.foreground_service()) fg->retry_failed();   // bugs 0.3.4 (ver roto_add_stroke)
-    if (auto* roto = renderer_.roto_service(); roto && roto->progress().total > 0 && l->kind == LayerKind::Video && !strokes.empty())
-        (void)renderer_.roto_propagate(*project_, *comp, *l, *e, &media_);
+    (void)renderer_.roto_propagate(*project_, *comp, *l, *e, &media_, true);
     request_render();
     return true;
 } catch (...) {
@@ -232,11 +237,13 @@ bool Engine::roto_progress(i64* out4) noexcept {
     return p.total > 0;
 }
 
-bool Engine::roto_status(u64 layerId, u32 effectId, i64* out8) noexcept {
+bool Engine::roto_status(u64 layerId, u32 effectId, i64* out8, u32* strokeCounts) noexcept {
     if (!out8) return false;
     for (u32 i = 0; i < 8; ++i) out8[i] = 0;
-    // Só leitura do modelo e consultas ao cache do serviço (locks próprios):
-    // não precisa do renderMutex_ - a UI pergunta a cada 250 ms.
+    if (strokeCounts) strokeCounts[0] = strokeCounts[1] = 0;
+    // The preview can keep its last status when a render or export owns the engine.
+    std::unique_lock<std::mutex> rl(renderMutex_, std::try_to_lock);
+    if (!rl.owns_lock()) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -244,29 +251,25 @@ bool Engine::roto_status(u64 layerId, u32 effectId, i64* out8) noexcept {
     const EffectInstance* e = roto_instance(comp, layerId, effectId, l);
     if (!e) return false;
     const i64 frame = roto_source_frame(*project_, *comp, *l, editing_frame_locked());
-    return renderer_.roto_status(*project_, *comp, *l, *e, frame, out8);
+    return renderer_.roto_status(*project_, *comp, *l, *e, frame, out8, strokeCounts);
 }
 
 void Engine::roto_cancel() noexcept {
+    std::lock_guard<std::mutex> rl(renderMutex_);
     if (auto* roto = renderer_.roto_service()) roto->cancel();
     request_render();
 }
 
 bool Engine::roto_set_view(u64 layerId, u32 effectId, u32 mode) noexcept {
+    std::lock_guard<std::mutex> rl(renderMutex_);
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
     InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = nullptr;
     EffectInstance* e = roto_instance(comp, layerId, effectId, l);
-    const ParameterRegistry* specs = e ? effectRegistry_.params(e->type) : nullptr;
-    if (!e || !specs || !roto_curve(*e, *specs)) return false;
-    constexpr u32 kView = 10;
-    e->params[kView].constant = ParamValue::scalar(static_cast<f32>(std::min(mode, 2u)));
-    bump_model_revision_locked();
-    // Salva: sem isso, "Concluir" (volta a Final) não marcava o projeto e a
-    // sobreposição vermelha reabria no projeto.
-    project_->mark_dirty();
+    if (mode > 3 || (!e && mode < 3)) return false;
+    renderer_.set_cutout_view(comp, l, e, e ? project_->asset(l->source) : nullptr, mode);
     request_render();
     return true;
 }

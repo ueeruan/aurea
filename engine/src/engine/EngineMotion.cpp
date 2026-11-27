@@ -93,7 +93,8 @@ bool Engine::pause_motion_track(bool paused) noexcept {
     return true;
 }
 bool Engine::restore_motion_track(u64 id) noexcept {
-    if(motionTrack_&&!motionTrack_->finished.load())return false;
+    if (motionTrack_ && !motionTrack_->finished.load() &&
+        (motionTrack_->state.load() == 1 || motionTrack_->cancel.load())) return false;
     join_motion_track();
     // A failed restore for another layer must not leave the previous layer's
     // completed result available for an accidental Apply. Saved layer caches
@@ -121,7 +122,9 @@ bool Engine::start_motion_track(u64 id,u32 tool,u32 model,bool backward,const f3
     // Uma análise por vez. Uma CANCELADA ainda saindo não bloqueia a próxima:
     // o trabalhador olha o cancelamento a cada quadro decodificado, então o
     // join abaixo é curto (antes: "Cancelar" e tocar de novo = recusado).
-    if(motionTrack_&&!motionTrack_->finished.load()&&!motionTrack_->cancel.load())return false;
+    // The result is usable as soon as the worker publishes a terminal state.
+    // Joining then waits only for cleanup, so a repair can start immediately.
+    if (motionTrack_ && motionTrack_->state.load() == 1 && !motionTrack_->cancel.load()) return false;
     join_motion_track();
     Asset asset;auto data=std::make_shared<MotionTrackData>();auto job=std::make_shared<MotionTrackJob>();
     std::array<Vec2,4> seeds{};
@@ -230,13 +233,13 @@ bool Engine::start_motion_track(u64 id,u32 tool,u32 model,bool backward,const f3
             return true;
         };
         const usize total=data->sourceUs.size();
+        Gray gray;
         for(usize i=0;i<total;++i){
             if (j->paused.load()) {
                 std::unique_lock<std::mutex> lock(j->pauseMutex);
                 j->unpaused.wait(lock, [&] { return j->cancel.load() || !j->paused.load(); });
             }
             if(j->cancel.load())return fail("Cancelled");
-            Gray gray;
             const auto picked = sequence.read(i, gray);
             if (picked == AnalysisGraySequence::Result::Cancelled) return fail("Cancelled");
             if (picked != AnalysisGraySequence::Result::Ok) return fail("Incomplete video: analysis stopped before the end");

@@ -22,7 +22,7 @@ enum class HyperPath(val code: Int) {
 }
 
 /** hyper::UpscaleMode. */
-enum class HyperUpscaleMode(val code: Int) { General(0), Anime(1) }
+enum class HyperUpscaleMode(val code: Int) { General(0), Anime(1), Enchance(2) }
 
 /** hyper::Recipe. Zeros/false = etapa desligada. */
 data class HyperRecipe(
@@ -44,7 +44,7 @@ data class HyperRecipe(
     val path: HyperPath = HyperPath.Auto,
 ) {
     /** Nenhuma etapa ligada (o motor confere de novo com `is_identity`). */
-    val identity: Boolean get() = upscale <= 1 && denoise <= 0f && !deblock && deinterlace == 0 && !face &&
+    val identity: Boolean get() = upscale == 1 && denoise <= 0f && !deblock && deinterlace == 0 && !face &&
         targetFps <= 0.0 && slowMotion <= 1 && !stabilize
 
     /**
@@ -61,7 +61,8 @@ data class HyperRecipe(
     fun summary(): String = buildList {
         if (denoise > 0f || deblock || deinterlace > 0) add("Clean")
         if (stabilize) add("Stable")
-        if (upscale > 1) add("Upscale ${upscale}×")
+        if (upscale == 0) add("Aurea Detail")
+        if (upscale > 1) add(if (upscaleMode == HyperUpscaleMode.Enchance) "AureaEnchance 2×" else "Aurea Detail ${upscale}×")
         if (face) add("Face")
         if (targetFps > 0.0) add("${targetFps.roundToInt()} fps")
         if (slowMotion > 1) add("Slow ${slowMotion}×")
@@ -69,7 +70,7 @@ data class HyperRecipe(
 
     companion object {
         const val PACKED_SIZE = 13
-        val UpscaleFactors = listOf(1, 2, 4)
+        val UpscaleFactors = listOf(1, 0, 2, 4)
         val SlowMotionFactors = listOf(1, 2, 4, 8)
         val TargetFpsChoices = listOf(0.0, 30.0, 60.0)
     }
@@ -81,7 +82,8 @@ data class HyperRecipe(
  */
 enum class HyperPreset(val id: String, val variants: List<Int> = emptyList()) {
     Restore("restore"),
-    Sharper("sharper", listOf(2, 4)),
+    Sharper("sharper", listOf(0, 2, 4)),
+    Enchance("enchance"),
     Fps60("fps60"),
     SlowMotion("slowmo", listOf(2, 4, 8)),
     Anime("anime"),
@@ -90,7 +92,8 @@ enum class HyperPreset(val id: String, val variants: List<Int> = emptyList()) {
     fun recipe(variant: Int = variants.firstOrNull() ?: 0): HyperRecipe = when (this) {
         // Clean + Upscale 2× + Face (o rosto é o risco; a tela avisa).
         Restore -> HyperRecipe(upscale = 2, denoise = 0.5f, deblock = true, deinterlace = 1, face = true, faceStrength = 0.5f)
-        Sharper -> HyperRecipe(upscale = if (variant == 4) 4 else 2)
+        Sharper -> HyperRecipe(upscale = if (variant in listOf(2, 4)) variant else 0)
+        Enchance -> HyperRecipe(upscale = 2, upscaleMode = HyperUpscaleMode.Enchance)
         Fps60 -> HyperRecipe(targetFps = 60.0)
         SlowMotion -> HyperRecipe(slowMotion = variant.takeIf { it in HyperRecipe.SlowMotionFactors && it > 1 } ?: 2)
         Anime -> HyperRecipe(upscale = 2, upscaleMode = HyperUpscaleMode.Anime)

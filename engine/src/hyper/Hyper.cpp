@@ -29,14 +29,13 @@ struct PaidEffect {
 // (fora de venda desde a 1.0.2.1, reconhecida para quem já tem); o AureaHyper
 // (semanal, mensal ou anual desde a 1.0.9) libera todos. docs/release/assinaturas.md.
 constexpr PaidEffect kPaidEffects[] = {
-    // As 3 ferramentas Hyper: só no AureaHyper (sem assinatura avulsa).
+    // Ferramentas Hyper: só no AureaHyper (sem assinatura avulsa).
     {effect_type_id(effect_keys::kHyperUpscale), nullptr},
+    {effect_type_id(effect_keys::kHyperEnchance), nullptr},
     {effect_type_id(effect_keys::kHyperMotion), nullptr},
     {effect_type_id(effect_keys::kHyperClean), nullptr},
     {effect_type_id(text::kTextPrismEffect), nullptr},
     {effect_type_id("aurea.motion.cartoon_moblur"), "aurea_fx_cartoon_moblur"},
-    {effect_type_id("aurea.motion.twitch_reference"), "aurea_fx_twitch"},
-    {effect_type_id(aurea::effect_keys::kTwitch), "aurea_fx_twitch"},
     {effect_type_id("aurea.glitch.signal_reference"), "aurea_fx_signal"},
     {effect_type_id(aurea::effect_keys::kSignal), "aurea_fx_signal"},
     {effect_type_id("aurea.glitch.glitchify_reference"), "aurea_fx_glitchify"},
@@ -112,7 +111,7 @@ bool effect_option_requires_access(u32 effectTypeId, u32 paramIndex, f32 value) 
         && std::isfinite(value) && std::lround(value) == static_cast<long>(kFlowRetimeNeuralValue);
 }
 
-bool text3d_requires_access() noexcept { return true; }
+bool text3d_requires_access() noexcept { return false; }
 
 bool model_source_requires_access(const std::string& sourcePath) noexcept {
     return text3d_requires_access() && sourcePath.rfind(scene3d::kText3DScheme, 0) == 0;
@@ -153,6 +152,8 @@ std::vector<std::string> subscription_product_ids() {
     std::vector<std::string> ids = hyper_plans_on_sale();
     for (const PaidEffect& e : kPaidEffects)
         if (e.product && std::find(ids.begin(), ids.end(), e.product) == ids.end()) ids.emplace_back(e.product);
+    // Twitch is free. Retain the retired SKU for receipt restoration.
+    ids.emplace_back("aurea_fx_twitch");
     ids.emplace_back(kText3DProductId);
     return ids;
 }
@@ -174,8 +175,9 @@ bool has_text3d_access(const std::vector<std::string>& owned) noexcept {
 
 Recipe sanitize(const Recipe& in) noexcept {
     Recipe r = in;
-    r.upscale = in.upscale >= 3 ? 4u : (in.upscale >= 2 ? 2u : 1u);
-    if (static_cast<u8>(r.upscaleMode) > static_cast<u8>(UpscaleMode::Anime)) r.upscaleMode = UpscaleMode::General;
+    r.upscale = in.upscale >= 3 ? 4u : in.upscale;
+    if (static_cast<u8>(r.upscaleMode) > static_cast<u8>(UpscaleMode::Enchance)) r.upscaleMode = UpscaleMode::General;
+    if (r.upscaleMode == UpscaleMode::Enchance && r.upscale != 1) r.upscale = 2;
     r.denoise = unit(in.denoise, 0.0f);
     r.deinterlace = std::min<u8>(in.deinterlace, 2);
     r.faceStrength = unit(in.faceStrength, 0.5f);

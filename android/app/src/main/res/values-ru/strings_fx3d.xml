@@ -33,4 +33,7 @@
     <string name="fxp_explode_glass">Разбить стекло</string>
     <string name="fxp_explode_assemble">Сборка</string>
     <string name="fxp_explode_side_impact">Боковой удар</string>
+    <string name="fx3d_name_spacing">Разнесение 3D</string>
+    <string name="fx3d_desc_spacing">Раздвигает части модели. Анимируйте расстояние, чтобы собирать или разбирать объект.</string>
+    <string name="fx3d_name_money">3D-дождь из денег</string>
 </resources>

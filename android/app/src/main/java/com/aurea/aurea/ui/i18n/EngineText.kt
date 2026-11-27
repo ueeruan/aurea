@@ -214,6 +214,8 @@ object EngineText {
         "trilhas invalidas" to R.string.eng_invalid_track,
         "preset invalido" to R.string.eng_preset_invalid,
         "preset de estudio invalido" to R.string.eng_preset_invalid,
+        "lut invalida no preset de cor" to R.string.eng_preset_invalid,
+        "nao foi possivel salvar a lut do preset de cor" to R.string.msg_nao_foi_possivel_salvar_o_preset,
         "selecione um modelo 3d" to R.string.eng_pick_model,
         "selecione um modelo 3d importado" to R.string.eng_pick_model,
         "selecione texto 3d" to R.string.eng_pick_text3d,

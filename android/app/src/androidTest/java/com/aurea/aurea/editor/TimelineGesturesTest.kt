@@ -453,6 +453,9 @@ class TimelineGesturesTest {
      */
     @Test fun secondFingerAfterAcceptedHoldPinchesInsteadOfSelectingOrLiftingTheLayer() {
         launch(5)
+        val zoomAnchor = 45
+        compose.runOnIdle { store.seek(zoomAnchor) }
+        compose.waitUntil(5000) { store.playhead == zoomAnchor }
         val before = store.layers.map { Triple(it.id, it.startFrame, it.endFrame) }
         val order = store.layers.map { it.id }
         val height = timeline().fetchSemanticsNode().size.height
@@ -473,6 +476,7 @@ class TimelineGesturesTest {
         }
         compose.waitForIdle()
         compose.runOnIdle {
+            assertEquals("A pinça longe do cabeçote deve manter o instante atual", zoomAnchor, store.playhead)
             assertTrue("A pinça depois do toque longo não escolhe", store.selection.isEmpty())
             assertEquals("A pinça depois do toque longo não reordena", order, store.layers.map { it.id })
             assertEquals(before, store.layers.map { Triple(it.id, it.startFrame, it.endFrame) })
@@ -495,6 +499,38 @@ class TimelineGesturesTest {
             val frames = store.playhead - playhead
             assertTrue("A pinça deveria ter ampliado a timeline: 40 dp = $frames quadros", frames in 1..10)
         }
+    }
+
+    @Test fun deletingWithMagneticTimelineOffKeepsTheNextClipAtItsTime() {
+        launch(4, shape = true)
+        val ids = compose.runOnIdle { store.layers.map { it.id } }
+        val (first, middle, loose, last) = ids
+        compose.runOnIdle {
+            store.setLayerRanges(ids.toLongArray(), intArrayOf(0, 30, 60, 90), intArrayOf(30, 60, 90, 120))
+        }
+        compose.waitUntil(5000) { store.layers.firstOrNull { it.id == last }?.startFrame == 90 }
+        compose.runOnIdle {
+            assertTrue(store.moveLayerToRow(middle, first, 1))
+            assertTrue(store.moveLayerToRow(loose, first, 1))
+            assertTrue(store.moveLayerToRow(last, first, 1))
+            store.setLayerMagneticTrack(middle, true)
+            store.toggleEditMode()
+            assertTrue(store.editMode)
+            store.toggleEditMode()
+            assertFalse(store.editMode)
+        }
+        compose.waitUntil(5000) { store.layers.firstOrNull { it.id == middle }?.magnetic == true }
+        compose.runOnIdle { store.deleteLayers(listOf(middle)) }
+        compose.waitUntil(5000) { store.layers.none { it.id == middle } }
+        compose.runOnIdle {
+            assertEquals(90, store.layers.single { it.id == last }.startFrame)
+            store.toggleEditMode()
+            assertTrue(store.editMode)
+            assertFalse(store.layers.single { it.id == loose }.magnetic)
+            store.deleteLayers(listOf(loose))
+        }
+        compose.waitUntil(5000) { store.layers.none { it.id == loose } }
+        compose.runOnIdle { assertEquals(90, store.layers.single { it.id == last }.startFrame) }
     }
 
     /**

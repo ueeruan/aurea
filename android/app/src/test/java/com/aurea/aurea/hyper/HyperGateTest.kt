@@ -53,7 +53,6 @@ class HyperGateTest {
         assertEquals(HyperAccess.Locked, EntitlementRules.access(cache(emptySet()), email, product, now, false))
     }
 
-    // 0.5.4: o texto 3D (e os efeitos Hyper) só passam com o acesso confirmado.
     @Test fun paidFeatureNeedsConfirmedAccess() {
         for (access in HyperAccess.entries) {
             assertEquals("pago com $access", access != HyperAccess.Unlocked, PaidGate.locked(true, access))
@@ -61,8 +60,7 @@ class HyperGateTest {
         }
     }
 
-    // Texto 3D sem conta, sem rede, expirado ou com a config desligada: criar continua bloqueado.
-    @Test fun text3dCreationFollowsTheAccountGate() {
+    @Test fun paidAndFreeFeaturesRespectTheirAccessRules() {
         val signedOut = EntitlementRules.access(cache(setOf(product)), null, product, now, false)
         val locked = EntitlementRules.access(cache(emptySet()), email, product, now, false)
         val unlocked = EntitlementRules.access(cache(setOf(product)), email, product, now, false)
@@ -71,6 +69,9 @@ class HyperGateTest {
         assertTrue(PaidGate.locked(true, locked))
         assertTrue(PaidGate.locked(true, expired))
         assertFalse(PaidGate.locked(true, unlocked))
+        for (access in listOf(signedOut, locked, unlocked, expired)) {
+            assertFalse(PaidGate.locked(false, access))
+        }
     }
 
     @Test fun serverResponsesMapToChecks() {
@@ -102,7 +103,10 @@ class HyperGateTest {
         val restore = HyperPreset.Restore.recipe()
         assertTrue(restore.denoise > 0f && restore.deblock && restore.deinterlace == 1 && restore.upscale == 2 && restore.face)
         assertEquals(4, HyperPreset.Sharper.recipe(4).upscale)
-        assertEquals(2, HyperPreset.Sharper.recipe().upscale)
+        assertEquals(2, HyperPreset.Sharper.recipe(2).upscale)
+        assertEquals(0, HyperPreset.Sharper.recipe().upscale)
+        assertEquals(2, HyperPreset.Enchance.recipe().upscale)
+        assertEquals(HyperUpscaleMode.Enchance, HyperPreset.Enchance.recipe().upscaleMode)
         assertEquals(60.0, HyperPreset.Fps60.recipe().targetFps, 0.0)
         assertEquals(8, HyperPreset.SlowMotion.recipe(8).slowMotion)
         assertEquals(HyperUpscaleMode.Anime, HyperPreset.Anime.recipe().upscaleMode)

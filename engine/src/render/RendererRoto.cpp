@@ -63,13 +63,35 @@ struct RotoFrame {
 
 } // namespace
 
+void Renderer::set_cutout_view(const Composition* comp, const Layer* layer, const EffectInstance* effect,
+                               const Asset* asset, u32 mode) noexcept {
+    cutoutViewOverride_ = (layer && effect && mode < 3) ? mode + 1 : 0;
+    cutoutViewTrack_ = cutoutViewOverride_ ? roto_track(comp, *layer, effect, asset) : 0;
+    clear_preview_cache();
+}
+
+u32 Renderer::cutout_view(const Layer* layer, const EffectInstance* effect) const noexcept {
+    if (!cutoutViewOverride_ || planFinal_ || !layer || !effect || !planProject_) return 0;
+    const Asset* asset = planProject_->asset(layer->source);
+    return roto_track(planComp_, *layer, effect, asset) == cutoutViewTrack_ ? cutoutViewOverride_ : 0;
+}
+
 bool Renderer::roto_propagate(const Project& project, const Composition& comp, const Layer& layer,
-                              const EffectInstance& instance, MediaManager* media) noexcept try {
-    ai::RotoStrokes strokes;
-    if (!ai::roto_instance_strokes(instance, strokes)) return false;
+                              const EffectInstance& instance, MediaManager* media, bool refresh) noexcept try {
     if (layer.kind != LayerKind::Video || !media || !media->factory()) return false;
     const Asset* asset = project.asset(layer.source);
     if (!asset || !asset->has_video()) return false;
+    const u64 track = roto_track(&comp, layer, &instance, asset);
+    if (refresh) {
+        if (!roto_) return false;
+        const auto previous = roto_->progress();
+        if (previous.track != track || previous.total <= 0) return false;
+    }
+    ai::RotoStrokes strokes;
+    if (!ai::roto_instance_strokes(instance, strokes)) {
+        if (refresh) roto_->cancel();
+        return false;
+    }
     if (!foreground_) foreground_ = std::make_unique<ai::DepthMapService>(true);
     // Bugs 0.3.4: "Propagar clipe" é pedido explícito — a rede que não carregou
     // antes tenta de novo (antes só depois de trocar de projeto).
@@ -106,7 +128,7 @@ bool Renderer::roto_propagate(const Project& project, const Composition& comp, c
     if (a > b) std::swap(a, b);
     // Os traços sempre entram no trecho propagado.
     for (const ai::RotoStroke& s : strokes) { a = std::min(a, s.frame); b = std::max(b, s.frame); }
-    roto_->propagate(roto_track(&comp, layer, &instance, asset), strokes, src, std::max<i64>(0, a), std::min(total - 1, b));
+    roto_->propagate(track, strokes, src, std::max<i64>(0, a), std::min(total - 1, b));
     return true;
 } catch (...) {
     return false;
@@ -184,6 +206,17 @@ DepthMapResult Renderer::roto_map(const DepthMapRequest& request, const std::vec
         const u64 k = rmix(rmix(track, static_cast<u64>(f)), ai::roto_dependency(strokes, f));
         return rmix(k, std::bit_cast<u32>(chatter));
     };
+    if (refine) {
+        const u64 key = rmix(tex_key(frame), refineKey);
+        for (const u32 kind : {2u, 1u}) {
+            auto cached = rotoRefinedTex_.find(rmix(key, kind));
+            if (cached == rotoRefinedTex_.end()) continue;
+            cached->second.lastFrame = frameNumber_;
+            DepthMapResult result{cached->second.texture, 0.0f, 1.0f, false, sourceTimeUs};
+            result.rotoRefined = kind;
+            return result;
+        }
+    }
     ai::RotoService::MattePtr matte = roto_->cached(track, strokes, frame);
     ai::RotoService::RefinedPtr refined = refine && matte ? roto_->cached_refined(track, strokes, src.refine, frame) : nullptr;
     if (!matte || (refine && !refined)) {
@@ -326,12 +359,17 @@ std::shared_ptr<const std::vector<f32>> Renderer::roto_cached_matte(const Compos
 }
 
 bool Renderer::roto_status(const Project& project, const Composition& comp, const Layer& layer,
-                           const EffectInstance& instance, i64 sourceFrame, i64* out8) noexcept try {
+                           const EffectInstance& instance, i64 sourceFrame, i64* out8, u32* strokeCounts) noexcept try {
     if (!out8) return false;
     for (u32 i = 0; i < 8; ++i) out8[i] = 0;
     ai::RotoStrokes strokes;
-    if (!ai::roto_instance_strokes(instance, strokes) || strokes.empty()) return false;
+    if (!ai::roto_instance_strokes(instance, strokes)) return true;
     out8[7] = 1;
+    if (strokeCounts) {
+        strokeCounts[0] = static_cast<u32>(std::count_if(strokes.begin(), strokes.end(),
+            [sourceFrame](const ai::RotoStroke& stroke) { return stroke.frame == sourceFrame; }));
+        strokeCounts[1] = static_cast<u32>(strokes.size());
+    }
     const Asset* asset = project.asset(layer.source);
     const u64 track = roto_track(&comp, layer, &instance, asset);
     i64 first = 0, last = 0;
@@ -362,6 +400,7 @@ bool Renderer::roto_status(const Project& project, const Composition& comp, cons
     // Com Refinar borda, "pronto" é o refinado também.
     const u64 refineKey = ai::roto_instance_refine(instance).hash();
     out8[4] = roto_->ready(track, strokes, sourceFrame, refineKey) ? 1 : 0;
+    if (!out8[2] && !out8[3] && !out8[4]) out8[3] = roto_->preview_failure(track, strokes, sourceFrame, refineKey);
     out8[5] = roto_->ready_count(track, strokes, first, last, refineKey);
     return true;
 } catch (...) {

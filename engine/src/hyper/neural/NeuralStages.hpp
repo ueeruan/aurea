@@ -14,25 +14,21 @@
 
 namespace aurea::hyper::neural {
 
-// NeuralUpscale.cpp — Upscale (General/Anime) e Clean.
-[[nodiscard]] std::unique_ptr<HyperStage> make_upscale_stage(StageKind kind, Path path, UpscaleMode mode);
-/// O que a última chamada de `process` fez (testes, log).
-struct UpscaleStats {
+// NeuralUpscale.cpp — legacy filename for the optional Clean stage.
+[[nodiscard]] std::unique_ptr<HyperStage> make_clean_stage(Path path);
+struct CleanStats {
     u32 tiles = 0, skipped = 0, tile = 0, margin = 0, workers = 0;
     u64 peakBytes = 0, historyBytes = 0, budgetPerWorker = 0;
-    bool vulkan = false, fastCpu = false, finalCatmull = false;   ///< fastCpu: int8 misto (anime) ou conta fp16 (SPAN)
+    bool vulkan = false;
 };
-[[nodiscard]] UpscaleStats upscale_stage_stats(const HyperStage& stage) noexcept;
-[[nodiscard]] f64 cost_span_lite(const DeviceProfile& p) noexcept;
+[[nodiscard]] CleanStats clean_stage_stats(const HyperStage& stage) noexcept;
 [[nodiscard]] f64 cost_esrgan(const DeviceProfile& p) noexcept;
-[[nodiscard]] f64 cost_anime(const DeviceProfile& p) noexcept;
 /// Pesos fp32 do realesr-general-x4v3 misturados ao wdn (w = força do denoise).
 [[nodiscard]] Status esrgan_general_weights(f32 denoise, std::vector<unsigned char>& out);
-/// 0 SPAN ×2, 1 SPAN ×4, 2 x4v3 (misturado), 3 animevideov3.
 class NetRunner;
 enum class Backend : u8;
-[[nodiscard]] Status load_upscale_net(int net, f32 denoise, Backend backend, bool fp16, bool int8, NetRunner& runner,
-                                      std::vector<unsigned char>& owned);
+[[nodiscard]] Status load_clean_net(f32 denoise, Backend backend, bool fp16, NetRunner& runner,
+                                    std::vector<unsigned char>& owned);
 /// Orçamento de trabalho que as etapas usam (memória do sistema + perfil).
 [[nodiscard]] u64 inference_budget(const DeviceProfile& profile, u64 fixedBytes) noexcept;
 

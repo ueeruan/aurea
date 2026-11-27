@@ -2,6 +2,7 @@ package com.aurea.aurea.effects
 
 import android.content.res.Resources
 import com.aurea.aurea.R
+import com.aurea.aurea.editor.panels.colorParamSpecType
 import com.aurea.aurea.engine.EffectParam
 
 // =============================================================================
@@ -38,15 +39,20 @@ private val LabelFallback = mapOf(
 )
 
 /** Os parâmetros de um efeito do tipo [typeId] com rótulo, opções e unidade traduzidos. */
-internal fun localizeEffectParams(res: Resources, typeId: Int, params: List<EffectParam>): List<EffectParam> =
+internal fun localizeEffectParams(res: Resources, typeId: Int, params: List<EffectParam>): List<EffectParam> {
+    val specType = colorParamSpecType(typeId)
     // Plugin (0.3.0): os textos vêm do plugin.json, no idioma do app.
-    PluginTexts.localize(typeId, params, res.configuration.locales[0].toLanguageTag()) ?: params.map { p ->
-        val ids = EffectI18nTable.entries[EffectI18nTable.slot(typeId, p.index)]
+    return PluginTexts.localize(typeId, params, res.configuration.locales[0].toLanguageTag()) ?: params.map { p ->
+        val ids = EffectI18nTable.entries[EffectI18nTable.slot(specType, p.index)]
         val unit = UnitRes[p.unit]?.let(res::getString) ?: p.unit
         // Dica (ⓘ) e título da seção: também pela identidade (efeito + índice / ordinal).
-        val tip = if (p.tip.isEmpty()) p.tip else EffectI18nTable.tips[EffectI18nTable.slot(typeId, p.index)]?.let(res::getString) ?: p.tip
-        val sectionLabel = if (p.section <= 0) p.sectionLabel
-            else EffectI18nTable.sections[EffectI18nTable.slot(typeId, p.section)]?.let(res::getString) ?: p.sectionLabel
+        val tip = if (p.tip.isEmpty()) p.tip else EffectI18nTable.tips[EffectI18nTable.slot(specType, p.index)]?.let(res::getString) ?: p.tip
+        val sectionName = when {
+            p.section <= 0 -> null
+            specType != typeId && p.sectionId == "window" -> R.string.grade_window
+            else -> EffectI18nTable.sections[EffectI18nTable.slot(specType, p.section)]
+        }
+        val sectionLabel = sectionName?.let(res::getString) ?: p.sectionLabel
         val fallback = if (ids == null) LabelFallback[p.label] else null
         if (ids == null && fallback == null && unit == p.unit && tip == p.tip && sectionLabel == p.sectionLabel) return@map p
         val label = ids?.let { res.getString(it[0]) } ?: fallback?.let(res::getString) ?: p.label
@@ -66,3 +72,4 @@ internal fun localizeEffectParams(res: Resources, typeId: Int, params: List<Effe
             control = p.control, step = p.step, origin = p.origin, enumStyle = p.enumStyle, rowFlags = p.rowFlags,
         )
     }
+}

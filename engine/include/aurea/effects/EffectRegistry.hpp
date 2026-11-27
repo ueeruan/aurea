@@ -120,6 +120,14 @@ namespace effect_keys {
     inline constexpr const char* kCurves             = "aurea.color.curves";
     /// O corretor de cor completo (0.3.0, ColorGradeEffect.cpp).
     inline constexpr const char* kColorGrade         = "aurea.color.grade";
+    inline constexpr const char* kColorStudio        = "aurea.color.studio_grade";
+    inline constexpr const char* kLookStudio         = "aurea.color.studio_look";
+    inline constexpr u32 kColorGradeLutParam = 70;
+
+    [[nodiscard]] constexpr bool is_color_grade(EffectTypeId type) noexcept {
+        return type == effect_type_id(kColorGrade) || type == effect_type_id(kColorStudio) ||
+               type == effect_type_id(kLookStudio);
+    }
     inline constexpr const char* kGaussianBlur       = "aurea.blur.gaussian";
     inline constexpr const char* kSharpen            = "aurea.blur.sharpen";
     inline constexpr const char* kSharpenReference   = "aurea.blur.sharpen_reference";
@@ -285,6 +293,7 @@ namespace effect_keys {
     // Explosão (23/11/2026): o objeto 3D quebra em peças da própria malha
     // (scene3d/Explode3D.cpp); em camada 2D, peças planas como o 3D Shatter.
     inline constexpr const char* kExplode3D             = "aurea.3d.explode";
+    inline constexpr const char* kSpacing3D             = "aurea.3d.spacing";
 
     // --- Tempo por optical flow (0.1.8; FlowTimeEffects.cpp) ----------------
     // Declarativos: o renderer lê os parâmetros onde escolhe os quadros da

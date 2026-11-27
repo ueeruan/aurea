@@ -1761,6 +1761,14 @@ AUREA_JNI jboolean AUREA_FN(nativePreviewGestureBasis)(JNIEnv* env, jclass, jlon
     if (!c || !out || env->GetArrayLength(out) < 13 || !c->engine.query_preview_gesture_basis(static_cast<u64>(layer), values)) return JNI_FALSE;
     env->SetFloatArrayRegion(out, 0, 13, values); return JNI_TRUE;
 }
+AUREA_JNI jboolean AUREA_FN(nativePivotDragBasis)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
+    auto* c = ctx_of(handle);
+    constexpr jsize count = static_cast<jsize>(Engine::kPivotDragFloats);
+    f32 values[count]{};
+    if (!c || !out || env->GetArrayLength(out) < count || !c->engine.query_pivot_drag_basis(static_cast<u64>(layer), values)) return JNI_FALSE;
+    env->SetFloatArrayRegion(out, 0, count, values);
+    return JNI_TRUE;
+}
 AUREA_JNI jfloatArray AUREA_FN(previewGestureValue)(JNIEnv* env, jclass, jfloatArray basis, jfloat dx, jfloat dy, jboolean rotate) {
     if (!basis || env->GetArrayLength(basis) != 13) return env->NewFloatArray(0);
     f32 values[13]{}; env->GetFloatArrayRegion(basis, 0, 13, values);
@@ -3637,13 +3645,14 @@ AUREA_JNI jstring AUREA_FN(nativeLayerMediaPath)(JNIEnv* env, jclass, jlong hand
 // Substituir mídia, informações da mídia e arquivo do projeto (EngineMedia.cpp,
 // ProjectPackage.cpp).
 // =============================================================================
-AUREA_JNI jlong AUREA_FN(nativeReplaceLayerVideo)(JNIEnv* env, jclass, jlong handle, jlong layer, jstring source, jstring name) {
+AUREA_JNI jlong AUREA_FN(nativeReplaceLayerVideo)(JNIEnv* env, jclass, jlong handle, jlong layer, jstring source,
+                                                jstring name, jboolean verifyUpgrade) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);
     VideoImport request;
     request.sourcePath = to_string(env, source);
     request.displayName = to_string(env, name);
-    const Result<u64> r = c->engine.replace_layer_video(static_cast<u64>(layer), request);
+    const Result<u64> r = c->engine.replace_layer_video(static_cast<u64>(layer), request, verifyUpgrade == JNI_TRUE);
     if (!r.ok()) return -static_cast<jlong>(r.status().code());
     return static_cast<jlong>(*r);
 }
@@ -4334,19 +4343,18 @@ AUREA_JNI jboolean AUREA_FN(nativeRotoSetView)(JNIEnv*, jclass, jlong handle, jl
     return c && c->engine.roto_set_view(static_cast<u64>(layer), static_cast<u32>(effectId), static_cast<u32>(std::max(0, mode))) ? JNI_TRUE : JNI_FALSE;
 }
 /// [propagados, total, propagando, falhou, traços aqui, traços total,
-///  quadro atual pronto, quadros do clipe prontos, quadros do clipe, há traços]
+///  quadro atual pronto, quadros do clipe prontos, quadros do clipe, há traços, válido]
 AUREA_JNI jlongArray AUREA_FN(nativeRotoStatus)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effectId) {
     NativeContext* c = ctx_of(handle);
-    jlong v[10]{};
+    jlong v[11]{};
     if (c) {
-        i64 st[8]{}; u32 info[3]{};
-        (void)c->engine.roto_status(static_cast<u64>(layer), static_cast<u32>(effectId), st);
-        (void)c->engine.roto_stroke_info(static_cast<u64>(layer), static_cast<u32>(effectId), info);
+        i64 st[8]{}; u32 info[2]{};
+        v[10] = c->engine.roto_status(static_cast<u64>(layer), static_cast<u32>(effectId), st, info);
         v[0] = st[0]; v[1] = st[1]; v[2] = st[2]; v[3] = st[3]; v[4] = info[0]; v[5] = info[1];
         v[6] = st[4]; v[7] = st[5]; v[8] = st[6]; v[9] = st[7];
     }
-    jlongArray out = env->NewLongArray(10);
-    if (out) env->SetLongArrayRegion(out, 0, 10, v);
+    jlongArray out = env->NewLongArray(11);
+    if (out) env->SetLongArrayRegion(out, 0, 11, v);
     return out;
 }
 
@@ -6825,8 +6833,8 @@ bool hyper_recipe_from(JNIEnv* env, jdoubleArray packed, hyper::Recipe& r) {
     for (jdouble& x : v) if (!std::isfinite(x)) x = 0.0;
     auto on = [](jdouble x) { return x >= 0.5; };
     r = hyper::Recipe{};
-    r.upscale = static_cast<u32>(std::clamp(v[0], 1.0, 8.0));
-    r.upscaleMode = on(v[1]) ? hyper::UpscaleMode::Anime : hyper::UpscaleMode::General;
+    r.upscale = static_cast<u32>(std::clamp(v[0], 0.0, 8.0));
+    r.upscaleMode = static_cast<hyper::UpscaleMode>(std::lround(std::clamp(v[1], 0.0, 2.0)));
     r.denoise = static_cast<f32>(std::clamp(v[2], 0.0, 1.0));
     r.deblock = on(v[3]);
     r.deinterlace = static_cast<u8>(std::clamp(v[4], 0.0, 2.0));

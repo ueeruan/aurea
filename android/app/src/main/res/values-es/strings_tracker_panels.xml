@@ -1,0 +1,5 @@
+<resources>
+    <string name="trk_motion_title">Rastreador de movimiento</string>
+    <string name="trk_video_required">Selecciona una capa de vídeo.</string>
+    <string name="trk_back_to_result">Volver al resultado</string>
+</resources>

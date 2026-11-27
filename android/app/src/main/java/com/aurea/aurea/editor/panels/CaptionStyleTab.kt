@@ -27,7 +27,7 @@ import com.aurea.aurea.ui.theme.AureaColors
  * Personalizar, Texto e caixa, e a posição/tamanho da faixa.
  */
 @Composable
-internal fun CaptionStyleTab(cap: CaptionsState, store: EditorStore) {
+internal fun CaptionStyleTab(cap: CaptionsState, store: EditorStore, onSaved: () -> Unit) {
     val chosen = cap.selectedBlocks
     val track = cap.track
     var onChosen by remember(track?.layer) { mutableStateOf(chosen.isNotEmpty()) }
@@ -37,19 +37,28 @@ internal fun CaptionStyleTab(cap: CaptionsState, store: EditorStore) {
     val s = target.settings
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)) {
         item(key = "status") { CaptionJobStatus(cap) }
-        if (track != null) item(key = "escopo") {
+        if (track != null && chosen.isNotEmpty()) item(key = "escopo") {
             Column {
                 CapLabel(stringResource(R.string.cap053_apply_to))
                 CapChips(listOf(stringResource(R.string.cap053_scope_track), stringResource(R.string.cap053_scope_selected, chosen.size)),
-                    if (onBlocks) 1 else 0, enabled = { it == 0 || chosen.isNotEmpty() }) { onChosen = it == 1 }
-                if (chosen.isEmpty()) CapNote(stringResource(R.string.cap053_scope_hint), AureaColors.Muted)
+                    if (onBlocks) 1 else 0) { onChosen = it == 1 }
             }
         }
-        item(key = "modelos") {
+        item(key = "ritmo") {
             Column {
-                CaptionTemplateRow(target)
-                // Meus modelos e os da comunidade valem para a faixa (o pacote leva posição e tamanho).
-                if (!onBlocks) CaptionPresetBrowser(cap)
+                if (!onBlocks) {
+                    CapLabel(stringResource(R.string.pn_caption_words_per_caption))
+                    CapChips((1..8).map(Int::toString), if (s.mode == 1) 0 else s.maxWords - 1,
+                        enabled = { cap.lookEnabled }) { cap.setWordsPerBlock(it + 1) }
+                    CaptionSavePresetButton(cap, onSaved)
+                }
+                CapLabel(stringResource(R.string.caption_star_motion))
+                val motion = if (s.style == 5) 2 else if (s.highlight) 1 else 0
+                CapChips(listOf(stringResource(R.string.caption_star_cut), stringResource(R.string.pn_caption_style_highlight),
+                    stringResource(R.string.edt_tp_pop)), motion, enabled = { target.lookEnabled }) { index ->
+                    target.update { it.copy(style = listOf(0, 2, 5)[index], highlight = index != 0) }
+                }
+                CapAction(stringResource(R.string.caption_star_impact), enabled = target.lookEnabled) { target.applyTemplate("comic") }
             }
         }
         item(key = "aparencia") {

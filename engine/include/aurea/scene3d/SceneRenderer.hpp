@@ -546,11 +546,18 @@ public:
     /// (SSAO/sombra de contato). Com MSAA ela sai do resolve da amostra 0 —
     /// só onde o aparelho tem (`depthResolveSampleZero`); sem, fica inválida
     /// e quem precisa faz um pré-passe de profundidade de 1 amostra.
+    /// Can be shared by shutter samples of one scene within one FrameGraph.
+    struct ExposureShadow {
+        const SceneFrame* source = nullptr;
+        FGTexture texture;
+        Mat4 matrix;
+        Vec4 params, params2;
+    };
     [[nodiscard]] bool build(FrameGraph& graph, Arena& arena, const SceneFrame& frame, u32 width, u32 height,
                              u64 frameNumber, FGTexture& outColor, const std::vector<ScenePlane>* planes = nullptr,
                              const SceneParticleDraw* particles = nullptr, u32 particleCount = 0,
                              FGTexture* outDepth = nullptr, FGTexture* outExposureHdr = nullptr,
-                             Vec2 previewJitterPixels = {}) noexcept;
+                             Vec2 previewJitterPixels = {}, ExposureShadow* exposureShadow = nullptr) noexcept;
     /// Complete a linear temporal exposure once, after all geometry samples.
     [[nodiscard]] FGTexture finish_exposure(FrameGraph& graph, const SceneFrame& frame, u32 width, u32 height,
                                             FGTexture display, FGTexture scene, bool bloomHasRadiance = true) noexcept;

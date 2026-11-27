@@ -30,7 +30,6 @@ struct EffectsView: View {
     @State private var maskCount = 0
     @State private var hasMatte = false
     @State private var captionCount = 0
-    @State private var cameraTracked = false
     @State private var about: EffectCatalogItem?
     @State private var pendingPick: UInt32?
     /// Arquivo de projeto de efeitos escolhido (DocumentImportPicker; o `.fileImporter`
@@ -458,6 +457,10 @@ struct EffectsView: View {
     private func tapRow(_ effect: EffectItem) {
         guard overlayId == nil, dragId == nil, liftedTap != effect.effectId else { return }
         if !effect.known { confirmUnknown(effect); return }
+        if let tool = fxEffectToolOf(effect.typeId), tool == .cameraTrack || tool == .tracking {
+            fxOpenEffectTool(tool, in: model)
+            return
+        }
         open(effect.effectId, animated: true)
     }
 
@@ -476,7 +479,8 @@ struct EffectsView: View {
     /// O corpo dos controles (soltas, "Avançado" e seções) — regra de `fxEffectLayout`.
     private func layout(_ id: UInt32) -> FxLayout {
         let visible = model.effectParams.filter { $0.flags & 16 == 0 }
-        return fxEffectLayout(typeOf(id), visible)
+        let typeId = typeOf(id)
+        return fxEffectLayout(typeId, visible, quickControls: fxColorStudioPrincipal(typeId))
     }
     /// Abre/recolhe uma seção (apresentação: sem desfazer) e relê o efeito.
     private func setSectionOpen(_ effect: UInt32, ordinal: Int, open: Bool) {
@@ -810,12 +814,11 @@ struct EffectsView: View {
     /// Relê no motor o que a camada tem de cada ferramenta. O rastreio guardado
     /// é restaurado como o painel de rastreio faz ao aparecer.
     private func refreshTools() {
-        guard tabbed, let id = model.primarySelection else { maskCount = 0; hasMatte = false; captionCount = 0; cameraTracked = false; return }
+        guard tabbed, let id = model.primarySelection else { maskCount = 0; hasMatte = false; captionCount = 0; return }
         maskCount = fxMaskIds(model.engine.maskData(id)).count
         let matte = model.engine.trackMatte(id)
         hasMatte = matte.count > 1 && matte[0].int64Value != 0 && matte[1].intValue != 0
         captionCount = Int(model.engine.captionCount(id))
-        cameraTracked = model.selectedLayer?.kind == 1 && model.engine.restoreCameraTrack(forLayer: id)
     }
     /// A LINHA DE UMA FERRAMENTA no formato da lista: glifo no lugar da seta,
     /// contagem no lugar do selo, 🗑 no lugar do olho, sem ≡. Tocar abre a
@@ -1037,6 +1040,14 @@ struct EffectsView: View {
                     if !effect.known {
                         FxBodyNotice(text: AureaText.t("panel_este_efeito_saiu_catalogo_ele_nao"))
                     } else {
+                        if effect.typeId == fxColorStudioLookType {
+                            Button(AureaText.t("fx_studio_look_import_ffx")) {
+                                OmegaChromeRequests.shared.aeImport = .aeImport
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .disabled(locked)
+                            .accessibilityIdentifier("effects.looks.importFfx")
+                        }
                         specialTools(effect)
                         if effect.typeId != fxEffectTypeId("aurea.time.remap") {
                             if bodyLayout.isEmpty {
@@ -1081,18 +1092,15 @@ struct EffectsView: View {
         let type = effect.typeId
         let localAiBit: UInt32 = type == fxEffectTypeId("aurea.ai.depth_map") ? 1 : type == fxEffectTypeId("aurea.key.rotobrush") ? 2 : 0
         if type == fxEffectTypeId(bgRemoveEffectKey) {
-            BgRemoveCardTools(effectId: effect.effectId).padding(.horizontal, 6).padding(.vertical, 4)
+            RotoPaintCardTools(effectId: effect.effectId, automatic: true)
+                .padding(.horizontal, 6).padding(.vertical, 4)
         }
         if type == fxEffectTypeId("aurea.distort.headbop") {
             HeadbopCardTools(effectId: effect.effectId).padding(.horizontal, 6).padding(.vertical, 4)
         }
         if type == fxEffectTypeId("aurea.key.rotobrush") {
-            VStack(spacing: 0) {
-                FxBodyNotice(text: AureaText.t("roto_note"))
-                RotoPaintCardTools(effectId: effect.effectId,
-                    previousView: UInt32(Swift.max(0, Swift.min(2, Int(model.effectParams.first { $0.index == 10 }?.scalar ?? 0)))))
-            }
-            .padding(.horizontal, 6).padding(.vertical, 4)
+            RotoPaintCardTools(effectId: effect.effectId)
+                .padding(.horizontal, 6).padding(.vertical, 4)
         }
         if effect.enabled && localAiBit != 0 {
             if model.localAiActivity & localAiBit != 0 {
@@ -1138,12 +1146,13 @@ struct EffectsView: View {
     /// escolher aplica o preset num passo de desfazer. Id `effects.variation.<efeito>`.
     @ViewBuilder private func variationRow(_ effect: EffectItem) -> some View {
         let presets = model.engine.effectPresets(effect.typeId)
-        let explode = effect.typeId == fxEffectTypeId("aurea.3d.explode")
+        let studioLook = effect.typeId == fxColorStudioLookType
+        let useCatalogNames = studioLook || effect.typeId == fxEffectTypeId("aurea.3d.explode")
         let labels = stride(from: 0, to: presets.count - 1, by: 2).map {
-            explode ? fxPresetName(effect.typeId, presets[$0], presets[$0 + 1]) : fxPresetLabel(presets[$0], presets[$0 + 1])
+            useCatalogNames ? fxPresetName(effect.typeId, presets[$0], presets[$0 + 1]) : fxPresetLabel(presets[$0], presets[$0 + 1])
         }
         if !labels.isEmpty {
-            choiceLayout(label: AureaText.t("om_fx_variation"), options: labels, current: -1,
+            choiceLayout(label: AureaText.t(studioLook ? "fx_studio_look_preset" : "om_fx_variation"), options: labels, current: -1,
                          segmented: labels.count <= 4 && labels.allSatisfy { $0.count <= 10 },
                          enabled: !locked, labelActive: false, tag: "effects.variation.\(effect.effectId)") { preset in
                 guard let layer = model.primarySelection, !locked else { return }
@@ -1696,9 +1705,10 @@ struct EffectsView: View {
             })
         }
         items.append(.item(AureaText.t("om_fx_menu_save_preset"), tag: "effects.menu.save_preset") { saveDialog(effect: id) })
-        if effect.typeId == fxEffectTypeId("aurea.distort.turbulence") {
+        let reference = effect.typeId == fxEffectTypeId("aurea.distort.turbulent_displace_reference")
+        if reference || effect.typeId == fxEffectTypeId("aurea.distort.turbulence") {
             items.append(.item(AureaText.t("app_preset_fx_turbulence"), enabled: !locked, tag: "effects.menu.turbulence") {
-                applyTurbulencePreset(effect)
+                applyTurbulencePreset(effect, reference: reference)
             })
         }
         return items
@@ -1757,14 +1767,17 @@ struct EffectsView: View {
     }
 
     /// "Preset Turbulência dinâmica" (⋮ do Turbulência): quantidade e tamanho 15,
-    /// complexidade 1, o resto zerado e a evolução por expressão `time*6`.
-    private func applyTurbulencePreset(_ effect: EffectItem) {
+    /// complexidade 1 e evolução por expressão `time*6`.
+    private func applyTurbulencePreset(_ effect: EffectItem, reference: Bool) {
         guard let layer = model.primarySelection, model.selectedLayer?.locked != true else { return }
+        let evolution: UInt32 = reference ? 5 : 3
+        let values: [(UInt32, Float)] = reference ? [(0, 0), (1, 15), (2, 15), (4, 1), (evolution, 0), (8, 0)]
+            : [(0, 15), (1, 15), (2, 1), (evolution, 0), (4, 0), (5, 0), (6, 0)]
         model.beginGesture("Preset Turbulência dinâmica")
-        for (param, value) in [(UInt32(0), Float(15)), (1, 15), (2, 1), (3, 0), (4, 0), (5, 0), (6, 0)] {
+        for (param, value) in values {
             model.engine.setEffect(effect.effectId, forLayer: layer, paramIndex: param, value: value)
         }
-        let error = model.engine.setExpression(layer, property: 31, effect: effect.effectId, param: 24, source: "time*6")
+        let error = model.engine.setExpression(layer, property: 31, effect: effect.effectId, param: evolution * 4, source: "time*6")
         model.endGesture(); model.refreshModel(force: true)
         if !error.isEmpty { model.toast = error }
     }

@@ -405,7 +405,10 @@ AUREA_TEST(BgRemove, LayerActionAddsOneEffectReadsTheSavedMasksAndRejectsOtherLa
     AUREA_CHECK(layer && layer->effects.size() == 1u);
     if (!layer || layer->effects.empty()) return;
     const ParameterRegistry* specs = engine.effects().params(layer->effects.back().type);
-    AUREA_CHECK(specs && specs->count() == 11u);
+    AUREA_CHECK(specs && specs->count() == ai::kRotoStrokesParam + 1);
+    // Older projects had only the automatic settings. Painting extends the
+    // effect in place while a temporary view leaves those settings alone.
+    layer->effects.back().params.resize(ai::kRotoStrokesParam);
     i64 st[8]{};
     AUREA_CHECK(status_of(engine, id.pack(), static_cast<u32>(effect), st));
     AUREA_CHECK_EQ(st[6], i64{1});    // uma foto = um quadro
@@ -440,6 +443,26 @@ AUREA_TEST(BgRemove, LayerActionAddsOneEffectReadsTheSavedMasksAndRejectsOtherLa
     AUREA_CHECK(status_of(engine, reopened, reopenedEffect, again));
     AUREA_CHECK_EQ(again[4], i64{1});
     AUREA_CHECK_EQ(again[5], i64{1});
+    Layer* restored = comp->layer(LayerId::unpack(reopened));
+    AUREA_CHECK(restored != nullptr);
+    if (restored) {
+        auto* cutout = restored->find_effect(EffectId{reopenedEffect, 0});
+        AUREA_CHECK(cutout != nullptr);
+        if (cutout) {
+            const Vec4 where = layer_comp_matrix(*comp, *restored, FrameIndex{0}) * Vec4{80, 60, 0, 1};
+            const f32 point[] = {where.x / where.w, where.y / where.w};
+            AUREA_CHECK(engine.roto_set_view(reopened, reopenedEffect, 2));
+            AUREA_CHECK_EQ(cutout->params[ai::kBgRotoViewParam].constant.as_enum(), 0u);
+            AUREA_CHECK(engine.roto_add_stroke(reopened, reopenedEffect, false, 8, point, 1));
+            ai::RotoStrokes strokes;
+            AUREA_CHECK(ai::roto_instance_strokes(*cutout, strokes));
+            AUREA_CHECK_EQ(strokes.size(), usize{1});
+            AUREA_CHECK_EQ(restored->effects.size(), usize{1});
+            AUREA_CHECK(engine.roto_undo_stroke(reopened, reopenedEffect));
+            AUREA_CHECK(!ai::roto_instance_strokes(*cutout, strokes));
+            AUREA_CHECK(engine.roto_set_view(reopened, reopenedEffect, 3));
+        }
+    }
     engine.shutdown();
     (void)fileio::remove_file(file.string());
     (void)fileio::remove_file(sidecar);

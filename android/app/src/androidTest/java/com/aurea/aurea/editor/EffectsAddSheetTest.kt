@@ -236,6 +236,7 @@ class EffectsAddSheetTest {
             store.effectPrefs.updateQuickPage(0)
         }
         val captions = effectCardId(EffectTool.Captions.typeId)
+        val mask = effectCardId(EffectTool.Mask.typeId)
         val vhsId = effectTypeId("aurea.glitch.vhs")
         val vhs = effectCardId(vhsId)
 
@@ -247,20 +248,21 @@ class EffectsAddSheetTest {
         compose.onNodeWithTag("effects.quick").assertDoesNotExist()
         capture("fx-add-home")
 
-        // A linha da ferramenta abre o destino com um toque.
-        compose.onNodeWithTag("effects.home").performScrollToNode(hasTestTag("effects.category.text"))
-        compose.onNodeWithTag("effects.category.text").performClick()
+        // Legendas abre pela barra inferior. As ferramentas que continuam no catálogo ainda abrem em um toque.
+        compose.onNodeWithTag("effects.card.$captions").assertDoesNotExist()
+        compose.onNodeWithTag("effects.home").performScrollToNode(hasTestTag("effects.category.matte"))
+        compose.onNodeWithTag("effects.category.matte").performClick()
         compose.onNodeWithTag("effects.back").assertIsDisplayed()
         compose.onNodeWithTag("effects.search").assertIsDisplayed()
-        compose.onNodeWithTag("effects.grid").performScrollToNode(hasTestTag("effects.card.$captions"))
-        compose.onNodeWithTag("effects.card.$captions").performClick()
-        compose.waitUntil(5000) { opened == EffectTool.Captions }
+        compose.onNodeWithTag("effects.grid").performScrollToNode(hasTestTag("effects.card.$mask"))
+        compose.onNodeWithTag("effects.card.$mask").performClick()
+        compose.waitUntil(5000) { opened == EffectTool.Mask }
         compose.onNodeWithTag("effects.close").assertDoesNotExist()
 
         // Reaberto: a ferramenta está em Recentes.
         compose.runOnIdle { showBrowser = true }
         compose.waitUntil(5000) { exists("effects.close") }
-        compose.onNodeWithTag("effects.recent.$captions").assertIsDisplayed()
+        compose.onNodeWithTag("effects.recent.$mask").assertIsDisplayed()
 
         // Glitch → VHS → detalhe → a estrela favorita o efeito base; ✕ fecha o detalhe.
         compose.onNodeWithTag("effects.home").performScrollToNode(hasTestTag("effects.category.glitch"))

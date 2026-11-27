@@ -63,6 +63,7 @@ public:
     /// A region, when present, limits detection of new corners in this frame.
     void add_frame(const Gray& g, std::span<const Vec2> seedRegion = {});
     [[nodiscard]] const Tracks2D& tracks() const noexcept { return tracks_; }
+    [[nodiscard]] Tracks2D take_tracks() && noexcept;
     [[nodiscard]] u32 active() const noexcept { return static_cast<u32>(active_.size()); }
 
 private:

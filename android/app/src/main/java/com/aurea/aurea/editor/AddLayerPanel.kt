@@ -785,6 +785,9 @@ private fun Model3DGrid(store: EditorStore, close: () -> Unit) {
         listOf(
             ObjectCell(stringResource(R.string.model_library_3d), "add.model3d.library", glyph = CupertinoGlyph.Cube,
                 tint = AureaColors.Accent) { library = true },
+            ObjectCell(stringResource(R.string.fx3d_name_money), "add.model3d.money", glyph = CupertinoGlyph.Sparkles, tint = ShellColors.Text3D) {
+                if (store.addParticles(19) >= 0) close()
+            },
             ObjectCell(stringResource(R.string.shape3d_title), "add.model3d.shapes", draw = { drawShape3DIcon(0) }) { shapes = true },
             ObjectCell(stringResource(R.string.sh_add_model_3d), "add.model3d.file", glyph = CupertinoGlyph.Cube, tint = AureaColors.Accent) {
                 // Keep the broad fallback for providers that assign FBX/OBJ a
@@ -1276,7 +1279,7 @@ private fun AddBarPill(store: EditorStore, ui: EditorUi, reduce: Boolean, modifi
             .border(AddBarDims.Line, AddBarColors.Raised, AddBarPillShape)
             .testTag("addBar.pill"),
     ) {
-        val total = weights.sum()
+        val total = weights.sum() + 1f
         val index = ADD_BAR_PILL.indexOf(glowTab)
         val start = maxWidth * (weights.take(index).sum() / total)
         val width = maxWidth * (weights[index] / total)
@@ -1301,6 +1304,21 @@ private fun AddBarPill(store: EditorStore, ui: EditorUi, reduce: Boolean, modifi
                     else -> AddBarLook.IconOnly
                 }
                 AddBarPillItem(store, ui, tab, if (on && open != null) open else tab, look, on, reduce, Modifier.weight(weights[k]).fillMaxHeight())
+            }
+            val captions = stringResource(R.string.panel_legendas)
+            Column(
+                Modifier.weight(1f).fillMaxHeight().testTag("addBar.Captions")
+                    .semantics { contentDescription = captions }
+                    .tocavel(shrink = 1f, haptic = true, role = androidx.compose.ui.semantics.Role.Button) {
+                        AddBarState.more = false
+                        openPanel(store, ui, EditorPanel.Captions)
+                    },
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                CupertinoIcon(CupertinoGlyph.CaptionsBubble, AddBarDims.Icon, AureaColors.Accent)
+                Spacer(Modifier.height(2.dp))
+                AddBarLabel(captions, 10, color = AureaColors.Accent)
             }
         }
     }

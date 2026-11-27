@@ -143,12 +143,24 @@ internal class PivotDragSession(private val store: EditorStore, d: LayerDetail, 
     private val skew = FloatArray(2) { d.skew.getOrElse(it) { 0f } }
     val threeD = d.kind in 8..10 || d.flags and com.aurea.aurea.engine.PodLayout.FLAG_THREE_D != 0
     private val depthFollowsWidth = d.kind != 8 && d.kind != 9
-    val startX = pivotCompX
-    val startY = pivotCompY
-    private val p0 = FloatArray(2).also { d.compToParent(pivotCompX, pivotCompY, it) }
+    private val basis = store.pivotDragBasis(d.id)
+    val startX = basis?.get(0) ?: pivotCompX
+    val startY = basis?.get(1) ?: pivotCompY
+    private val p0 = FloatArray(2).also { d.compToParent(startX, startY, it) }
     private val pt = FloatArray(2)
 
     fun moveTo(compX: Float, compY: Float) {
+        if (basis != null) {
+            val dx = compX - startX
+            val dy = compY - startY
+            store.setPivot(
+                FloatArray(3) { anchor0[it] + basis[8 + it] * dx + basis[11 + it] * dy },
+                FloatArray(3) { pos0[it] + basis[2 + it] * dx + basis[5 + it] * dy },
+                detail.id,
+            )
+            return
+        }
+        if (threeD && depthFollowsWidth) return
         detail.compToParent(compX, compY, pt)
         val dx = pt[0] - p0[0]
         val dy = pt[1] - p0[1]
@@ -159,4 +171,5 @@ internal class PivotDragSession(private val store: EditorStore, d: LayerDetail, 
             detail.id,
         )
     }
+
 }

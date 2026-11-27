@@ -25,8 +25,7 @@ u64 RotoService::key_of(u64 track, i64 frame) noexcept {
     h ^= h >> 31; h *= 0xBF58476D1CE4E5B9ull; return h ^ (h >> 29);
 }
 
-u64 RotoService::refined_dep(const RotoStrokes& strokes, i64 frame, u64 refineKey) noexcept {
-    const u64 dep = roto_dependency(strokes, frame);
+u64 RotoService::refined_dep(u64 dep, u64 refineKey) noexcept {
     if (!dep || !refineKey) return 0;
     u64 h = dep ^ (refineKey * 0x9E3779B97F4A7C15ull);
     h ^= h >> 29; h *= 0xBF58476D1CE4E5B9ull; h ^= h >> 32;
@@ -63,7 +62,7 @@ RotoService::RefinedPtr RotoService::cached_refined_dep(u64 track, i64 frame, u6
 RotoService::RefinedPtr RotoService::cached_refined(u64 track, const RotoStrokes& strokes, const RotoRefineSettings& refine,
                                                     i64 frame) {
     if (!refine.on()) return nullptr;
-    return cached_refined_dep(track, frame, refined_dep(strokes, frame, refine.hash()));
+    return cached_refined_dep(track, frame, refined_dep(roto_dependency(strokes, frame), refine.hash()));
 }
 
 bool RotoService::ready(u64 track, const RotoStrokes& strokes, i64 frame, u64 refineKey) const {
@@ -74,22 +73,32 @@ bool RotoService::ready(u64 track, const RotoStrokes& strokes, i64 frame, u64 re
     if (it == cache_.end() || it->second.dep != dep) return false;
     if (!refineKey) return true;
     const auto rt = refined_.find(key_of(track, frame));
-    return rt != refined_.end() && rt->second.dep == refined_dep(strokes, frame, refineKey);
+    return rt != refined_.end() && rt->second.dep == refined_dep(dep, refineKey);
 }
 
 i64 RotoService::ready_count(u64 track, const RotoStrokes& strokes, i64 first, i64 last, u64 refineKey) const {
+    if (strokes.empty()) return 0;
     if (last < first) std::swap(first, last);
     if (last - first > 100'000) last = first + 100'000;   // teto de custo da consulta
     i64 n = 0;
+    const auto bases = roto_bases(strokes);
+    auto next = std::upper_bound(bases.begin(), bases.end(), first);
+    u64 dep = roto_dependency(strokes, first);
+    u64 refined = refined_dep(dep, refineKey);
     std::lock_guard<std::mutex> lock(mutex_);
     for (i64 f = first; f <= last; ++f) {
-        const u64 dep = roto_dependency(strokes, f);
-        if (!dep) continue;
+        // A dependency only changes at a painted frame. Between boundaries,
+        // progress uses the same hashes without walking the stroke points.
+        if (next != bases.end() && f == *next) {
+            dep = roto_dependency(strokes, f);
+            refined = refined_dep(dep, refineKey);
+            ++next;
+        }
         const auto it = cache_.find(key_of(track, f));
         if (it == cache_.end() || it->second.dep != dep) continue;
         if (refineKey) {
             const auto rt = refined_.find(key_of(track, f));
-            if (rt == refined_.end() || rt->second.dep != refined_dep(strokes, f, refineKey)) continue;
+            if (rt == refined_.end() || rt->second.dep != refined) continue;
         }
         ++n;
     }
@@ -221,7 +230,7 @@ RotoService::Result RotoService::compute_impl(u64 track, const RotoStrokes& stro
     RefinedPtr rhit;
     for (;;) {
         hit = cached(track, strokes, k);
-        rhit = hit && refine ? cached_refined_dep(track, k, refined_dep(strokes, k, refineKey)) : nullptr;
+        rhit = hit && refine ? cached_refined(track, strokes, source.refine, k) : nullptr;
         if ((hit && (!refine || rhit || !chained)) || k == first) break;
         k -= dir;
     }
@@ -252,7 +261,7 @@ RotoService::Result RotoService::compute_impl(u64 track, const RotoStrokes& stro
         }
         auto out = std::make_shared<RotoRefined>();
         roto_refine(matteM.data(), kSize, *img, s, temporal ? &t : nullptr, *out);
-        store_refined(track, m, refined_dep(strokes, m, refineKey), *out);
+        store_refined(track, m, refined_dep(roto_dependency(strokes, m), refineKey), *out);
         return out;
     };
 
@@ -378,10 +387,16 @@ void RotoService::ensure_thread() {
 }
 
 void RotoService::request(u64 track, const RotoStrokes& strokes, const Source& source, i64 frame) try {
+    const PreviewKey key{track, strokes_key(strokes), source.refine.hash(), frame};
     std::lock_guard<std::mutex> lock(queueMutex_);
+    const bool duringRange = (progress_.running && progress_.track == track) || (pending_ && pending_->range);
+    if (failedPreview_ == key) return;
+    if (duringRange ? (focus_ && focus_->preview == key)
+                    : (pending_ ? pending_->preview == key : activePreview_ == key)) return;
     auto job = std::make_unique<Job>();
     job->track = track; job->strokes = strokes; job->source = source; job->first = job->last = frame;
-    if ((progress_.running && progress_.track == track) || (pending_ && pending_->range)) {
+    job->preview = key;
+    if (duringRange) {
         // A propagação segue, mas este quadro (o que o usuário olha/pinta) vai
         // na frente: antes o pedido era descartado e o palco esperava a
         // propagação chegar nele - "o quadro congela".
@@ -391,7 +406,10 @@ void RotoService::request(u64 track, const RotoStrokes& strokes, const Source& s
         return;
     }
     // Um pedido de um quadro em curso (scrub antigo) para: o mais novo vence.
-    if (runningSingle_) generation_.fetch_add(1, std::memory_order_relaxed);
+    if (runningSingle_) {
+        generation_.fetch_add(1, std::memory_order_relaxed);
+        activePreview_.reset();
+    }
     pending_ = std::move(job);
     ensure_thread();
     wake_.notify_one();
@@ -402,6 +420,9 @@ void RotoService::request(u64 track, const RotoStrokes& strokes, const Source& s
 void RotoService::propagate(u64 track, const RotoStrokes& strokes, const Source& source, i64 first, i64 last) try {
     std::lock_guard<std::mutex> lock(queueMutex_);
     generation_.fetch_add(1, std::memory_order_relaxed);   // o que estava rodando para
+    activePreview_.reset();
+    failedPreview_.reset();
+    focus_.reset();
     auto job = std::make_unique<Job>();
     job->track = track; job->strokes = strokes; job->source = source;
     job->first = std::min(first, last); job->last = std::max(first, last); job->range = true;
@@ -418,11 +439,19 @@ RotoService::Progress RotoService::progress() const {
     return progress_;
 }
 
+u32 RotoService::preview_failure(u64 track, const RotoStrokes& strokes, i64 frame, u64 refineKey) const {
+    const PreviewKey key{track, strokes_key(strokes), refineKey, frame};
+    std::lock_guard<std::mutex> lock(queueMutex_);
+    return failedPreview_ == key ? failedPreviewReason_ : 0;
+}
+
 void RotoService::cancel() noexcept {
     std::lock_guard<std::mutex> lock(queueMutex_);
     generation_.fetch_add(1, std::memory_order_relaxed);
     if (pending_) pending_.reset();
     focus_.reset();
+    activePreview_.reset();
+    failedPreview_.reset();
     progress_.running = false;
 }
 
@@ -445,6 +474,7 @@ void RotoService::thread_main() noexcept {
             job = pending_ ? std::move(pending_) : std::move(focus_);
             gen = generation_.load(std::memory_order_relaxed);
             runningSingle_ = !job->range;
+            activePreview_ = job->preview;
         }
         auto notify = [&] {
             void (*fn)(void*) = nullptr; void* ctx = nullptr;
@@ -453,8 +483,17 @@ void RotoService::thread_main() noexcept {
         };
         bool ok = true;
         if (!job->range) {
+            lastFailure_.store(0, std::memory_order_relaxed);
             ok = compute_impl(job->track, job->strokes, job->source, job->first, 0, &generation_, gen).matte != nullptr;
-            { std::lock_guard<std::mutex> lock(queueMutex_); runningSingle_ = false; }
+            {
+                std::lock_guard<std::mutex> lock(queueMutex_);
+                runningSingle_ = false;
+                activePreview_.reset();
+                if (generation_.load(std::memory_order_relaxed) == gen) {
+                    failedPreview_ = ok ? std::nullopt : job->preview;
+                    failedPreviewReason_ = std::max(1u, lastFailure_.load(std::memory_order_relaxed));
+                }
+            }
             // Acorda a prévia também na falha/interrupção: o palco não fica
             // esperando um recorte que nunca vem.
             notify();
@@ -506,6 +545,8 @@ void RotoService::clear() noexcept {
         running_ = false;
         pending_.reset();
         focus_.reset();
+        activePreview_.reset();
+        failedPreview_.reset();
         generation_.fetch_add(1, std::memory_order_relaxed);
         progress_ = Progress{};
     }

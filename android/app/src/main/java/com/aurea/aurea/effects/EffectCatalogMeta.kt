@@ -171,6 +171,8 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.distort.warp", EffectMeta(R.string.fx_desc_distort_warp, AllTargets))
     put("aurea.distort.ripple_dissolve", EffectMeta(R.string.fx_desc_distort_ripple_dissolve, AllTargets))
     put("aurea.stylize.scanlines", EffectMeta(R.string.fx_desc_stylize_scanlines, AllTargets))
+    put("aurea.stylize.psyko_blobs", EffectMeta(R.string.psyko_blobs_desc, AllTargets))
+    put("aurea.stylize.psyko_stripes", EffectMeta(R.string.psyko_stripes_desc, AllTargets))
     put("aurea.stylize.grain", EffectMeta(R.string.fx_desc_stylize_grain, AllTargets))
     put("aurea.stylize.halftone", EffectMeta(R.string.fx_desc_stylize_halftone, AllTargets))
     put("aurea.stylize.minimax", EffectMeta(R.string.fx_desc_stylize_minimax, AllTargets))
@@ -229,6 +231,10 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     ))
     put("aurea.color.grade", EffectMeta(R.string.fx030_desc_color_grade, AllTargets,
         "correcao de cor color grade grading lumetri resolve log lut rodas hsl curvas"))
+    put("aurea.color.studio_grade", EffectMeta(R.string.fx_studio_grade_desc, AllTargets,
+        "estudio cor color studio colorista grade correcao grading balanço white balance wheels rodas curvas curves hsl exposição"))
+    put("aurea.color.studio_look", EffectMeta(R.string.fx_studio_look_desc, AllTargets,
+        "estudio cor look looks studio cc preset ffx after effects magic bullet film cinema lut color"))
     put("aurea.time.wide_time", EffectMeta(
         R.string.fx030_desc_wide_time,
         AllTargets,
@@ -356,6 +362,8 @@ private val Table: Map<Int, EffectMeta> = buildMap {
         "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh"))
     put("aurea.3d.part_transform", EffectMeta(R.string.fx3d_desc_part_transform, listOf(EffectTarget.Cena3D),
         "animar parte 3d animate part mover girar escala objeto modelo forma keyframe peca"))
+    put("aurea.3d.spacing", EffectMeta(R.string.fx3d_desc_spacing, listOf(EffectTarget.Cena3D),
+        "3d spacing espacamento separar afastar partes modelo spread separate parts exploded view"))
     put("aurea.3d.part_hide", EffectMeta(R.string.fx3d_desc_part_hide, listOf(EffectTarget.Cena3D),
         "esconder partes 3d hide parts sumir ocultar visibilidade objeto modelo forma peca"))
     put("aurea.3d.part_texture", EffectMeta(R.string.fx3d_desc_part_texture, listOf(EffectTarget.Cena3D),
@@ -755,7 +763,7 @@ fun toolLabelRes(tool: EffectTool): Int = when (tool) {
     EffectTool.CameraTrack -> R.string.fxui_tool_camera_track
     EffectTool.Mask -> R.string.fxui_tool_mask
     EffectTool.Animation -> R.string.la_animators
-    EffectTool.Tracking -> R.string.panel_rastreio
+    EffectTool.Tracking -> R.string.trk_motion_title
     EffectTool.PreciseCut -> R.string.fn_tool_precise_cut
     EffectTool.Puppet -> R.string.fx_name_puppet
     EffectTool.RigMocap -> R.string.fn_tool_rig
@@ -768,7 +776,7 @@ fun toolLabelRes(tool: EffectTool): Int = when (tool) {
 /** O desenho da ferramenta no cartão (ela não tem prévia renderizada). */
 fun toolGlyph(tool: EffectTool): Char = when (tool) {
     EffectTool.Captions -> CupertinoGlyph.CaptionsBubble
-    EffectTool.CameraTrack -> com.aurea.aurea.editor.ShellGlyph.Viewfinder
+    EffectTool.CameraTrack -> com.aurea.aurea.ui.theme.CupertinoGlyph.Camera
     EffectTool.Mask -> CupertinoGlyph.PencilOutline
     EffectTool.Animation -> CupertinoGlyph.Sparkles
     EffectTool.Tracking -> com.aurea.aurea.editor.ShellGlyph.Viewfinder
@@ -914,7 +922,7 @@ private val TagByKey: Map<Int, List<String>> by lazy {
         ),
         "3d" to listOf(
             "aurea.distort.sphere_wrap", "aurea.distort.cylinder_wrap", "aurea.generate.raster_extrude",
-            "aurea.3d.part_transform", "aurea.3d.part_hide", "aurea.3d.part_texture", "aurea.3d.shatter",
+            "aurea.3d.part_transform", "aurea.3d.part_hide", "aurea.3d.part_texture", "aurea.3d.spacing", "aurea.3d.shatter",
             "aurea.3d.explode", "aurea.3d.stroke", "aurea.shape3d.layout", "aurea.generate.aurora", "aurea.generate.constellation",
             "aurea.ai.depth_map", EffectTool.CameraTrack.key, "aurea.distort.hollow_box",
         ),
@@ -933,7 +941,8 @@ private val TagByKey: Map<Int, List<String>> by lazy {
         ),
         "repeat" to listOf("aurea.pattern.checkerboard", "aurea.pattern.hexagonal", "aurea.stylize.mosaic",
             "aurea.distort.tile_shift", "aurea.distort.hex_tile_rotate", "aurea.distort.hex_tile_shift"),
-        "color" to listOf("aurea.time.warp_rgb", "aurea.color.color_offset", "aurea.color.threshold_rgb", "aurea.color.rgb_split", "aurea.color.grade",
+        "color" to listOf("aurea.color.studio_grade", "aurea.color.studio_look",
+            "aurea.time.warp_rgb", "aurea.color.color_offset", "aurea.color.threshold_rgb", "aurea.color.rgb_split", "aurea.color.grade",
             "aurea.color.shift_channels"),
         "distort" to listOf("aurea.glitch.datamosh", "aurea.distort.displacement_map"),
         "glitch" to listOf(

@@ -86,16 +86,7 @@ if(MSVC)
     target_compile_options(ncnn PRIVATE /MP4)
 endif()
 set(ai_model_dir "${CMAKE_CURRENT_SOURCE_DIR}/assets/ai")
-set(ai_model_cpp "${CMAKE_CURRENT_BINARY_DIR}/generated/AiModel.cpp")
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
-add_custom_command(OUTPUT "${ai_model_cpp}"
-    COMMAND "${CMAKE_COMMAND}" "-DMODEL_DIR=${ai_model_dir}" "-DOUTPUT=${ai_model_cpp}"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedUpscaleModel.cmake"
-    DEPENDS "${ai_model_dir}/realesr-animevideov3.bin"
-            "${ai_model_dir}/realesr-animevideov3-x2.param"
-            "${ai_model_dir}/realesr-animevideov3-x4.param"
-            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedUpscaleModel.cmake"
-    VERBATIM)
 # Depth model (MiDaS v2.1 small): OUR ncnn conversion, fp16 storage, ~33 MB.
 # Provenance, recipe and hashes: assets/ai/README.md. Clang/GCC (Android, iOS)
 # embed the bytes with the assembler's .incbin; MSVC (host tests) has no
@@ -171,9 +162,9 @@ else()
     set_source_files_properties("${ai_click_cpp}" PROPERTIES OBJECT_DEPENDS
         "${AI_ROTO_CLICK_ENCODER_BIN};${AI_ROTO_CLICK_ENCODER_PARAM};${AI_ROTO_CLICK_DECODER_BIN};${AI_ROTO_CLICK_DECODER_PARAM};${AI_ROTO_CLICK_PROMPT}")
 endif()
-target_sources(aurea_core PRIVATE src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/RotoClick.cpp
+target_sources(aurea_core PRIVATE src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/RotoClick.cpp
                src/ai/IllustratedPose.cpp
-               "${ai_model_cpp}" "${ai_depth_cpp}" "${ai_foreground_cpp}" "${ai_click_cpp}")
+               "${ai_depth_cpp}" "${ai_foreground_cpp}" "${ai_click_cpp}")
 target_link_libraries(aurea_core PRIVATE ncnn)
 # Motion Capture do Aurea PC (BlazePose do MediaPipe em ncnn, modelos lidos de
 # engine/assets/mocap em tempo de execução). SÓ no Windows: no celular a pose
@@ -186,9 +177,9 @@ include(${CMAKE_CURRENT_LIST_DIR}/AureaHyperNeural.cmake)
 # Model/vector allocation failures are translated to Status at this boundary.
 # The rest of the shared core retains its existing no-exceptions contract.
 if(MSVC)
-    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp src/ai/RotoService.cpp src/ai/RotoClick.cpp src/ai/IllustratedPose.cpp
+    set_source_files_properties(src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp src/ai/RotoService.cpp src/ai/RotoClick.cpp src/ai/IllustratedPose.cpp
                                 PROPERTIES COMPILE_OPTIONS /EHsc)
 else()
-    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp src/ai/RotoService.cpp src/ai/RotoClick.cpp src/ai/IllustratedPose.cpp
+    set_source_files_properties(src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp src/ai/RotoService.cpp src/ai/RotoClick.cpp src/ai/IllustratedPose.cpp
                                 PROPERTIES COMPILE_OPTIONS -fexceptions)
 endif()

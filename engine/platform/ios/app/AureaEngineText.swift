@@ -206,6 +206,8 @@ enum AureaEngineText {
         ("trilhas invalidas", "eng_invalid_track"),
         ("preset invalido", "eng_preset_invalid"),
         ("preset de estudio invalido", "eng_preset_invalid"),
+        ("lut invalida no preset de cor", "eng_preset_invalid"),
+        ("nao foi possivel salvar a lut do preset de cor", "msg_nao_foi_possivel_salvar_o_preset"),
         ("selecione um modelo 3d", "eng_pick_model"),
         ("selecione um modelo 3d importado", "eng_pick_model"),
         ("selecione texto 3d", "eng_pick_text3d"),

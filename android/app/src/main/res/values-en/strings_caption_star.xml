@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="caption_star_title">Auto Caption Star</string>
+    <string name="caption_star_setup">Setup</string>
+    <string name="caption_star_motion">Timing</string>
+    <string name="caption_star_cut">Hard cut</string>
+    <string name="caption_star_impact">Impact style</string>
+    <string name="caption_star_save">Save as preset</string>
+    <string name="caption_star_empty_presets">Your saved presets appear here.</string>
+    <string name="caption_star_save_failed">Could not save this preset.</string>
+    <string name="caption_star_reflow_failed">Could not regroup these captions.</string>
+    <string name="caption_star_to_layers">Convert to layers</string>
+    <string name="caption_star_to_layers_failed">This track could not be converted. Check whether it is locked, linked to other layers, or the composition has reached its layer limit.</string>
+</resources>

@@ -93,7 +93,7 @@ class MainActivity : ComponentActivity() {
      *
      * Só os pedidos com resposta (requestCode >= 0, os do ActivityResultRegistry):
      * um `startActivity` comum (-1) continua lançando para quem já trata a falha
-     * com um caminho alternativo (doação, notas da versão, perfil).
+     * com um caminho alternativo (notas da versão, perfil).
      */
     @Deprecated("Deprecated in Java")
     @Suppress("DEPRECATION")

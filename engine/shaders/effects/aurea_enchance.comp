@@ -1,0 +1,95 @@
+#version 450
+#include "../common/bindings.glsl"
+#include "../common/color.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = AUREA_TEX0) uniform sampler2D source;
+layout(set = 0, binding = AUREA_TEX1) uniform sampler2D filters;
+layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params { vec4 settings; } p;
+layout(set = 0, binding = AUREA_IMG0, rgba16f) writeonly uniform image2D target;
+
+const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
+const vec4 kCubic = vec4(-0.10546875, 0.87890625, 0.26171875, -0.03515625);
+shared vec4 tile[144];
+
+int filter_index(float gx, float gy) {
+    const float diagonal = 0.41421356;
+    vec2 a = abs(vec2(gx, gy));
+    int direction = a.y < a.x * diagonal ? 0 : a.x < a.y * diagonal ? 1 : gx * gy >= 0.0 ? 2 : 3;
+    float gradient = max(a.x, a.y);
+    int strength = gradient < 6.0 / 255.0 ? 0 : gradient < 27.0 / 255.0 ? 1 : 2;
+    return direction * 3 + strength;
+}
+
+void main() {
+    ivec2 size = textureSize(source, 0);
+    ivec2 basePos = ivec2(gl_WorkGroupID.xy) * 8 - 2;
+    for (uint i = gl_LocalInvocationIndex; i < 144u; i += 64u) {
+        ivec2 pos = basePos + ivec2(int(i % 12u), int(i / 12u));
+        vec4 c = texelFetch(source, clamp(pos, ivec2(0), size - 1), 0);
+        bool sdr = c.a == 1.0 && all(greaterThanEqual(c.rgb, vec3(0))) && all(lessThanEqual(c.rgb, vec3(1)));
+        tile[i] = sdr ? vec4(linear_to_srgb(c.rgb), 1) : vec4(0);
+    }
+    barrier();
+
+    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, size))) return;
+    ivec2 local = ivec2(gl_LocalInvocationID.xy);
+    float y[25];
+    vec3 left[5], right[5];
+    bool sdr = true;
+    for (int row = 0; row < 5; ++row) {
+        vec3 rgb[5];
+        for (int col = 0; col < 5; ++col) {
+            vec4 c = tile[(local.y + row) * 12 + local.x + col];
+            rgb[col] = c.rgb;
+            y[row * 5 + col] = dot(c.rgb, kLuma);
+            sdr = sdr && c.a == 1.0;
+        }
+        left[row] = rgb[0] * kCubic.w + rgb[1] * kCubic.z + rgb[2] * kCubic.y + rgb[3] * kCubic.x;
+        right[row] = rgb[1] * kCubic.x + rgb[2] * kCubic.y + rgb[3] * kCubic.z + rgb[4] * kCubic.w;
+    }
+
+    // The fitted filters operate on opaque SDR. Match the compositor's
+    // premultiplied sampling for transparent edges and extended colour.
+    vec2 pitch = 0.5 / vec2(size);
+    if (!sdr) {
+        for (int i = 0; i < 4; ++i) {
+            ivec2 dst = pos * 2 + ivec2(i % 2, i / 2);
+            imageStore(target, dst, textureLod(source, (vec2(dst) + 0.5) * pitch, 0.0));
+        }
+        return;
+    }
+
+    float gx = (y[8] - y[6] + y[13] - y[11] + y[18] - y[16]) / 3.0;
+    float gy = (y[16] - y[6] + y[17] - y[7] + y[18] - y[8]) / 3.0;
+    int index = filter_index(gx, gy);
+    vec4 correction = vec4(0);
+    for (int i = 0; i < 24; ++i) {
+        int sampleIndex = i < 12 ? i : i + 1;
+        correction += (y[sampleIndex] - y[12]) * texelFetch(filters, ivec2(i, index), 0);
+    }
+    correction = clamp(correction, -0.08, 0.08);
+    vec3 rgb[4] = vec3[4](
+        left[0] * kCubic.w + left[1] * kCubic.z + left[2] * kCubic.y + left[3] * kCubic.x,
+        right[0] * kCubic.w + right[1] * kCubic.z + right[2] * kCubic.y + right[3] * kCubic.x,
+        left[1] * kCubic.x + left[2] * kCubic.y + left[3] * kCubic.z + left[4] * kCubic.w,
+        right[1] * kCubic.x + right[2] * kCubic.y + right[3] * kCubic.z + right[4] * kCubic.w);
+    for (int i = 0; i < 4; ++i) {
+        ivec2 dst = pos * 2 + ivec2(i % 2, i / 2);
+        // The layer sampler reads a transparent border across the outermost
+        // half-texel. Keep that coverage at the edge of the 2x result.
+        if (any(equal(dst, ivec2(0))) || any(equal(dst, size * 2 - 1))) {
+            imageStore(target, dst, textureLod(source, (vec2(dst) + 0.5) * pitch, 0.0));
+            continue;
+        }
+        float base = dot(rgb[i], kLuma);
+        float gain = clamp(base + correction[i], 0.0, 1.0) - base;
+        vec4 result = vec4(srgb_to_linear(clamp(rgb[i] + gain, 0.0, 1.0)), 1.0);
+        if (p.settings.x < 1.0) {
+            vec4 original = textureLod(source, (vec2(dst) + 0.5) * pitch, 0.0);
+            result = mix(original, result, p.settings.x);
+        }
+        imageStore(target, dst, result);
+    }
+}

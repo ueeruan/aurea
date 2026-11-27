@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="caption_star_title">Auto Caption Star</string>
+    <string name="caption_star_setup">सेटअप</string>
+    <string name="caption_star_motion">लय</string>
+    <string name="caption_star_cut">सीधा कट</string>
+    <string name="caption_star_impact">इम्पैक्ट शैली</string>
+    <string name="caption_star_save">प्रीसेट के रूप में सहेजें</string>
+    <string name="caption_star_empty_presets">सहेजे हुए प्रीसेट यहाँ दिखेंगे।</string>
+    <string name="caption_star_save_failed">यह प्रीसेट सहेजा नहीं जा सका।</string>
+    <string name="caption_star_reflow_failed">इन कैप्शन को फिर से समूहित नहीं कर सके।</string>
+    <string name="caption_star_to_layers">लेयर में बदलें</string>
+    <string name="caption_star_to_layers_failed">इस ट्रैक को लेयर में नहीं बदला जा सका। देखें कि क्या यह लॉक है, दूसरी लेयर इस पर निर्भर हैं या कंपोज़िशन की लेयर सीमा पूरी हो गई है।</string>
+</resources>

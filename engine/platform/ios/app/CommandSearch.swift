@@ -217,7 +217,7 @@ struct CommandSearchView: View {
             if let id = model.primarySelection, model.engine.text3D(forLayer: id) != nil { model.openTextContentEditor() } else { model.openPanel(.text) }
         case "effects": model.openPanel(.effects)
         case "appearance": model.openPanel(.appearance)
-        case "tracking": model.openPanel(.tracking)
+        case "tracking": fxOpenEffectTool(.tracking, in: model)
         case "environment": model.openPanel(.layer3D)
         case "particles": model.openPanel(.particles)
         case "vector": model.vectorFace = .paths; model.openPanel(.vector)

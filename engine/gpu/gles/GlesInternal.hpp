@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -18,7 +19,7 @@ Format format_of(SurfaceFormat) noexcept;
 struct Texture { GLuint id = 0; GLenum target = GL_TEXTURE_2D; TextureDesc desc; ResourceState state{}; };
 struct Buffer {
     GLuint id = 0; BufferDesc desc; usize gpuBytes = 0;
-    std::vector<u8> cpu;
+    std::unique_ptr<u8[]> cpu;
     u32 readWidth = 0, readHeight = 0, readComponents = 0;
     bool rgbaReadback = false, pendingRead = false;
 };
@@ -60,7 +61,8 @@ struct Backend::Impl final : CommandList {
     std::unordered_map<u64, Shader> shaders;
     std::unordered_map<u64, Pipeline> pipelines;
     std::unordered_map<u64, Sampler> samplers;
-    std::vector<u8> uploadScratch;
+    std::unique_ptr<u8[]> uploadScratch;
+    usize uploadScratchBytes = 0;
     std::array<Frame, 3> frames;
     Frame* current = nullptr;
     Frame* last = nullptr;
@@ -98,7 +100,7 @@ struct Backend::Impl final : CommandList {
         if (context == EGL_NO_CONTEXT) return false;
         if (eglGetCurrentContext() == context) return true;
         if (eglMakeCurrent(display, pbuffer, pbuffer, context)) return true;
-        deviceLost = eglGetError() == EGL_CONTEXT_LOST;
+        if (eglGetError() == EGL_CONTEXT_LOST) deviceLost = true;
         return false;
     }
     struct Scope {
@@ -107,19 +109,27 @@ struct Backend::Impl final : CommandList {
         ~Scope() { if (valid && acquired && !d.frameOpen) eglMakeCurrent(d.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT); }
     };
     Status check(const char* operation) {
-        GLenum first = glGetError();
+        const GLenum first = glGetError();
         if (first == GL_NO_ERROR) return OkStatus;
         AUREA_LOG_ERROR("GLES %s: 0x%x", operation, first);
-        while (glGetError() != GL_NO_ERROR) {}
-        const Errc code = first == GL_OUT_OF_MEMORY ? Errc::OutOfDeviceMemory
-                        : first == GL_CONTEXT_LOST_KHR ? Errc::DeviceLost : Errc::InvalidState;
-        if (code == Errc::DeviceLost) deviceLost = true;
+        // A failed driver/context cannot keep the export thread in error
+        // draining. Preserve context loss even if another error arrived first.
+        bool lost = first == GL_CONTEXT_LOST_KHR;
+        for (int i = 0; i < 8 && !lost; ++i) {
+            const GLenum next = glGetError();
+            if (next == GL_NO_ERROR) break;
+            lost = next == GL_CONTEXT_LOST_KHR;
+        }
+        if (lost) deviceLost = true;
+        const Errc code = deviceLost ? Errc::DeviceLost
+                        : first == GL_OUT_OF_MEMORY ? Errc::OutOfDeviceMemory : Errc::InvalidState;
         const Status result{code, operation};
         if (frameOpen && frameStatus.ok()) frameStatus = result;
         return result;
     }
     void fail(Errc code, const char* operation) {
         AUREA_LOG_ERROR("GLES: %s", operation);
+        if (code == Errc::DeviceLost) deviceLost = true;
         if (frameStatus.ok()) frameStatus = Status{code, operation};
     }
     bool extension(const char* name) const {

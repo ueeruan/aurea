@@ -27,4 +27,12 @@
     <string name="bg_remove_o_person">Orang</string>
     <string name="bg_remove_tip_model">Otomatis memotong objek utama dan berjalan di semua perangkat. Orang memakai segmentasi orang dari sistem bila perangkat memilikinya; jika tidak, Otomatis dipakai.</string>
     <string name="bg_remove_tip_edge">Membangun ulang tepi pada resolusi video (rambut, garis tipis). 0 memakai tepi sederhana.</string>
+    <string name="cutout_analyzing_scene">Menganalisis adegan</string>
+    <string name="cutout_analyzing_frame">Menganalisis frame ini</string>
+    <string name="cutout_brush">Kuas potongan</string>
+    <string name="cutout_brush_add">Sertakan</string>
+    <string name="cutout_brush_subtract">Keluarkan</string>
+    <string name="cutout_brush_help">Ketuk objek untuk memilihnya. Sapukan kuas untuk menambah atau menghapus area.</string>
+    <string name="cutout_auto_help">Hapus latar otomatis atau sesuaikan potongan dengan kuas.</string>
+    <string name="cutout_track">Lacak objek</string>
 </resources>

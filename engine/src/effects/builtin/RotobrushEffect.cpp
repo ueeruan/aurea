@@ -47,7 +47,7 @@ public:
         req.rotoDecontaminate=e.count>9&&e.f(ai::kRotoDecontaminateParam)>0.f;
         const auto r=e.resources->depth_map(req);e.aux=r.texture;
         // x: 0 grade, 1 alfa refinado, 2 refinado com a cor do objeto; w: falhou.
-        e.auxInfo={static_cast<f32>(r.rotoRefined),0.f,0.f,r.failed?1.f:0.f};
+        e.auxInfo={static_cast<f32>(r.rotoRefined),static_cast<f32>(e.resources->cutout_view(e.layer,e.instance)),0.f,r.failed?1.f:0.f};
         e.foregroundSourceTimeUs=r.sourceTimeUs;
     }
     Status build(EffectBuildContext& ctx,const EffectEval& e,const LayerImage& input,f32,LayerImage& out) const override {
@@ -55,7 +55,8 @@ public:
         auto u=base_uniforms(input);
         u.p0={std::clamp((e.f(0)-e.f(2))*.01f,0.f,1.f),std::max(.001f,e.f(1)*.005f),e.b(3)?1.f:0.f,e.f(4)*.01f};
         const bool refine=e.count>10;
-        u.p1={e.b(5)?1.f:0.f,e.aux.valid()?1.f:0.f,refine?static_cast<f32>(e.e(10)):0.f,refine?e.f(6)*.01f:0.f};
+        const f32 view = e.auxInfo.y > 0.f ? e.auxInfo.y - 1.f : refine ? static_cast<f32>(e.e(10)) : 0.f;
+        u.p1={e.auxInfo.y <= 0.f && e.b(5)?1.f:0.f,e.aux.valid()?1.f:0.f,view,refine?e.f(6)*.01f:0.f};
         u.p2={input.region.x,input.region.y,input.region.w,input.region.h};
         const f32 lw=e.placement?static_cast<f32>(e.placement->layerWidth):input.region.w;
         const f32 lh=e.placement?static_cast<f32>(e.placement->layerHeight):input.region.h;

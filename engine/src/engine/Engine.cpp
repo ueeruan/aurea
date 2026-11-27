@@ -21,11 +21,13 @@
 #include "aurea/tracking/CameraTracker.hpp"
 #include "aurea/tracking/CameraTrackData.hpp"
 #include "aurea/tracking/TrackingValidation.hpp"
+#include "aurea/tracking/TrackerEffects.hpp"
 #include "../tracking/AnalysisDecode.hpp"
 #include "EngineAeAnimation.hpp"   // AE animation: texto-fonte
 #include "TextShadowMigration.hpp"   // D2: sombra antiga do texto → decoração
 
 #include "aurea/text/Text.hpp"
+#include "aurea/text/TextLayerName.hpp"
 #include "aurea/text/TextAnimator.hpp"
 #include "aurea/text/TextTransform.hpp"
 #include "aurea/timeline/LayerAnimator.hpp"
@@ -41,10 +43,8 @@
 #include "aurea/core/Thread.hpp"
 #include "aurea/project/Serialization.hpp"
 #include "aurea/project/FileIO.hpp"
-#include "aurea/ai/Upscaler.hpp"
 #include "hyper/HyperExport.hpp"
 #include "hyper/HyperGraph.hpp"
-#include "aurea/ai/TemporalStabilizer.hpp"
 #include "aurea/export/UpscaleColor.hpp"
 #include "aurea/export/BitratePolicy.hpp"
 #include "aurea/export/ExportRules.hpp"
@@ -380,7 +380,7 @@ struct Engine::ExportContext {
     std::string    outputPath;
     /// AureaHyper: o projeto temporário e as etapas do grafo (job da Home).
     std::shared_ptr<const HyperExportOverride> hyper;
-    /// O grafo Hyper roda entre readback e encoder (aiUpscale ou etapas do job).
+    /// O grafo Hyper roda entre readback e encoder quando o job tem etapas de CPU.
     bool graphWanted = false;
     bool graphResumable = true;
     std::atomic<bool> cancelRequested{false};
@@ -1724,6 +1724,18 @@ void Engine::detach_surface() noexcept {
     if (!rl.owns_lock() && !lock_render_for_ui(rl, kUiSurfaceWaitMs)) {
         defer_surface_detach();
         AUREA_LOG_INFO("superficie: render ocupado; soltura adiada para a thread de render");
+        return;
+    }
+    // 1.0.9 (2235: ANR com a main em nativeDetachSurface → vkDeviceWaitIdle,
+    // Mali RMX5020 e Adreno ALT-LX2, ao entrar/sair da exportação): ter o mutex
+    // não quer dizer GPU livre. O soltar do backend espera o dispositivo
+    // inteiro — inclusive o trabalho do export e uploads já enviados — e a
+    // thread da UI não pode esperar isso. Com comandos ainda na fila, a
+    // soltura vai para a thread de render (o mesmo caminho do export acima: a
+    // superfície Vulkan/EGL/CAMetalLayer guarda a própria referência da janela).
+    if (gpu_ && surfaceAttached_ && !gpu_->is_device_lost() && gpu_->has_pending_gpu_work()) {
+        defer_surface_detach();   // ainda com o mutex: surfaceAttached_ muda sob ele
+        AUREA_LOG_INFO("superficie: GPU com trabalho na fila; soltura adiada para a thread de render");
         return;
     }
     apply_pending_surface_locked(false);
@@ -3078,6 +3090,7 @@ Result<u64> Engine::add_text(const char* content) noexcept {
     Layer* l = comp->layer(lid);
     if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
     l->text.content = content && *content ? std::string(content) : default_name(DefaultName::Text);
+    l->name = text::source_layer_name(l->text.content);
     l->text.size = std::round(0.12f * static_cast<f32>(std::min(comp->width(), comp->height())));
     l->text.color = Vec4{1, 1, 1, 1};
     l->text.alignment = 1;
@@ -4751,7 +4764,8 @@ void Engine::join_camera_track() noexcept {
 }
 
 bool Engine::restore_camera_track(u64 layerId) noexcept {
-    if (cameraTrack_ && !cameraTrack_->finished.load()) return false;
+    if (cameraTrack_ && !cameraTrack_->finished.load() &&
+        (cameraTrack_->state.load() == 1 || cameraTrack_->cancel.load())) return false;
     std::shared_ptr<const CameraTrackResult> saved;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
@@ -4816,7 +4830,7 @@ bool Engine::start_camera_track(u64 layerId, u32 mode, u32 motion, f32 knownFov,
     if (shotType == 2 && knownFov <= 0) return false;   // "FOV informada" sem o valor
     // Uma análise por vez; uma CANCELADA ainda saindo não bloqueia a próxima
     // (decode e solve olham o cancelamento a cada quadro/iteração).
-    if (cameraTrack_ && !cameraTrack_->finished.load() && !cameraTrack_->cancel.load()) return false;
+    if (cameraTrack_ && cameraTrack_->state.load() == 1 && !cameraTrack_->cancel.load()) return false;
     join_camera_track();
     bool tooLong = false;
     Asset asset;
@@ -4900,7 +4914,7 @@ bool Engine::start_camera_track(u64 layerId, u32 mode, u32 motion, f32 knownFov,
     job->state.store(1);
     job->finished.store(false);
     VideoSourceFactory* factory = config_.mediaFactory;
-    job->thread = std::thread([this, job, asset, targetUs, analysisH, mode, motion, knownFov, shotType, lens, factory, sourceSignature]() {
+    job->thread = std::thread([this, job, asset, targetUs = std::move(targetUs), analysisH, mode, motion, knownFov, shotType, lens, factory, sourceSignature]() mutable {
         struct Completion { CameraTrackJob* job; ~Completion() { job->finished.store(true); } } completion{job};
         auto fail = [&](const char* why) {
             std::lock_guard<std::mutex> g(job->mutex);
@@ -4918,9 +4932,9 @@ bool Engine::start_camera_track(u64 layerId, u32 mode, u32 motion, f32 knownFov,
         tracking::AnalysisGraySequence sequence(*dec, fps, job->cancel, targetUs,
                                                 analysisH, asset.video.width, asset.video.height);
         u32 aw = 0, ah = 0;
+        tracking::Gray gray;
         for (usize i = 0; i < targetUs.size(); ++i) {
             if (job->cancel.load()) return fail("cancelado");
-            tracking::Gray gray;
             const auto picked = sequence.read(i, gray);
             if (picked == tracking::AnalysisGraySequence::Result::Cancelled) return fail("cancelado");
             if (picked != tracking::AnalysisGraySequence::Result::Ok) break;
@@ -4952,11 +4966,11 @@ bool Engine::start_camera_track(u64 layerId, u32 mode, u32 motion, f32 knownFov,
         if (job->cancel.load()) return fail("cancelado");
         auto res = std::make_shared<CameraTrackResult>();
         res->solution = std::move(sol);
-        res->tracks = ft.tracks();
-        res->frames = ft.tracks().frames;
+        res->tracks = std::move(ft).take_tracks();
+        res->frames = res->tracks.frames;
         res->analysisW = aw;
         res->analysisH = ah;
-        res->cacheKey = job->cacheKey; res->mode = mode; res->sourceUs = targetUs;
+        res->cacheKey = job->cacheKey; res->mode = mode; res->sourceUs = std::move(targetUs);
         res->sourceSignature = sourceSignature;
         if (res->solution.ok) {
             std::lock_guard<std::mutex> lock(modelMutex_);
@@ -4986,7 +5000,7 @@ bool Engine::start_camera_track(u64 layerId, u32 mode, u32 motion, f32 knownFov,
 }
 
 bool Engine::refine_camera_track(bool removeSelected, u32 motion, f32 knownFov, u32 shotType, u32 lens) noexcept {
-    if (!cameraTrack_ || !cameraTrack_->finished.load() || cameraTrack_->state.load()!=2 || motion>3 || shotType>2 || lens>1 ||
+    if (!cameraTrack_ || cameraTrack_->state.load()!=2 || motion>3 || shotType>2 || lens>1 ||
         !std::isfinite(knownFov) || knownFov<0 || knownFov>150 || (shotType==2 && knownFov<=0)) return false;
     join_camera_track();
     auto* job=cameraTrack_.get();
@@ -5720,6 +5734,8 @@ bool Engine::set_transition(u64 layerId, bool out, u32 type, u32 frames) noexcep
 
 namespace {
 
+constexpr u32 kMoney3DPreset = 19;  // Last native preset, before Particular starts at 20.
+
 /// Os presets do AUREA PARTICULAR.
 ///
 /// Os tres primeiros sao os nomes que o app tinha como SISTEMAS SEPARADOS
@@ -5730,6 +5746,36 @@ namespace {
 /// editaveis depois, e nenhum deles cria um motor proprio.
 void particle_preset(ParticleData& p, u32 preset, f32 w, f32 h) noexcept {
     p = ParticleData{};
+    if (preset == kMoney3DPreset) {
+        p.emitterType = static_cast<u32>(ParticleEmitter::WorldBox);
+        p.emitterSize = Vec2{w * 0.98f, h * 0.16f};
+        p.emitterOffset = Vec2{0, -h * 0.32f};
+        p.emitterDepth = w * 0.60f;
+        p.emitterSpace = 1;
+        p.direction = 90.0f;
+        p.spread = 28.0f;
+        p.rate = 32.0f;
+        p.burst = 14;
+        p.maxParticles = 420;
+        p.lifetime = 4.0f;
+        p.speed = h * 0.18f;
+        p.speedRandom = 0.48f;
+        p.gravity = Vec3{0, -h * 0.26f, 0};
+        p.drag = 0.6f;
+        p.turbulence = w * 0.055f;
+        p.turbulenceScale = 1.45f;
+        p.startColor = p.endColor = Vec4{1, 1, 1, 1};
+        p.startSize = w * 0.075f;
+        p.endSize = w * 0.075f;
+        p.sizeRandom = 0.54f;
+        p.rotationRandom = 180.0f;
+        p.spin = 150.0f;
+        p.startOpacity = 1.0f;
+        p.endOpacity = 0.0f;
+        p.particleType = static_cast<u32>(ParticleShape::Money);
+        p.meshLit = true;
+        return;
+    }
     if (preset >= 10 && preset <= 18) {
         // Particle World: new analytic 3D dynamics, compact mobile controls.
         // IDs 0..9 remain readable for existing projects, but are no longer
@@ -5965,7 +6011,7 @@ Result<u64> Engine::add_particles(u32 preset) noexcept {
     const bool particularPreset = preset >= particular::kPresetBase
                                && preset < particular::kPresetBase + particular::kPresetCount;
     const LayerId lid = comp->add_layer(LayerKind::ParticleSystem,
-                                        default_name(particularPreset ? DefaultName::Particles3D : DefaultName::Particles));
+                                        default_name(particularPreset || preset == kMoney3DPreset ? DefaultName::Particles3D : DefaultName::Particles));
     Layer* l = comp->layer(lid);
     if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
     const f32 w = static_cast<f32>(comp->width()), h = static_cast<f32>(comp->height());
@@ -5977,7 +6023,7 @@ Result<u64> Engine::add_particles(u32 preset) noexcept {
         }
     } else {
         particle_preset(l->particles, preset, w, h);
-        if (preset >= 10 && preset <= 18) l->threeD = true;
+        if (preset >= 10 && preset <= kMoney3DPreset) l->threeD = true;
         if (preset == 9) logo_burst_from_text(*comp, lid, l->particles);
         l->particles.seed = lid.index * 7919u + 1u;
     }
@@ -6074,7 +6120,7 @@ bool Engine::apply_particle_preset(u64 layerId, u32 preset) noexcept {
     bump_model_revision_locked();
     const u32 seed = l->particles.seed;
     particle_preset(l->particles, preset, static_cast<f32>(comp->width()), static_cast<f32>(comp->height()));
-    if (preset >= 10 && preset <= 18) {
+    if (preset >= 10 && preset <= kMoney3DPreset) {
         l->threeD = true;
         l->tracks.remove_if([](const Track& track) { return track.property == TrackProperty::ParticleParam; });
     }
@@ -7343,8 +7389,8 @@ bool Engine::focus_scene_view(const u64* layers, u32 count) noexcept {
         const Layer* l = comp->layer(LayerId::unpack(layers[i]));
         if (!l || !lives_in_3d(*l)) continue;
         const FrameIndex local = l->local_time(now);
-        // A mesma origem do gizmo (query_gizmo): modelo, luz e câmera na origem; o resto na âncora.
-        const Vec3 a = (l->kind == LayerKind::Model3D || l->kind == LayerKind::Light || l->kind == LayerKind::Camera) ? Vec3{0, 0, 0} : Vec3{
+        // A mesma origem do gizmo (query_gizmo): a âncora editada do modelo também conta.
+        const Vec3 a = (l->kind == LayerKind::Light || l->kind == LayerKind::Camera) ? Vec3{0, 0, 0} : Vec3{
             l->tracks.sample_or(TrackProperty::AnchorX, local, l->transform.anchor.x),
             l->tracks.sample_or(TrackProperty::AnchorY, local, l->transform.anchor.y),
             l->tracks.sample_or(TrackProperty::AnchorZ, local, l->transform.anchor.z)};
@@ -7507,7 +7553,7 @@ bool Engine::query_gizmo(u64 layerId, f32 length, f32* out, bool localSpace) noe
     const FrameIndex now = editing_frame_locked();
     const Mat4 w = layer_world_3d(*comp, *l, now);
     const FrameIndex local = l->local_time(now);
-    const Vec3 a = (l->kind == LayerKind::Model3D || l->kind == LayerKind::Light) ? Vec3{0, 0, 0} : Vec3{
+    const Vec3 a = l->kind == LayerKind::Light ? Vec3{} : Vec3{
         l->tracks.sample_or(TrackProperty::AnchorX, local, l->transform.anchor.x),
         l->tracks.sample_or(TrackProperty::AnchorY, local, l->transform.anchor.y),
         l->tracks.sample_or(TrackProperty::AnchorZ, local, l->transform.anchor.z)};
@@ -7706,7 +7752,7 @@ bool Engine::query_trackball(u64 layerId, f32* out) noexcept {
     const FrameIndex now = editing_frame_locked();
     const FrameIndex local = l->local_time(now);
     const Mat4 w = layer_world_3d(*comp, *l, now);
-    const Vec3 a = (l->kind == LayerKind::Model3D || l->kind == LayerKind::Light) ? Vec3{0, 0, 0} : Vec3{
+    const Vec3 a = l->kind == LayerKind::Light ? Vec3{} : Vec3{
         l->tracks.sample_or(TrackProperty::AnchorX, local, l->transform.anchor.x),
         l->tracks.sample_or(TrackProperty::AnchorY, local, l->transform.anchor.y),
         l->tracks.sample_or(TrackProperty::AnchorZ, local, l->transform.anchor.z)};
@@ -7751,10 +7797,10 @@ Mat4 scene_parent_world(const Composition& comp, const Layer& l, FrameIndex now)
     return pw;
 }
 
-/// Origem da camada no mundo: a do gizmo (modelo, luz e câmera na origem; o resto na âncora).
+/// Origem da camada no mundo: a do gizmo, incluindo a âncora dos modelos.
 Vec3 scene_layer_origin(const Composition& comp, const Layer& l, FrameIndex now) noexcept {
     const FrameIndex local = l.local_time(now);
-    const Vec3 a = (l.kind == LayerKind::Model3D || l.kind == LayerKind::Light || l.kind == LayerKind::Camera) ? Vec3{0, 0, 0} : Vec3{
+    const Vec3 a = (l.kind == LayerKind::Light || l.kind == LayerKind::Camera) ? Vec3{} : Vec3{
         l.tracks.sample_or(TrackProperty::AnchorX, local, l.transform.anchor.x),
         l.tracks.sample_or(TrackProperty::AnchorY, local, l.transform.anchor.y),
         l.tracks.sample_or(TrackProperty::AnchorZ, local, l.transform.anchor.z)};
@@ -7765,6 +7811,47 @@ bool scene_is_3d(const Composition& comp, const Layer& l, FrameIndex now) noexce
     return l.kind != LayerKind::Audio && (wants_layer_3d(comp, l, now) || lives_in_3d(l));
 }
 } // namespace
+
+bool Engine::query_pivot_drag_basis(u64 layerId, f32 out[kPivotDragFloats]) noexcept {
+    if (!out) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
+    const BoneAttachScope bones(&Engine::model_lookup, this);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->locked || l->kind == LayerKind::Camera || l->kind == LayerKind::Light) return false;
+    const FrameIndex now = editing_frame_locked();
+    if (!lives_in_3d(*l) && !wants_layer_3d(*comp, *l, now)) return false;
+
+    const Mat4 localToWorld = layer_world_3d(*comp, *l, now);
+    const Mat4 parentToWorld = scene_parent_world(*comp, *l, now);
+    const Mat4 projection = sceneEditor_.enabled ? scene_editor_projection(comp->width(), comp->height(), sceneEditor_)
+                                               : comp_view_projection(*comp, now);
+    Mat4 worldToLocal, worldToParent, fromScreen;
+    if (!world::invert(localToWorld, worldToLocal) || !world::invert(parentToWorld, worldToParent)
+        || !world::invert(projection, fromScreen)) return false;
+
+    const FrameIndex local = l->local_time(now);
+    const Vec3 anchor{l->tracks.sample_or(TrackProperty::AnchorX, local, l->transform.anchor.x),
+                      l->tracks.sample_or(TrackProperty::AnchorY, local, l->transform.anchor.y),
+                      l->tracks.sample_or(TrackProperty::AnchorZ, local, l->transform.anchor.z)};
+    const Vec4 clip = projection * localToWorld * Vec4{anchor.x, anchor.y, anchor.z, 1};
+    if (!(clip.w > 1e-6f)) return false;
+    const Vec3 center{clip.x / clip.w, clip.y / clip.w, clip.z / clip.w};
+    const Vec3 origin = fromScreen.transform_point(center);
+    const Vec3 x = fromScreen.transform_point(center + Vec3{1, 0, 0}) - origin;
+    const Vec3 y = fromScreen.transform_point(center + Vec3{0, 1, 0}) - origin;
+    const auto delta = [](const Mat4& toSpace, Vec3 worldStep) {
+        return toSpace * Vec4{worldStep.x, worldStep.y, worldStep.z, 0};
+    };
+    const Vec4 px = delta(worldToParent, x), py = delta(worldToParent, y);
+    const Vec4 ax = delta(worldToLocal, x), ay = delta(worldToLocal, y);
+    const f32 values[kPivotDragFloats]{center.x, center.y, px.x, px.y, px.z, py.x, py.y, py.z,
+                                       ax.x, ax.y, ax.z, ay.x, ay.y, ay.z};
+    for (f32 value : values) if (!std::isfinite(value)) return false;
+    std::copy_n(values, kPivotDragFloats, out);
+    return true;
+}
 
 bool Engine::scene_layer_box_locked(u64 layerId, Mat4& toWorld, Vec3& lo, Vec3& hi) noexcept {
     const Composition* comp = project_ ? current_composition() : nullptr;
@@ -10133,6 +10220,74 @@ u32 Engine::clipboard_state() noexcept {
 // =============================================================================
 // Presets (JSON; formato em project/Presets.hpp)
 // =============================================================================
+namespace {
+
+// Mesmo limite do leitor dos presets. A LUT viaja como conteúdo .cube, sem
+// depender de caminho, ID do asset ou arquivo do projeto que criou o preset.
+constexpr usize kPortablePresetMaxBytes = 4u << 20;
+
+std::string asset_path_utf8(const std::filesystem::path& path);
+
+std::string write_color_preset(const presets::Preset& preset, std::span<const EffectInstance> effects,
+                               const EffectRegistry& registry, const Project& project, const auto& resolve) {
+    std::string result = presets::write(preset, &registry);
+    json::Writer luts;
+    luts.begin_array();
+    bool hasLuts = false;
+    for (u32 i = 0; i < effects.size(); ++i) {
+        const auto& effect = effects[i];
+        constexpr u32 base = effect_keys::kColorGradeLutParam;
+        if (!effect_keys::is_color_grade(effect.type) || effect.params.size() <= base) continue;
+        const u64 ref = effect.params[base].constant.ref;
+        if (!ref) continue;
+        const Asset* asset = project.asset(AssetId::unpack(ref));
+        std::vector<u8> bytes;
+        if (!asset || asset->kind != AssetKind::Lut ||
+            !fileio::read_all(resolve(asset->sourcePath), bytes, kPortablePresetMaxBytes) || bytes.empty()) return {};
+        luts.begin_object().key("effect").value(i)
+            .key("cube").value(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size())).end_object();
+        if (luts.str().size() + result.size() + 16 >= kPortablePresetMaxBytes) return {};
+        hasLuts = true;
+    }
+    if (hasLuts) {
+        luts.end_array();
+        result.pop_back();
+        result += ",\"colorLuts\":" + luts.str() + "}";
+    }
+    return result;
+}
+
+struct PresetColorLut {
+    u32 effect;
+    std::string_view source;
+    CubeLut table;
+};
+
+bool read_color_preset_luts(const json::Value& root, const presets::Preset& preset,
+                            std::vector<PresetColorLut>& luts) {
+    const auto* list = root.get("colorLuts");
+    if (!list) return true;
+    if (!list->is_array() || preset.kind != presets::PresetKind::Effects || list->array.size() > preset.effects.size()) return false;
+    std::vector<bool> seen(preset.effects.size(), false);
+    for (const auto& entry : list->array) {
+        const auto* index = entry.get("effect");
+        const auto* cube = entry.get("cube");
+        if (!index || !index->is_number() || !cube || !cube->is_string() || index->number < 0 ||
+            index->number >= static_cast<f64>(preset.effects.size()) || std::trunc(index->number) != index->number) return false;
+        const auto pos = static_cast<u32>(index->number);
+        const auto& effect = preset.effects[pos];
+        if (seen[pos] || !effect_keys::is_color_grade(effect.type) ||
+            effect.params.size() < effect_keys::kColorGradeLutParam + 6) return false;
+        auto parsed = parse_cube_lut(cube->string);
+        if (!parsed.ok()) return false;
+        luts.push_back(PresetColorLut{pos, cube->string, std::move(*parsed)});
+        seen[pos] = true;
+    }
+    return true;
+}
+
+} // namespace
+
 std::string Engine::save_preset(u64 layerId, presets::PresetKind kind, const std::string& name, u32 parts) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     InlineEditScope inlineScope(*this, layerId);
@@ -10142,7 +10297,9 @@ std::string Engine::save_preset(u64 layerId, presets::PresetKind kind, const std
     presets::Preset p;
     if (!presets::capture(*l, kind, name, comp->fps(), parts, &effectRegistry_, p,
                          l->kind == LayerKind::Model3D && supports_text_animation(*l))) return {};
-    return presets::write(p, &effectRegistry_);
+    if (kind != presets::PresetKind::Effects) return presets::write(p, &effectRegistry_);
+    return write_color_preset(p, l->effects, effectRegistry_, *project_,
+        [this](const std::string& path) { return resolve_asset_path(path); });
 }
 
 std::string Engine::save_effect_preset(u64 layerId, u32 effectId, const std::string& name) noexcept {
@@ -10153,7 +10310,10 @@ std::string Engine::save_effect_preset(u64 layerId, u32 effectId, const std::str
     if (!l) return {};
     presets::Preset p;
     if (!presets::capture_effect(*l, effectId, name, comp->fps(), &effectRegistry_, p)) return {};
-    return presets::write(p, &effectRegistry_);
+    const auto effect = std::find_if(l->effects.begin(), l->effects.end(),
+        [effectId](const EffectInstance& fx) { return fx.id == effectId; });
+    return write_color_preset(p, {&*effect, 1}, effectRegistry_, *project_,
+        [this](const std::string& path) { return resolve_asset_path(path); });
 }
 
 std::string Engine::import_alight_motion(const std::string& data, presets::AlightImportReport& report) noexcept {
@@ -10167,8 +10327,18 @@ bool Engine::apply_preset(u64 layerId, const std::string& json, i64 durationFram
     // quebrado não deixa passo vazio no histórico nem camada pela metade.
     presets::Preset p;
     std::string err;
-    if (!presets::parse(json, p, &effectRegistry_, &err)) {
+    json::Value root;
+    if (!json::parse(json, root, &err)) {
+        if (error) *error = "JSON invalido: " + err;
+        return false;
+    }
+    if (!presets::parse_value(root, p, &effectRegistry_, &err)) {
         if (error) *error = err;
+        return false;
+    }
+    std::vector<PresetColorLut> luts;
+    if (!read_color_preset_luts(root, p, luts)) {
+        if (error) *error = "LUT invalida no preset de cor";
         return false;
     }
     std::lock_guard<std::mutex> lock(modelMutex_);
@@ -10219,6 +10389,47 @@ bool Engine::apply_preset(u64 layerId, const std::string& json, i64 durationFram
         if (!ready.ok()) {
             if (error) *error = "este preset precisa de texto 3D com ate 256 glifos";
             return false;
+        }
+    }
+    if (!luts.empty()) {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        const auto dir = fs::u8path(config_.documentsDirectory) / "preset-luts";
+        const auto failed = [&] {
+            if (error) *error = "nao foi possivel salvar a LUT do preset de cor";
+            return false;
+        };
+        if (config_.documentsDirectory.empty()) return failed();
+        fs::create_directories(dir, ec);
+        if (ec) return failed();
+
+        const auto stamp = std::to_string(monotonic_ns());
+        static std::atomic<u64> sequence{0};
+        const auto batch = std::to_string(sequence.fetch_add(1, std::memory_order_relaxed));
+        std::vector<fs::path> saved;
+        for (const auto& lut : luts) {
+            const auto dst = dir / ("look-" + stamp + "-" + batch + "-" + std::to_string(lut.effect) + ".cube");
+            if (!fileio::write_atomic(asset_path_utf8(dst), lut.source.data(), lut.source.size()).ok()) {
+                for (const auto& path : saved) fs::remove(path, ec);
+                return failed();
+            }
+            saved.push_back(dst);
+        }
+        for (usize i = 0; i < luts.size(); ++i) {
+            const auto& lut = luts[i];
+            Asset asset;
+            asset.kind = AssetKind::Lut;
+            asset.sourcePath = store_asset_path(asset_path_utf8(saved[i]));
+            asset.name = asset_path_utf8(saved[i].filename());
+            const AssetId id = project_->add_asset(std::move(asset));
+            constexpr u32 base = effect_keys::kColorGradeLutParam;
+            auto& params = p.effects[lut.effect].params;
+            params[base].constant.ref = id.pack();
+            params[base + 2].constant = ParamValue::scalar(static_cast<f32>(lut.table.size));
+            params[base + 3].constant = ParamValue::scalar(static_cast<f32>(lut.table.dimensions));
+            const Vec3 lo = lut.table.domainMin, hi = lut.table.domainMax;
+            params[base + 4].constant = ParamValue::vec3(lo.x, lo.y, lo.z);
+            params[base + 5].constant = ParamValue::vec3(hi.x, hi.y, hi.z);
         }
     }
     history_.before_mutation(*comp, project_->timeline().current(), "aplicar preset");
@@ -13921,6 +14132,15 @@ Status Engine::recover_device_locked() noexcept {
     }
     AUREA_LOG_WARN("GPU indisponivel: recriando recursos sem alterar o projeto");
     if (++gpuGeneration_ == 0) ++gpuGeneration_;
+    // 1.0.9 (2235: SIGSEGV em vkCreateAndroidSurfaceKHR, fault 0x4, CPH2711/ALT-LX2):
+    // uma soltura adiada quer dizer que a plataforma JÁ devolveu a janela
+    // (nativeDetachSurface solta o ANativeWindow logo depois). Recriar a
+    // superfície com esse ponteiro usava memória solta. A superfície antiga
+    // morre com o backend abaixo; um anexo novo pendente continua na fila.
+    if (surfaceDetachPending_.exchange(false, std::memory_order_acq_rel) && surface_.nativeWindow) {
+        surface_.nativeWindow = nullptr;
+        AUREA_LOG_INFO("superficie: soltura adiada aplicada na recuperacao da GPU");
+    }
     cancel_preview_graph_locked();
     media_.close_all();   // os frames importados pertenciam ao dispositivo morto
     renderer_.forget_device();
@@ -16009,11 +16229,13 @@ u32 Engine::query_layers(bridge::LayerRow* out, u32 capacity, char* outNameBlob,
         row.flags = flags;
         row.parentIndex = kInvalidIndex;
         hasParents |= l->parent.valid();
-        if (outNameBlob && nameCursor + l->name.size() < nameBlobCapacity) {
+        if (outNameBlob && l->name.size() <= nameBlobCapacity - nameCursor) {
             std::memcpy(outNameBlob + nameCursor, l->name.data(), l->name.size());
             row.nameOffset = nameCursor;
             row.nameLength = static_cast<u32>(l->name.size());
             nameCursor += static_cast<u32>(l->name.size());
+        } else if (outNameBlob) {
+            row.reserved0 |= bridge::kLayerRowNameBufferFull;
         }
         out[written++] = row;
     }
@@ -16813,6 +17035,10 @@ constexpr u32 effect_layer_bit(LayerKind kind) noexcept {
     return index < 32 ? 1u << index : 0;
 }
 
+bool is_tracker_effect(EffectTypeId type) noexcept {
+    return type == effect_type_id(tracking::kCameraTrackerEffect) || type == effect_type_id(tracking::kMotionTrackerEffect);
+}
+
 // The picker and EffectAdd share the same layer-kind restrictions.
 u32 effect_catalog_layer_flags(EffectTypeId type) noexcept {
     u32 kinds = 0;
@@ -16825,6 +17051,8 @@ u32 effect_catalog_layer_flags(EffectTypeId type) noexcept {
         flags = bridge::kEffectCatalogShapeModel;
     } else if (scene3d::is_part3d_effect(type)) {
         kinds = effect_layer_bit(LayerKind::Model3D);
+    } else if (is_tracker_effect(type)) {
+        kinds = effect_layer_bit(LayerKind::Video);
     } else if (type == effect_type_id(effect_keys::kRotobrush) || type == effect_type_id(effect_keys::kBackgroundRemove)) {
         kinds = effect_layer_bit(LayerKind::Image) | effect_layer_bit(LayerKind::Video);
     } else if (type == effect_type_id(text::kAnimatorProEffect) || type == effect_type_id(text::kTextPrismEffect)) {
@@ -17699,12 +17927,10 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         try { ctx->hyper = std::make_shared<const HyperExportOverride>(*hyper); }
         catch (...) { return Errc::OutOfMemory; }
     }
-    ctx->graphWanted = settings.aiUpscale != 0 || (hyper && !hyper->graph.empty());
+    ctx->graphWanted = hyper && !hyper->graph.empty();
     if (ctx->graphWanted) {
-        // Etapa com estado ou vizinhos: a passagem não retoma no meio (o
-        // upscale de IA embutido suaviza no tempo — o "off_temporal" de antes).
-        ctx->graphResumable = settings.aiUpscale == 0;
-        if (hyper) for (const hyper::StageDescriptor* d : hyper->graph) {
+        // Etapas com estado ou vizinhos precisam do histórico da passagem.
+        for (const hyper::StageDescriptor* d : hyper->graph) {
             auto probe = d && d->create ? d->create() : nullptr;
             if (!probe || probe->stateful() || probe->temporal_radius() > 0) ctx->graphResumable = false;
         }
@@ -17928,17 +18154,6 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         if (working > std::max<u64>(64ull << 20, caps_.memory_budget_bytes()))
             return Status{Errc::OutOfMemory, "memoria insuficiente para o Hyper nesta resolucao"};
         ctx->dither = false; // A rede não recebe o ruído da quantização.
-    } else if (settings.aiUpscale) {
-        // Keep the entire composition and the selected output exactly. Round the
-        // inference input to even dimensions, then shrink the full neural image.
-        const u32 scale = settings.aiUpscale;
-        ctx->width = ((ctx->outputWidth + scale * 2 - 1) / (scale * 2)) * 2;
-        ctx->height = ((ctx->outputHeight + scale * 2 - 1) / (scale * 2)) * 2;
-        const u64 working = static_cast<u64>(ctx->width) * ctx->height * 3 +
-                            static_cast<u64>(ctx->width * scale) * (ctx->height * scale) * 3 / 2 + (64ull << 20);
-        if (working > std::max<u64>(32ull << 20, caps_.memory_budget_bytes() / 2))
-            return Status{Errc::OutOfMemory, "memoria insuficiente para upscale nesta resolucao"};
-        ctx->dither = false; // Do not feed quantization noise to the neural network.
     }
 
     // "Preparando" das fontes. Cancelável a cada bloco; a mensagem anda com os
@@ -18058,7 +18273,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     vc.keyframeIntervalFrames = settings.keyframeIntervalFrames;
     // surface-direct (EXPORT_SURFACE_DIRETO_2026-10-15.md): ligado por padrão
     // em todo projeto, com ou sem efeitos (o quadro sai do MESMO render). Fora
-    // só o grafo Hyper/upscale de IA (o quadro final vem da CPU, não do slot da
+    // só o grafo Hyper (o quadro final vem da CPU, não do slot da
     // GPU) e as tentativas de compatibilidade (sem Surface). debug.aurea.enc.direct=0
     // desliga no aparelho; =1 liga mesmo com a config desligada.
     ctx->directSurface = vc.directSurface = !vc.portableFrames && (config_.enableDirectSurfaceExport ||
@@ -19266,6 +19481,8 @@ void Engine::export_thread_main() noexcept {
     target.yPlane = ctx.y;
     target.uvPlane = ctx.uv;
     target.encodeDither = ctx.dither;
+    // The legacy scale flag now requests detail at the selected output size.
+    target.enhanceDetail = ctx.settings.aiUpscale != 0;
 
     // 1.0.7.1 ("nem um cubo 3D exporta no celular"): projeto com 3D vai um
     // passe por envio DESDE O 1º QUADRO. Antes a fatia só ligava depois de um
@@ -19713,28 +19930,16 @@ void Engine::export_encoder_hyper_loop(ExportContext& ctx) noexcept {
           ctx.set_encoder_status(st); ctx.encoderFailed = true; ctx.stop = true; }
         ctx.qCv.notify_all();
     };
-    std::vector<const hyper::StageDescriptor*> stages;
-    hyper::Recipe recipe;
-    hyper::DeviceProfile profile = ctx.hyper ? ctx.hyper->profile : hyper_cached_profile();
-    if (ctx.hyper && !ctx.hyper->graph.empty()) {
-        stages = ctx.hyper->graph;
-        recipe = ctx.hyper->graphRecipe;
-    } else {
-        // ExportSettings::aiUpscale: Hyper Upscale Anime no caminho Max (o
-        // Real-ESRGAN da 0.1.4, tile 128 — o mesmo do export de antes).
-        recipe.upscale = ctx.settings.aiUpscale == 4 ? 4u : 2u;
-        recipe.upscaleMode = hyper::UpscaleMode::Anime;
-        recipe.path = hyper::Path::Max;
-        const auto& reg = hyper::stage_registry();
-        const hyper::StageDescriptor* d = reg.find(hyper::StageKind::Upscale, hyper::Path::Max,
-                                                   static_cast<i32>(hyper::UpscaleMode::Anime), profile);
-        if (!d) d = reg.find(hyper::StageKind::Upscale, hyper::Path::Lite, static_cast<i32>(hyper::UpscaleMode::Anime), profile);
-        if (!d) { failWith(Status{Errc::NotSupported, "upscale de IA indisponivel neste aparelho"}); return; }
-        stages.push_back(d);
+    if (!ctx.hyper || ctx.hyper->graph.empty()) {
+        failWith(Errc::InvalidState);
+        return;
     }
+    const auto& stages = ctx.hyper->graph;
+    const auto& recipe = ctx.hyper->graphRecipe;
+    const auto& profile = ctx.hyper->profile;
     hyper::HyperGraph graph;
     ctx.enter(ExportWorkerPhase::Upscale);
-    // Pesos e preparo das etapas também ficam neste worker.
+    // O preparo das etapas também fica neste worker.
     const hyper::StageFormat in{ctx.width, ctx.height, ctx.fps};
     const Status started = graph.start(profile, recipe, stages, in, ctx.outputWidth, ctx.outputHeight, &ctx.cancelRequested,
         [](void* p) noexcept { static_cast<ExportContext*>(p)->beat(); }, &ctx);
@@ -20018,7 +20223,7 @@ void Engine::export_encoder_main() noexcept {
             }
         }
     } workerExit{*this, ctx};
-    // AureaHyper: upscale de IA (aiUpscale) e as etapas Lite/Max do job — o
+    // AureaHyper: etapas Lite/Max do job — o
     // grafo (hyper/HyperGraph.hpp) entre o readback e o sink, nesta thread.
     if (ctx.graphWanted) {
         export_encoder_hyper_loop(ctx);
@@ -20190,7 +20395,7 @@ void Engine::export_encoder_main() noexcept {
 
 Engine::ExportResumeCandidate Engine::export_resume_candidate(const ExportSettings& requested) noexcept {
     ExportResumeCandidate out;
-    if (!config_.enableResumableExport || requested.aiUpscale) return out;
+    if (!config_.enableResumableExport) return out;
     std::vector<u8> bytes;
     CompositionId composition{};
     {
@@ -22495,10 +22700,12 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::EffectAdd: {
             Layer* l = need_layer(cmd.effect_add.layer);
             if (!l) return Errc::NotFound;
-            if (l->effects.size() >= kMaxEffectCount) return Errc::OutOfRange;
             const EffectTypeId type = cmd.effect_add.effectType;
             const u32 allowedKinds = effect_catalog_layer_flags(type) >> bridge::kEffectCatalogLayerShift;
             if (allowedKinds && !(allowedKinds & effect_layer_bit(l->kind))) return Errc::InvalidArgument;
+            if (is_tracker_effect(type) && std::any_of(l->effects.begin(), l->effects.end(),
+                [type](const EffectInstance& effect) { return effect.type == type; })) return OkStatus;
+            if (l->effects.size() >= kMaxEffectCount) return Errc::OutOfRange;
             if ((type == effect_type_id(text::kTransformEffect) || type == effect_type_id(text::kAnimatorEffect)) && l->kind != LayerKind::Text) {
                 const Asset* source = project_->asset(l->model.scene);
                 scene3d::Text3DSpec spec;
@@ -22846,9 +23053,11 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::TextSetContent: {
             Layer* l = need_layer(cmd.layer_ref.layer);
             if (!l) return Errc::NotFound;
+            const bool rename = stringData && text::follows_source_name(*l);
             ae_anim::begin_text_edit(*l, editing_frame_locked());
             if (stringData) l->text.content = stringData;
             ae_anim::end_text_edit(*l, editing_frame_locked());
+            if (rename) l->name = text::source_layer_name(stringData);
             recenter_text(*l);
             return OkStatus;
         }

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="caption_star_title">Auto Caption Star</string>
+    <string name="caption_star_setup">الإعدادات</string>
+    <string name="caption_star_motion">الإيقاع</string>
+    <string name="caption_star_cut">قطع مباشر</string>
+    <string name="caption_star_impact">نمط التأثير</string>
+    <string name="caption_star_save">حفظ كإعداد مسبق</string>
+    <string name="caption_star_empty_presets">تظهر إعداداتك المحفوظة هنا.</string>
+    <string name="caption_star_save_failed">تعذّر حفظ هذا الإعداد المسبق.</string>
+    <string name="caption_star_reflow_failed">تعذّر إعادة تجميع هذه التسميات.</string>
+    <string name="caption_star_to_layers">تحويل إلى طبقات</string>
+    <string name="caption_star_to_layers_failed">تعذّر تحويل هذا المسار. تحقّق مما إذا كان مقفلاً أو تعتمد عليه طبقات أخرى أو بلغ التركيب الحد الأقصى للطبقات.</string>
+</resources>

@@ -8,9 +8,9 @@
     <!-- O anual (1.0.9: R$ 150,00). -->
     <string name="assinatura_preco_hyper" translatable="false">R$ 150,00</string>
     <string name="assinatura_badge">Recurso pago</string>
-    <string name="assinatura_intro_efeito">Este efeito faz parte do AureaHyper. Assine o AureaHyper (por semana, mês ou ano) e libere todos os efeitos pagos, o Texto 3D e as ferramentas Hyper.</string>
+    <string name="assinatura_intro_efeito">Este efeito faz parte do AureaHyper. Assine o AureaHyper (por semana, mês ou ano) e libere todos os efeitos pagos e as ferramentas Hyper.</string>
     <string name="assinatura_intro_texto3d">O Texto 3D faz parte do AureaHyper. Assine o AureaHyper (por semana, mês ou ano) e libere também todos os efeitos pagos e as ferramentas Hyper.</string>
-    <string name="assinatura_intro_hyper">O AureaHyper libera todos os efeitos pagos, o Texto 3D e as ferramentas Hyper.</string>
+    <string name="assinatura_intro_hyper">O AureaHyper libera todos os efeitos pagos e as ferramentas Hyper.</string>
     <string name="assinatura_so_efeito">Assinar só este efeito</string>
     <string name="assinatura_so_texto3d">Assinar só o Texto 3D</string>
     <string name="assinatura_escolha_plano">Escolha o seu plano do AureaHyper. Todos liberam tudo.</string>

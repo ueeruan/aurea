@@ -258,7 +258,7 @@
     "fps": 60,
     "effects": [
       {
-        "key": "aurea.distort.turbulence",
+        "key": "aurea.distort.turbulent_displace_reference",
         "params": [
           {
             "id": "amount",
@@ -297,24 +297,6 @@
             ]
           },
           {
-            "id": "offset_x",
-            "v": [
-              0,
-              0,
-              0,
-              0
-            ]
-          },
-          {
-            "id": "offset_y",
-            "v": [
-              0,
-              0,
-              0,
-              0
-            ]
-          },
-          {
             "id": "seed",
             "v": [
               0,
@@ -326,8 +308,8 @@
         ],
         "tracks": [
           {
-            "param": "seed",
-            "index": 6,
+            "param": "evolution",
+            "index": 5,
             "comp": 0,
             "static": 0,
             "keys": [],

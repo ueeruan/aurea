@@ -9,9 +9,15 @@ import com.aurea.aurea.effects.EffectTool
 import com.aurea.aurea.state.EditorStore
 import java.text.Normalizer
 
+// 1.0.9 (2235: ANR no itel C671L com a main em Pattern.compile dentro de
+// EffectScoreFields): o índice de busca chama isto milhares de vezes na
+// composição (efeitos × 7 idiomas). O regex compilava a cada chamada.
+private val CombiningMarks = Regex("\\p{Mn}+")
+
 /** Busca sem acento e sem caixa ("saturacao" acha "Saturação"). */
 internal fun normalizeSearch(s: String): String =
-    Normalizer.normalize(s, Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "").lowercase().trim()
+    if (s.all { it.code < 0x80 }) s.lowercase().trim()   // ASCII: nada a decompor
+    else Normalizer.normalize(s, Normalizer.Form.NFD).replace(CombiningMarks, "").lowercase().trim()
 
 /**
  * O painel que cada FERRAMENTA-EFEITO abre (legendas, rastreio de câmera,
@@ -20,7 +26,7 @@ internal fun normalizeSearch(s: String): String =
  */
 internal fun effectToolPanel(tool: EffectTool): EditorPanel = when (tool) {
     EffectTool.Captions -> EditorPanel.Captions
-    EffectTool.CameraTrack -> EditorPanel.Tracking
+    EffectTool.CameraTrack -> EditorPanel.CameraTracking
     EffectTool.Mask -> EditorPanel.Mask
     // Funções do AUREA (13/11/2026, decisão 1 do dono: sem página 2 na grade).
     EffectTool.Animation -> EditorPanel.Animation          // F3: painel próprio (camada, texto, prontas, explodir)
@@ -42,8 +48,12 @@ internal fun effectToolPanel(tool: EffectTool): EditorPanel = when (tool) {
 internal fun openEffectTool(store: EditorStore, onOpenPanel: (EditorPanel) -> Unit, tool: EffectTool) {
     when (tool) {
         EffectTool.Mask -> store.addMaskTool()
-        EffectTool.CameraTrack -> store.cameraTrackerVisible = true
-        EffectTool.Tracking -> store.cameraTrackerVisible = false
+        EffectTool.CameraTrack, EffectTool.Tracking -> {
+            val layer = store.primary ?: return
+            if (store.editingLayers.none { it.id == layer && it.kind == 1 && !it.locked }) return
+            if (store.pointPick != null) store.cancelMotionPick()
+            if (store.effects.none { it.typeId == tool.typeId }) store.addEffect(tool.typeId, listOf(layer))
+        }
         EffectTool.Puppet -> if (!com.aurea.aurea.editor.preparePuppetTool(store)) return
         EffectTool.RigMocap -> { Element3DRequest.face = Face3D.Rig; Element3DRequest.tab = Tab3D.Rig }
         EffectTool.ShapeOperators -> VectorRequest.tab = VectorRequest.OPERATORS

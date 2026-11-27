@@ -3,8 +3,7 @@
 //
 //  AureaHyper (0.3.2): a suíte de restauração do Aurea — upscale, limpeza
 //  (ruído, blocos, entrelaçado), rostos, quadros a mais (60 fps, câmera lenta)
-//  e estabilização. Substitui o "Upscale com IA" da Home; o upscaler ncnn da
-//  0.1.4 (ai/Upscaler.cpp, Real-ESRGAN animevideov3) é o primeiro módulo dele.
+//  e estabilização. Aurea Detail faz ampliação e realce no renderer.
 //
 //  CONTRATO COMUM entre o motor (src/hyper/**, src/engine/EngineHyper.cpp), as
 //  redes (src/hyper/neural/**) e as telas (Android/iOS). Mudar algo aqui exige
@@ -35,17 +34,18 @@ namespace aurea::hyper {
 
 /// Caminho de processamento.
 enum class Path : u8 { Auto = 0, Turbo = 1, Lite = 2, Max = 3 };
+inline constexpr f32 kDetailStrength = 70.0f; // percentage
 inline constexpr u32 kPathCount = 4;   ///< índices de Estimate::seconds (Auto = o escolhido)
 
 /// Tipo de conteúdo do upscale (escolhe a rede/o shader).
-enum class UpscaleMode : u8 { General = 0, Anime = 1 };
+enum class UpscaleMode : u8 { General = 0, Anime = 1, Enchance = 2 };
 
 /// A receita: o que fazer com o vídeo. Zeros/false = etapa desligada.
 /// Persistida no projeto como parâmetros dos efeitos Hyper e enviada ao job
 /// da Home; valores fora da faixa são saneados por `sanitize`.
 struct Recipe {
     // Upscale -----------------------------------------------------------------
-    u32 upscale = 1;                      ///< 1 (desligado), 2 ou 4
+    u32 upscale = 1;                      ///< 0 (realce no tamanho original), 1 (desligado), 2 ou 4
     UpscaleMode upscaleMode = UpscaleMode::General;
     // Clean ---------------------------------------------------------------------
     f32 denoise = 0.0f;                   ///< 0..1 (força; mistura x4v3 ↔ wdn-x4v3 no Lite/Max)
@@ -128,6 +128,7 @@ struct JobSteps {
 /// Chaves dos efeitos de camada (editor). Registrados no catálogo de efeitos.
 namespace effect_keys {
 inline constexpr const char* kHyperUpscale = "aurea.hyper.upscale";
+inline constexpr const char* kHyperEnchance = "aurea.hyper.enchance";
 inline constexpr const char* kHyperMotion  = "aurea.hyper.motion";
 inline constexpr const char* kHyperClean   = "aurea.hyper.clean";
 } // namespace effect_keys
@@ -186,9 +187,9 @@ inline constexpr u32 kFlowRetimeNeuralValue = 3;
 /// "aurea-text3d:")? Formas 3D e imagem para 3D continuam livres.
 [[nodiscard]] bool model_source_requires_access(const std::string& sourcePath) noexcept;
 
-/// A assinatura AVULSA que libera este efeito pago (ex. "aurea_fx_twitch"), ou
+/// A assinatura AVULSA que libera este efeito pago (ex. "aurea_fx_signal"), ou
 /// nullptr: efeito grátis, ou só no AureaHyper (as 3 ferramentas Hyper). As
-/// versões legadas (kTwitch, kSignal, kGlitchify, kRasterExtrude) apontam para
+/// versões legadas (kSignal, kGlitchify, kRasterExtrude) apontam para
 /// a mesma assinatura da referência AE.
 [[nodiscard]] const char* effect_product_id(u32 effectTypeId) noexcept;
 /// A assinatura avulsa do Texto 3D (kText3DProductId).

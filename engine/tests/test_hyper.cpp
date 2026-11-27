@@ -29,12 +29,12 @@ using namespace aurea::hyper;
 AUREA_TEST(Hyper, ReferenceEffectsShareAccessClassification) {
     for (const char* key : {
              "aurea.hyper.upscale", "aurea.hyper.motion", "aurea.hyper.clean",
-             "aurea.motion.cartoon_moblur", "aurea.motion.twitch_reference",
+             "aurea.motion.cartoon_moblur",
              "aurea.glitch.signal_reference", "aurea.blur.sharpen_reference",
              "aurea.transition.radial_wipe_reference",
              "aurea.stylize.find_edges_reference", "aurea.distort.wave_warp_reference",
              "aurea.transition.block_dissolve_reference", "aurea.generate.extrude_reference",
-             "aurea.glitch.glitchify_reference","aurea.motion.twitch",
+             "aurea.glitch.glitchify_reference",
              "aurea.glitch.glitchify", "aurea.glitch.signal", "aurea.generate.raster_extrude"}) {
         AUREA_CHECK(effect_requires_access(effect_type_id(key)));
     }
@@ -48,7 +48,8 @@ AUREA_TEST(Hyper, ReferenceEffectsShareAccessClassification) {
                             "aurea.time.time_displacement", "aurea.time.time_displacement_reference",
                             // Free by the owner's decision (16/11/2026).
                             "aurea.blur.fast_blur_reference", "aurea.distort.turbulent_displace_reference",
-                            "aurea.stylize.drop_shadow_reference"}) {
+                            "aurea.stylize.drop_shadow_reference", "aurea.motion.twitch_reference",
+                            "aurea.motion.twitch"}) {
         AUREA_CHECK_MSG(!effect_requires_access(effect_type_id(key)), key);
     }
     AUREA_CHECK(!effect_requires_access(0));
@@ -108,14 +109,13 @@ AUREA_TEST(Hyper, FlowRetimeNeuralOptionRequiresAccess) {
     AUREA_CHECK(!effect_requires_access(retime));   // o efeito em si continua grátis
 }
 
-// 0.5.4: o texto 3D e do mesmo produto pago. So a receita de texto 3D conta;
-// formas 3D, imagem para 3D e modelos importados continuam livres.
-AUREA_TEST(Hyper, Text3DRequiresAccess) {
-    AUREA_CHECK(text3d_requires_access());
+AUREA_TEST(Hyper, Text3DIsAvailableWithoutSubscription) {
+    AUREA_CHECK(!text3d_requires_access());
+    AUREA_CHECK(has_text3d_access({}));
     scene3d::Text3DSpec spec;
     spec.content = "AUREA";
-    AUREA_CHECK(model_source_requires_access(scene3d::encode_text3d(spec)));
-    AUREA_CHECK(model_source_requires_access("aurea-text3d:v2;d=0.2500;t=old"));
+    AUREA_CHECK(!model_source_requires_access(scene3d::encode_text3d(spec)));
+    AUREA_CHECK(!model_source_requires_access("aurea-text3d:v2;d=0.2500;t=old"));
     AUREA_CHECK(!model_source_requires_access(scene3d::encode_shape3d(scene3d::default_shape3d(scene3d::Shape3DKind::Cube))));
     AUREA_CHECK(!model_source_requires_access(std::string(scene3d::kImage3DScheme) + "x"));
     AUREA_CHECK(!model_source_requires_access("C:/models/robot.glb"));
@@ -128,8 +128,6 @@ AUREA_TEST(Hyper, Text3DRequiresAccess) {
 AUREA_TEST(Hyper, SubscriptionProductForEachPaidEffect) {
     const struct { const char* key; const char* product; } table[] = {
         {"aurea.motion.cartoon_moblur", "aurea_fx_cartoon_moblur"},
-        {"aurea.motion.twitch_reference", "aurea_fx_twitch"},
-        {"aurea.motion.twitch", "aurea_fx_twitch"},
         {"aurea.glitch.signal_reference", "aurea_fx_signal"},
         {"aurea.glitch.signal", "aurea_fx_signal"},
         {"aurea.glitch.glitchify_reference", "aurea_fx_glitchify"},
@@ -149,7 +147,8 @@ AUREA_TEST(Hyper, SubscriptionProductForEachPaidEffect) {
     }
     // As 3 ferramentas Hyper: só no AureaHyper. Efeito grátis: nenhum produto.
     for (const char* key : {"aurea.hyper.upscale", "aurea.hyper.motion", "aurea.hyper.clean",
-                            "aurea.blur.gaussian", "aurea.blur.fast_blur_reference"}) {
+                            "aurea.blur.gaussian", "aurea.blur.fast_blur_reference",
+                            "aurea.motion.twitch_reference", "aurea.motion.twitch"}) {
         AUREA_CHECK_MSG(effect_product_id(effect_type_id(key)) == nullptr, key);
     }
     AUREA_CHECK(std::strcmp(text3d_product_id(), "aurea_texto3d") == 0);
@@ -168,6 +167,7 @@ AUREA_TEST(Hyper, SubscriptionProductForEachPaidEffect) {
     // Nada avulso à venda (quem já tem continua reconhecido em `ids`).
     for (const auto& p : sale) AUREA_CHECK(product_unlocks_everything(p));
     AUREA_CHECK(std::find(ids.begin(), ids.end(), "aurea_texto3d") != ids.end());
+    AUREA_CHECK(std::find(ids.begin(), ids.end(), "aurea_fx_twitch") != ids.end());
     AUREA_CHECK(std::find(ids.begin(), ids.end(), "aureahyper_lifetime") == ids.end());
     for (const auto& row : table) AUREA_CHECK_MSG(std::find(ids.begin(), ids.end(), row.product) != ids.end(), row.product);
     for (usize i = 0; i < ids.size(); ++i)
@@ -199,6 +199,7 @@ AUREA_TEST(Hyper, SubscriptionAccessRule) {
     const u32 freeFx = effect_type_id("aurea.blur.gaussian");
     const std::vector<std::string> none;
     const std::vector<std::string> onlyTwitch{"aurea_fx_twitch"};
+    const std::vector<std::string> onlySignal{"aurea_fx_signal"};
     const std::vector<std::string> onlyText3D{"aurea_texto3d"};
     const std::vector<std::string> weekly{"aurea_hyper_semanal"};
     const std::vector<std::string> monthly{"aurea_hyper_mensal"};
@@ -210,18 +211,23 @@ AUREA_TEST(Hyper, SubscriptionAccessRule) {
     AUREA_CHECK(has_effect_access(none, freeFx));
     AUREA_CHECK(has_effect_access(none, 0));
     // Nada comprado: nenhum pago.
-    AUREA_CHECK(!has_effect_access(none, twitch));
+    AUREA_CHECK(has_effect_access(none, twitch));
+    AUREA_CHECK(has_effect_access(none, twitchLegacy));
+    AUREA_CHECK(!has_effect_access(none, signal));
     AUREA_CHECK(!has_effect_access(none, upscale));
-    AUREA_CHECK(!has_text3d_access(none));
+    AUREA_CHECK(has_text3d_access(none));
     AUREA_CHECK(!has_access(none, nullptr));
-    // A assinatura avulsa libera o próprio efeito (e a versão legada), nada mais.
+    // A assinatura legada de Twitch permanece isolada e ambas as versões são gratuitas.
     AUREA_CHECK(has_effect_access(onlyTwitch, twitch));
     AUREA_CHECK(has_effect_access(onlyTwitch, twitchLegacy));
     AUREA_CHECK(!has_effect_access(onlyTwitch, signal));
     AUREA_CHECK(!has_effect_access(onlyTwitch, upscale));
-    AUREA_CHECK(!has_text3d_access(onlyTwitch));
+    AUREA_CHECK(has_effect_access(onlySignal, signal));
+    AUREA_CHECK(has_effect_access(onlySignal, effect_type_id("aurea.glitch.signal")));
+    AUREA_CHECK(!has_effect_access(onlySignal, upscale));
+    AUREA_CHECK(has_text3d_access(onlyTwitch));
     AUREA_CHECK(has_text3d_access(onlyText3D));
-    AUREA_CHECK(!has_effect_access(onlyText3D, twitch));
+    AUREA_CHECK(!has_effect_access(onlyText3D, signal));
     // Qualquer plano do AureaHyper (semanal, mensal, anual) e o legado vitalício: tudo.
     for (const auto* all : {&weekly, &annual, &monthly, &lifetime}) {
         AUREA_CHECK(has_effect_access(*all, twitch));
@@ -237,8 +243,8 @@ AUREA_TEST(Hyper, SubscriptionAccessRule) {
     AUREA_CHECK(!product_unlocks_everything("aurea_fx_twitch"));
     AUREA_CHECK(!product_unlocks_everything("aurea_aureaos"));
     // Produtos sem relação (AureaOS, vazio, parecido) não liberam nada.
-    AUREA_CHECK(!has_effect_access(unrelated, twitch));
-    AUREA_CHECK(!has_text3d_access(unrelated));
+    AUREA_CHECK(!has_effect_access(unrelated, signal));
+    AUREA_CHECK(has_text3d_access(unrelated));
     AUREA_CHECK(!has_access(unrelated, ""));
 }
 
@@ -474,44 +480,23 @@ AUREA_TEST(HyperPlan, AllTurboIsOnePassWithExactFramesAndCaps) {
     AUREA_CHECK_NEAR(bp->outFps, 30.0, 1e-9);
 }
 
-AUREA_TEST(HyperPlan, NeuralUpscaleThenMotionIsTwoPassesAndUpscalesOnlyOriginals) {
-    // Só uma rede de upscale (sem rede de Motion): o Motion Turbo vem depois.
-    StageRegistry reg;
-    StageDescriptor up;
-    up.id = "teste.anime";
-    up.kind = StageKind::Upscale;
-    up.path = Path::Lite;
-    up.mode = static_cast<i32>(UpscaleMode::Anime);
-    up.create = []() -> std::unique_ptr<HyperStage> { return std::make_unique<DoubleStage>(); };
-    reg.add(up);
+AUREA_TEST(HyperPlan, LegacyLiteUpscaleAndTurboMotionShareOneRenderPass) {
     Recipe r;
     r.upscale = 2;
     r.upscaleMode = UpscaleMode::Anime;
     r.targetFps = 60.0;
     r.path = Path::Lite;
-    auto plan = plan_job(r, measured(Path::Lite), source(320, 180, 30.0, 1.0), OutputCaps{}, reg);
+    StageRegistry empty;
+    auto plan = plan_job(r, measured(Path::Lite), source(320, 180, 30.0, 1.0), OutputCaps{}, empty);
     AUREA_CHECK(plan.ok());
     if (!plan.ok()) return;
-    AUREA_CHECK_EQ(plan->passes.size(), static_cast<usize>(2));
-    if (plan->passes.size() != 2) return;
-    const PassPlan& a = plan->passes[0];
-    const PassPlan& b = plan->passes[1];
-    // 1ª: a rede no grafo, nos quadros ORIGINAIS (30 fps), 320x180 -> 640x360.
-    AUREA_CHECK_EQ(a.graph.size(), static_cast<usize>(1));
-    AUREA_CHECK(!a.final && !a.renderMotion);
-    AUREA_CHECK_NEAR(a.fps, 30.0, 1e-9);
-    AUREA_CHECK_EQ(a.frames, static_cast<u64>(30));
-    AUREA_CHECK_EQ(a.renderW, 320u);
-    AUREA_CHECK_EQ(a.outW, 640u);
-    // 2ª: o Motion Turbo depois do upscale, a 60.
-    AUREA_CHECK(b.final && b.renderMotion && b.graph.empty() && !b.renderUpscale);
-    AUREA_CHECK_EQ(b.sourceW, 640u);
-    AUREA_CHECK_EQ(b.frames, static_cast<u64>(60));
-    AUREA_CHECK(plan->paths[static_cast<usize>(Step::Upscale)] != Path::Turbo);
-    // Turbo pedido: uma passagem, tudo no render.
-    r.path = Path::Turbo;
-    auto turbo = plan_job(r, measured(Path::Lite), source(320, 180, 30.0, 1.0), OutputCaps{}, reg);
-    AUREA_CHECK(turbo.ok() && turbo->passes.size() == 1);
+    AUREA_CHECK_EQ(plan->passes.size(), static_cast<usize>(1));
+    const PassPlan& pass = plan->passes.front();
+    AUREA_CHECK(pass.graph.empty() && pass.final && pass.renderUpscale && pass.renderMotion);
+    AUREA_CHECK_EQ(pass.sourceW, 320u);
+    AUREA_CHECK_EQ(pass.outW, 640u);
+    AUREA_CHECK_EQ(pass.frames, static_cast<u64>(60));
+    AUREA_CHECK(plan->paths[static_cast<usize>(Step::Upscale)] == Path::Turbo);
 }
 
 AUREA_TEST(HyperPlan, TurboAfterANetworkOpensANewPassAndEstimateMarksMissingPaths) {
@@ -616,11 +601,11 @@ AUREA_TEST(HyperGraph, FitStageResizesAndCancelStopsAtOnce) {
         AUREA_CHECK(!got.ok() && got.code() == Errc::Cancelled);
         AUREA_CHECK(!g.try_push(f.view()).ok());
     }
-    // Embutido: o upscale Anime (Real-ESRGAN) existe nos dois caminhos.
+    // Upscale is always spatial, including legacy Lite/Max settings.
     const StageRegistry& reg = stage_registry();
     DeviceProfile p;
-    AUREA_CHECK(reg.find(StageKind::Upscale, Path::Max, static_cast<i32>(UpscaleMode::Anime), p) != nullptr);
-    AUREA_CHECK(reg.find(StageKind::Upscale, Path::Lite, static_cast<i32>(UpscaleMode::Anime), p) != nullptr);
+    AUREA_CHECK(reg.find(StageKind::Upscale, Path::Max, static_cast<i32>(UpscaleMode::Anime), p) == nullptr);
+    AUREA_CHECK(reg.find(StageKind::Upscale, Path::Lite, static_cast<i32>(UpscaleMode::Anime), p) == nullptr);
 }
 
 AUREA_TEST(Hyper, Nv12RgbRoundTripAndFrameBuffer) {
@@ -844,6 +829,19 @@ AUREA_TEST(HyperGraph, MotionStageGetsTheSourcePairAndPhaseAndEarlierStagesSkipR
     if (out.size() == kOut) AUREA_CHECK_EQ(out[kOut - 1].nv12[0], static_cast<u8>(180));
 }
 
+AUREA_TEST(HyperPlan, DetailPreservesSizeAndNeverEntersTheNeuralGraph) {
+    Recipe r;
+    r.upscale = 0;
+    r.path = Path::Max;
+    AUREA_CHECK(!is_identity(sanitize(r)));
+    auto plan = plan_job(r, measured(Path::Max), source(1280, 720, 30.0, 1.0), OutputCaps{}, stage_registry());
+    AUREA_CHECK(plan.ok());
+    if (!plan.ok()) return;
+    AUREA_CHECK_EQ(plan->outW, 1280u);
+    AUREA_CHECK_EQ(plan->outH, 720u);
+    AUREA_CHECK(plan->passes.size() == 1 && plan->passes[0].renderUpscale && plan->passes[0].graph.empty());
+}
+
 AUREA_TEST(HyperPlan, NeuralMotionRunsInTheGraphOfTheSamePass) {
     StageRegistry reg;
     StageDescriptor up;
@@ -868,8 +866,8 @@ AUREA_TEST(HyperPlan, NeuralMotionRunsInTheGraphOfTheSamePass) {
     AUREA_CHECK_EQ(plan->passes.size(), static_cast<usize>(1));
     const PassPlan& p = plan->passes[0];
     AUREA_CHECK(p.graph_motion() && !p.renderMotion);
-    AUREA_CHECK_EQ(p.graph.size(), static_cast<usize>(2));
-    AUREA_CHECK(p.graph.size() == 2 && p.graph[0]->kind == StageKind::Upscale && p.graph[1]->kind == StageKind::Motion);
+    AUREA_CHECK(p.renderUpscale);
+    AUREA_CHECK(p.graph.size() == 1 && p.graph[0]->kind == StageKind::Motion);
     AUREA_CHECK_EQ(p.frames, static_cast<u64>(120));
     AUREA_CHECK(plan->paths[static_cast<usize>(Step::Motion)] == Path::Lite);
 }

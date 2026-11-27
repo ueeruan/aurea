@@ -3,6 +3,7 @@ import { lerSessao, lerJson, json, dentroDoLimite } from './contas.js';
 import { enviarEmail } from './email.js';
 import { storeRoute } from './store.js';
 import { removeMuralPost } from './mural.js';
+import { deleteCommunityMedia, readCommunityMedia, uploadCommunityMedia } from './community_media.js';
 
 const BADGES = new Set(['', 'blue', 'green', 'gold']);
 const MAX_FILE = 50 * 1024 * 1024;
@@ -13,7 +14,8 @@ function cursor(value) {
   const m = /^(\d{1,16}):([0-9a-f-]{36})$/.exec(value ?? '');
   return m ? [Number(m[1]), m[2]] : null;
 }
-const nextCursor = (items) => items.length === 30 ? `${items.at(-1).createdAt}:${items.at(-1).id}` : null;
+const itemCursor = (item) => `${item.createdAt}:${item.id}`;
+const nextCursor = (items) => items.length === 30 ? itemCursor(items.at(-1)) : null;
 const POST_CATEGORIES = new Set(['text', 'showcase', 'project', 'preset', 'announcement']);
 const POST_SORTS = new Set(['newest', 'oldest', 'popular']);
 // Moderação (Google Play: conteúdo gerado pelo usuário e IA generativa).
@@ -69,7 +71,21 @@ async function profile(env, uid, viewer) {
   return row && { ...author(row), followers: row.followers, following: row.following, posts: row.posts, followed: !!row.followed,
     blocked: !!row.blocked };
 }
-async function posts(env, url, viewer) {
+const postSelect = `SELECT p.*, a.username, a.name, a.avatar, a.verification,
+    f.kind AS asset_kind, f.name AS asset_name, f.bytes AS asset_bytes,
+    m.kind AS media_kind, m.name AS media_name, m.bytes AS media_bytes,
+    (SELECT COUNT(*) FROM community_likes WHERE post=p.id) AS likes,
+    (SELECT COUNT(*) FROM community_comments WHERE post=p.id) AS comments,
+    EXISTS(SELECT 1 FROM community_likes WHERE post=p.id AND uid=?) AS liked
+    FROM community_posts p JOIN community_profiles a ON a.uid=p.uid
+    LEFT JOIN community_assets f ON f.id=p.asset
+    LEFT JOIN community_media m ON m.id=p.media`;
+const postJson = r => ({ id: r.id, body: r.body, category: r.category, createdAt: r.created_at, author: author(r),
+  likes: r.likes, comments: r.comments, liked: !!r.liked,
+  asset: r.asset ? { id: r.asset, kind: r.asset_kind, name: r.asset_name, bytes: r.asset_bytes } : null,
+  media: r.media ? { id: r.media, kind: r.media_kind, name: r.media_name, bytes: r.media_bytes } : null });
+
+async function postPage(env, url, viewer) {
   const sort = url.searchParams.get('sort') ?? 'newest';
   const category = url.searchParams.get('category');
   if (!POST_SORTS.has(sort) || (category !== null && !POST_CATEGORIES.has(category))) return problem('invalid_feed_filter');
@@ -93,20 +109,39 @@ async function posts(env, url, viewer) {
   }
   if (uid) { conditions.push('p.uid=?'); params.push(uid); }
   if (following) { conditions.push('EXISTS(SELECT 1 FROM community_follows f WHERE f.follower=? AND f.followed=p.uid)'); params.push(viewer); }
-  const rows = await stmt(env, `SELECT p.*, a.username, a.name, a.avatar, a.verification,
-    f.kind AS asset_kind, f.name AS asset_name, f.bytes AS asset_bytes,
-    (SELECT COUNT(*) FROM community_likes WHERE post=p.id) AS likes,
-    (SELECT COUNT(*) FROM community_comments WHERE post=p.id) AS comments,
-    EXISTS(SELECT 1 FROM community_likes WHERE post=p.id AND uid=?) AS liked
-    FROM community_posts p JOIN community_profiles a ON a.uid=p.uid
-    LEFT JOIN community_assets f ON f.id=p.asset
+  const size = url.searchParams.get('compact') === '1' ? 12 : 30;
+  const rows = await stmt(env, `${postSelect}
     WHERE ${conditions.join(' AND ')}
-    ORDER BY ${popular ? 'p.popularity DESC, ' : ''}p.created_at ${order}, p.id ${order} LIMIT 31`, ...params).all();
-  const items = rows.results.slice(0, 30).map(r => ({ id: r.id, body: r.body, category: r.category, createdAt: r.created_at, author: author(r),
-    likes: r.likes, comments: r.comments, liked: !!r.liked,
-    asset: r.asset ? { id: r.asset, kind: r.asset_kind, name: r.asset_name, bytes: r.asset_bytes } : null }));
-  const next = rows.results.length > items.length ? nextCursor(items) : null;
-  return json({ items, cursor: next && popular ? `${rows.results[29].popularity}:${next}` : next });
+    ORDER BY ${popular ? 'p.popularity DESC, ' : ''}p.created_at ${order}, p.id ${order} LIMIT ?`, ...params, size + 1).all();
+  const items = rows.results.slice(0, size).map(postJson);
+  const next = rows.results.length > size ? itemCursor(items.at(-1)) : null;
+  return { items, cursor: next && popular ? `${rows.results[size - 1].popularity}:${next}` : next };
+}
+
+async function activity(env, url, viewer) {
+  const read = await stmt(env, 'SELECT seen_at FROM community_activity_read WHERE uid=?', viewer).first();
+  const seen = read?.seen_at ?? 0;
+  const through = Date.now();
+  const entries = `SELECT n.comment AS id, n.kind, n.created_at, c.post, c.uid, COALESCE(NULLIF(a.name,''), a.username, '') AS name
+    FROM community_comment_activity n JOIN community_comments c ON c.id=n.comment
+    JOIN community_posts p ON p.id=c.post JOIN community_profiles a ON a.uid=c.uid
+    WHERE n.recipient=? AND ${notBlocked('c.uid')} AND ${notBlocked('p.uid')}
+      AND ${notHidden('comment', 'c.id', 'c.uid')} AND ${notHidden('post', 'p.id', 'p.uid')}
+    UNION ALL
+    SELECT p.id, 'announcement', p.created_at, p.id, p.uid, COALESCE(NULLIF(a.name,''), a.username, '')
+    FROM community_posts p JOIN community_profiles a ON a.uid=p.uid
+    WHERE p.category='announcement' AND p.uid<>? AND ${notBlocked('p.uid')} AND ${notHidden('post', 'p.id', 'p.uid')}`;
+  const args = Array(11).fill(viewer);
+  const count = stmt(env, `WITH entries AS (${entries}) SELECT COUNT(*) AS unread FROM
+    (SELECT 1 FROM entries WHERE created_at>? AND created_at<=? LIMIT 100)`, ...args, seen, through).first();
+  if (url.searchParams.get('summary') === '1') return json({ unread: (await count).unread });
+  const page = cursor(url.searchParams.get('cursor')) ?? [through + 1, ''];
+  const list = stmt(env, `WITH entries AS (${entries}) SELECT * FROM entries
+    WHERE (created_at, id) < (?, ?) ORDER BY created_at DESC, id DESC LIMIT 31`, ...args, ...page).all();
+  const [readCount, rows] = await Promise.all([count, list]);
+  const items = rows.results.slice(0, 30).map(r => ({ id: r.id, post: r.post, kind: r.kind, name: r.name,
+    createdAt: r.created_at, unread: r.created_at > seen }));
+  return json({ items, unread: readCount.unread, through, cursor: rows.results.length > 30 ? itemCursor(items.at(-1)) : null });
 }
 async function download(req, env, id) {
   const asset = await stmt(env, `SELECT * FROM community_assets WHERE id=? AND
@@ -117,7 +152,9 @@ async function download(req, env, id) {
   return new Response(req.method === 'HEAD' ? null : object.body, { headers: {
     'content-type': asset.mime, 'content-length': String(object.size),
     'content-disposition': `${asset.kind === 'avatar' ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(asset.name)}`,
-    'cache-control': 'public, max-age=300', 'x-content-type-options': 'nosniff',
+    // 1.0.9: an avatar id never changes content (a new photo is a new id), so devices keep it
+    // a day instead of asking again on every feed scroll. Presets/projects stay at 5 minutes.
+    'cache-control': asset.kind === 'avatar' ? 'public, max-age=86400' : 'public, max-age=300', 'x-content-type-options': 'nosniff',
     'content-security-policy': "default-src 'none'; sandbox", 'etag': object.httpEtag ?? `"${id}"`,
   } });
 }
@@ -222,15 +259,36 @@ export async function communityRoute(req, env, ctx, url) {
   try {
     const assetMatch = /^\/api\/community\/assets\/([0-9a-f-]{36})$/.exec(path);
     if (assetMatch && ['GET', 'HEAD'].includes(req.method)) return await download(req, env, assetMatch[1]);
+    const mediaMatch = /^\/api\/community\/media\/([0-9a-f-]{36})$/.exec(path);
+    if (mediaMatch && ['GET', 'HEAD'].includes(req.method)) return await readCommunityMedia(req, env, mediaMatch[1]);
     const session = await lerSessao(env, req);
     if (!session) return problem('unauthorized', 401);
-    // Read the actual account: revoked/deleted accounts and stale session emails cannot become admins.
-    const account = await stmt(env, 'SELECT email FROM users WHERE id=?', session.uid).first();
-    if (!account) return problem('unauthorized', 401);
-    const admin = !!(await stmt(env, "SELECT uid FROM account_roles WHERE uid=? AND role='community_admin'", session.uid).first());
-    await ensureProfile(env, session.uid);
+    // lerSessao already joined the live account row (revoked/deleted accounts return null),
+    // so the admin role and the profile come from ONE query; the profile is written only
+    // when missing. D1 is far from most users (WEUR): every round trip costs ~160 ms.
+    const who = await stmt(env, `SELECT EXISTS(SELECT 1 FROM users WHERE id=?) AS account,
+      EXISTS(SELECT 1 FROM account_roles WHERE uid=? AND role='community_admin') AS admin,
+      EXISTS(SELECT 1 FROM community_profiles WHERE uid=?) AS profiled`, session.uid, session.uid, session.uid).first();
+    if (!who?.account) return problem('unauthorized', 401);
+    const admin = !!who.admin;
+    if (!who.profiled) await ensureProfile(env, session.uid);
     if (req.method !== 'GET' && !(await dentroDoLimite(env, 'community-write', session.uid, { max: 120, janela: 60 }))) return problem('rate_limited', 429);
-    if (path === '/api/community/me' && req.method === 'GET') return json({ profile: await profile(env, session.uid, session.uid), canVerify: admin, feedFilters: true });
+    if (path === '/api/community/me' && req.method === 'GET') {
+      const withFeed = url.searchParams.get('includeFeed') === '1';
+      const [owner, feed] = await Promise.all([
+        profile(env, session.uid, session.uid),
+        withFeed ? postPage(env, new URL('/api/community/posts?compact=1', url), session.uid) : undefined,
+      ]);
+      return json({ profile: owner, canVerify: admin, feedFilters: true, mediaPosts: !!env.COMMUNITY_FILES, activity: true, feed });
+    }
+    if (path === '/api/community/notifications' && req.method === 'GET') return await activity(env, url, session.uid);
+    if (path === '/api/community/notifications/read' && req.method === 'PUT') {
+      const { valor: v, erro } = await lerJson(req, 256);
+      if (erro || !Number.isSafeInteger(v?.through) || v.through < 0) return problem('invalid_activity');
+      await stmt(env, `INSERT INTO community_activity_read(uid,seen_at) VALUES(?,?)
+        ON CONFLICT(uid) DO UPDATE SET seen_at=MAX(seen_at, excluded.seen_at)`, session.uid, Math.min(v.through, Date.now())).run();
+      return json({ ok: true });
+    }
     if (path === '/api/community/me' && req.method === 'PUT') {
       const { valor: v, erro } = await lerJson(req, 4096); if (erro) return problem(erro);
       const username = text(v.username, 24)?.toLowerCase(), name = text(v.name, 50), bio = text(v.bio, 240);
@@ -286,26 +344,53 @@ export async function communityRoute(req, env, ctx, url) {
       }
     }
     if (path === '/api/community/assets' && req.method === 'POST') return await upload(req, env, session, url);
-    if (path === '/api/community/posts' && req.method === 'GET') return await posts(env, url, session.uid);
+    if (path === '/api/community/media' && req.method === 'POST') {
+      if (!(await profile(env, session.uid, session.uid)).username) return problem('profile_required');
+      return await uploadCommunityMedia(req, env, session.uid, url, avatarMime);
+    }
+    if (mediaMatch && req.method === 'DELETE') {
+      const id = mediaMatch[1];
+      const claim = await stmt(env, `DELETE FROM community_media WHERE id=? AND uid=?
+        AND NOT EXISTS(SELECT 1 FROM community_posts WHERE media=?)`, id, session.uid, id).run();
+      if (claim.meta.changes) await deleteCommunityMedia(env, id);
+      return json({ ok: true });
+    }
+    if (path === '/api/community/posts' && req.method === 'GET') {
+      const page = await postPage(env, url, session.uid);
+      return page instanceof Response ? page : json(page);
+    }
     if (path === '/api/community/posts' && req.method === 'POST') {
       const { valor: v, erro } = await lerJson(req, 12000); if (erro) return problem(erro);
-      const body = text(v?.body, 2000), asset = v?.asset ?? null;
+      const body = text(v?.body, 2000), asset = v?.asset ?? null, media = v?.media ?? null;
       const category = v?.category ?? 'standard';
       if (!['standard', 'showcase', 'announcement'].includes(category)) return problem('invalid_post_category');
       if (category === 'announcement' && !admin) return problem('forbidden', 403);
-      if (body === null || (!body && !asset)) return problem('empty_post');
+      if (body === null || (!body && !asset && !media)) return problem('empty_post');
+      if ((asset !== null && (typeof asset !== 'string' || !UUID.test(asset))) ||
+          (media !== null && (typeof media !== 'string' || !UUID.test(media)))) return problem('invalid_attachment');
       const p = await profile(env, session.uid, session.uid); if (!p.username) return problem('profile_required');
       const attachment = asset ? await stmt(env, "SELECT kind FROM community_assets WHERE id=? AND uid=? AND kind IN ('project','preset')", asset, session.uid).first() : null;
       if (asset && !attachment) return problem('invalid_attachment');
       const id = crypto.randomUUID();
-      const storedCategory = category === 'standard' ? attachment?.kind ?? 'text' : category;
-      await stmt(env, 'INSERT INTO community_posts(id,uid,body,asset,created_at,category) VALUES(?,?,?,?,?,?)', id, session.uid, body, asset, Date.now(), storedCategory).run();
+      const storedCategory = category === 'standard' ? attachment?.kind ?? (media ? 'showcase' : 'text') : category;
+      const saved = await stmt(env, `INSERT INTO community_posts(id,uid,body,asset,created_at,category,media)
+        SELECT ?,?,?,?,?,?,? WHERE ? IS NULL OR (EXISTS(SELECT 1 FROM community_media WHERE id=? AND uid=?)
+          AND NOT EXISTS(SELECT 1 FROM community_posts WHERE media=?))`,
+        id, session.uid, body, asset, Date.now(), storedCategory, media, media, media, session.uid, media).run();
+      if (!saved.meta.changes) return problem('invalid_attachment');
       return json({ id }, 201);
     }
     const postMatch = /^\/api\/community\/posts\/([0-9a-f-]{36})(?:\/(like|comments))?$/.exec(path);
     if (postMatch) {
       const [, id, action] = postMatch;
-      const post = await stmt(env, 'SELECT uid FROM community_posts WHERE id=?', id).first();
+      if (!action && req.method === 'GET') {
+        const row = await stmt(env, `${postSelect} WHERE p.id=? AND ${notBlocked('p.uid')} AND ${notHidden('post', 'p.id', 'p.uid')}`,
+          session.uid, id, session.uid, session.uid, session.uid).first();
+        return row ? json(postJson(row)) : problem('not_found', 404);
+      }
+      const post = await stmt(env, `SELECT p.uid, p.media FROM community_posts p WHERE p.id=? AND (
+        ? OR (${notBlocked('p.uid')} AND ${notHidden('post', 'p.id', 'p.uid')}))`,
+        id, !action && req.method === 'DELETE' && admin ? 1 : 0, session.uid, session.uid, session.uid).first();
       if (!post) return problem('not_found', 404);
       if (!action && req.method === 'DELETE') {
         if (post.uid !== session.uid && !admin) return problem('forbidden', 403);
@@ -313,6 +398,7 @@ export async function communityRoute(req, env, ctx, url) {
           stmt(env, 'DELETE FROM community_posts WHERE id=?', id),
           stmt(env, "UPDATE community_reports SET status='removed' WHERE target_kind='post' AND target_id=?", id),
         ]);
+        await deleteCommunityMedia(env, post.media);
         return json({ ok: true });
       }
       if (action === 'like' && ['PUT', 'DELETE'].includes(req.method)) {
@@ -322,18 +408,29 @@ export async function communityRoute(req, env, ctx, url) {
       }
       if (action === 'comments' && req.method === 'GET') {
         const after = cursor(url.searchParams.get('cursor')) ?? [0, ''];
-        const rows = await stmt(env, `SELECT c.*, p.username,p.name,p.avatar,p.verification FROM community_comments c JOIN community_profiles p ON p.uid=c.uid
-          WHERE c.post=? AND (c.created_at>? OR (c.created_at=? AND c.id>?)) AND ${notBlocked('c.uid')} AND ${notHidden('comment', 'c.id', 'c.uid')}
-          ORDER BY c.created_at,c.id LIMIT 30`, id, after[0], ...after, session.uid, session.uid, session.uid).all();
-        const items = rows.results.map(r => ({ id: r.id, body: r.body, createdAt: r.created_at, author: author(r) }));
+        const rows = await stmt(env, `SELECT c.*, p.username,p.name,p.avatar,p.verification,
+          CASE WHEN pc.id IS NOT NULL THEN COALESCE(NULLIF(pa.name,''),pa.username) END AS reply_name
+          FROM community_comments c JOIN community_profiles p ON p.uid=c.uid
+          LEFT JOIN community_comments pc ON pc.id=c.reply_to AND ${notBlocked('pc.uid')} AND ${notHidden('comment', 'pc.id', 'pc.uid')}
+          LEFT JOIN community_profiles pa ON pa.uid=pc.uid
+          WHERE c.post=? AND (c.created_at,c.id) > (?,?) AND ${notBlocked('c.uid')} AND ${notHidden('comment', 'c.id', 'c.uid')}
+          ORDER BY c.created_at,c.id LIMIT 30`, session.uid, session.uid, session.uid, id, ...after, session.uid, session.uid, session.uid).all();
+        const items = rows.results.map(r => ({ id: r.id, body: r.body, createdAt: r.created_at, author: author(r),
+          replyTo: r.reply_name ? r.reply_to : null, replyName: r.reply_name }));
         return json({ items, cursor: nextCursor(items) });
       }
       if (action === 'comments' && req.method === 'POST') {
         const { valor: v, erro } = await lerJson(req, 6000); if (erro) return problem(erro);
-        const body = text(v.body, 1000); if (!body) return problem('empty_comment');
+        const body = text(v?.body, 1000); if (!body) return problem('empty_comment');
+        const replyTo = v?.replyTo ?? null;
+        if (replyTo !== null && (typeof replyTo !== 'string' || !UUID.test(replyTo))) return problem('invalid_reply');
         if (!(await profile(env, session.uid, session.uid)).username) return problem('profile_required');
         const comment = crypto.randomUUID();
-        await stmt(env, 'INSERT INTO community_comments(id,post,uid,body,created_at) VALUES(?,?,?,?,?)', comment, id, session.uid, body, Date.now()).run();
+        const saved = await stmt(env, `INSERT INTO community_comments(id,post,uid,body,created_at,reply_to)
+          SELECT ?,?,?,?,?,? WHERE ? IS NULL OR EXISTS(SELECT 1 FROM community_comments parent WHERE parent.id=?
+            AND parent.post=? AND ${notBlocked('parent.uid')} AND ${notHidden('comment', 'parent.id', 'parent.uid')})`,
+          comment, id, session.uid, body, Date.now(), replyTo, replyTo, replyTo, id, session.uid, session.uid, session.uid).run();
+        if (!saved.meta.changes) return problem('invalid_reply');
         return json({ id: comment }, 201);
       }
     }
@@ -352,11 +449,14 @@ export async function communityRoute(req, env, ctx, url) {
       if (!admin) return problem('forbidden', 403);
       const { valor: v, erro } = await lerJson(req, 256); if (erro || !['removed', 'dismissed'].includes(v?.status)) return problem('invalid_status');
       const [, kind, id] = reportMatch;
+      const deletedMedia = v.status === 'removed' && kind === 'post'
+        ? (await stmt(env, 'SELECT media FROM community_posts WHERE id=?', id).first())?.media : null;
       const updates = [stmt(env, 'UPDATE community_reports SET status=? WHERE target_kind=? AND target_id=?', v.status, kind, id)];
       if (v.status === 'removed' && kind === 'post') updates.push(stmt(env, 'DELETE FROM community_posts WHERE id=?', id));
       if (v.status === 'removed' && kind === 'comment') updates.push(stmt(env, 'DELETE FROM community_comments WHERE id=?', id));
       if (v.status === 'removed' && kind === 'store') updates.push(stmt(env, "UPDATE community_store_items SET status='rejected',review_note='removido por denuncia',updated_at=? WHERE id=?", Date.now(), id));
       await env.AUREA_DB.batch(updates);
+      await deleteCommunityMedia(env, deletedMedia);
       if (v.status === 'removed' && kind === 'mural') await removeMuralPost(env, id);
       return json({ ok: true });
     }

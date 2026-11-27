@@ -629,7 +629,6 @@ final class AureaModel: ObservableObject {
     /// F6: o assunto do painel 3D (Material · Objeto 3D · Rig · Cena 3D); quem abre escolhe.
     @Published var face3D: Face3D = .all
     @Published var showSettings = false
-    @Published var donationPromptPending = true
     /// A folha de geração atual (a doca de painéis, o painel aberto ou o
     /// "adicionar camada").
     ///
@@ -1300,7 +1299,7 @@ final class AureaModel: ObservableObject {
 
     enum Screen { case home, editor, hyper }
     /// `filters`/`adjust` (0.3.0): as telas próprias do modo de edição (EditModeView.swift).
-    enum PanelKind { case none, dock, transform, text, effects, layer3D, exportPanel, appearance, speed, clipEdit, audio, shape, shapeEdit, mask, textAnimation, curve, presets, particles, tracking, captions, vector, filters, adjust,
+    enum PanelKind { case none, dock, transform, text, effects, layer3D, exportPanel, appearance, speed, clipEdit, audio, shape, shapeEdit, mask, textAnimation, curve, presets, particles, tracking, cameraTracking, captions, vector, filters, adjust,
         // Omega aparência (área 05): Borda e sombra e Opções da câmera.
         borderShadow, camera,
         // Omega conteúdo (área 06): o editor de desenho e o Editar pontos.
@@ -2687,6 +2686,7 @@ final class AureaModel: ObservableObject {
             let text = fxLocalizedParam(typeId, index: Int(index), label: row["label"] as? String ?? "", unit: row["unit"] as? String ?? "",
                                         options: row["enumLabels"] as? [String] ?? [])
             let section = (row["section"] as? NSNumber)?.intValue ?? 0
+            let sectionId = row["sectionId"] as? String ?? ""
             return EffectParamItem(flags: (row["flags"] as? NSNumber)?.uint32Value ?? 0, index: index,
                                    type: (row["type"] as? NSNumber)?.uint32Value ?? 0,
                                    label: text.label,
@@ -2701,8 +2701,8 @@ final class AureaModel: ObservableObject {
                                    animated: row["animated"] as? Bool ?? false,
                                    enumLabels: text.options,
                                    section: section,
-                                   sectionId: row["sectionId"] as? String ?? "",
-                                   sectionLabel: fxLocalizedSection(typeId, ordinal: section, label: row["sectionLabel"] as? String ?? ""),
+                                   sectionId: sectionId,
+                                   sectionLabel: fxLocalizedSection(typeId, ordinal: section, sectionId: sectionId, label: row["sectionLabel"] as? String ?? ""),
                                    sectionToggle: (row["sectionToggle"] as? NSNumber)?.intValue ?? -1,
                                    sectionOpen: (row["sectionOpen"] as? NSNumber)?.boolValue ?? true,
                                    tip: fxLocalizedTip(typeId, index: Int(index), tip: row["tip"] as? String ?? ""),
@@ -4610,7 +4610,26 @@ final class AureaModel: ObservableObject {
     }
 
     @Published var cameraFeatures: [Float] = []
-    @Published var cameraTrackerVisible = true
+    @Published private(set) var cameraTrackerProgress: Double?
+    private(set) var cameraTrackerSource: Int64?
+    private var cameraTrackerPoll: Task<Void, Never>?
+
+    func monitorCameraTracker(source: Int64) {
+        cameraTrackerSource = source
+        cameraTrackerPoll?.cancel()
+        cameraTrackerPoll = Task { @MainActor in
+            while !Task.isCancelled {
+                let status = self.engine.cameraTrackingStatus()
+                guard (status["state"] as? NSNumber)?.intValue == 1 else {
+                    self.cameraTrackerProgress = nil
+                    return
+                }
+                let value = (status["progress"] as? NSNumber)?.doubleValue ?? 0
+                if self.cameraTrackerProgress != value { self.cameraTrackerProgress = value }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+        }
+    }
     @Published var cameraSelection: CGRect? = nil
     var cameraSelectionFrame: Int64 = -1
     @Published var cameraMultiSelect = false
@@ -4758,7 +4777,6 @@ final class AureaModel: ObservableObject {
 
     func beginMotionPick(_ tool: UInt32, rectangle: Bool = false, confirm: Bool = false,
                          modelOverride: UInt32? = nil, auto: Bool = false) {
-        cameraTrackerVisible = false
         guard let layer = selectedLayer, layer.kind == 1, !layer.locked, let id = primarySelection else { return }
         guard (engine.motionTrackStatus()["state"] as? NSNumber)?.intValue != 1, landmarkProgress == nil else { return }
         guard !(2...3).contains(tool) || requireHyperSubscription() else { return }
@@ -7913,9 +7931,10 @@ final class AureaModel: ObservableObject {
         guard !targets.isEmpty else { toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar"); return }
         if status.playing != 0 { playPause() }
         let ids = targets.map { NSNumber(value: $0.id) }
-        // A LINHA MAGNÉTICA manda: apagar um trecho dela fecha o buraco mesmo
-        // no modo Composição. Sem nenhum trecho magnético, vale o modo Edição.
-        if ripple ?? (engine.timelineEditMode || targets.contains { $0.magnetic }) { engine.rippleDeleteLayers(ids) }
+        // Na Composição, só linhas magnéticas participam do ripple automático
+        // e apenas enquanto o ímã geral está ligado. Edição tem a fita principal.
+        let closesGap = ripple ?? (engine.timelineEditMode && (uiMode == AureaUiMode.edit || targets.contains { $0.magnetic }))
+        if closesGap { engine.rippleDeleteLayers(ids) }
         else { engine.deleteLayers(ids) }
         clearSelection()
         refreshModel(force: true)
@@ -8452,12 +8471,10 @@ final class AureaModel: ObservableObject {
               let d = engine.layerDetail(layer) else { return }
         let animated = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
         let keyMask = (d["keyAtPlayhead"] as? NSNumber)?.uint32Value ?? 0
-        for (base, values) in [(UInt32(9), anchor), (UInt32(0), position)] {
-            let changes = Dictionary(uniqueKeysWithValues: (0..<3).map { (base + UInt32($0), values[$0]) })
-            if keyTransformGroup(layer, detail: d, changes: changes) { continue }
-            let keyed = (0..<3).contains { animated & (UInt32(1) << (base + UInt32($0))) != 0 }
-            let here = (0..<3).contains { keyMask & (UInt32(1) << (base + UInt32($0))) != 0 }
-            mutate { core in
+        mutate { core in
+            for (base, values) in [(UInt32(9), anchor), (UInt32(0), position)] {
+                let keyed = (0..<3).contains { animated & (UInt32(1) << (base + UInt32($0))) != 0 }
+                let here = (0..<3).contains { keyMask & (UInt32(1) << (base + UInt32($0))) != 0 }
                 if transformLayout(animated: keyed, keyHere: here) {
                     for axis in 0..<3 { core.layoutTransform(layer, property: base + UInt32(axis), value: values[axis]) }
                 } else if keyed {
@@ -8795,10 +8812,20 @@ extension AureaModel {
 // Android (EditorStore.replaceMedia / exportProjectFile / importProjectFile).
 // =============================================================================
 extension AureaModel {
+    func completeVideoSourcePicker(layer: Int64?, result: Result<URL, Error>) {
+        guard let layer else { return }
+        switch result {
+        case .success(let url): replaceMedia(layer: layer, url: url, video: true, verifyUpgrade: true)
+        case .failure(let error): toast = AureaText.t("layer_improve_source_failed", error.localizedDescription)
+        }
+    }
+
     /// "Substituir mídia": copia para Media/ e troca a fonte da camada. Um desfazer.
-    func replaceMedia(layer: Int64, url: URL, video: Bool) {
+    func replaceMedia(layer: Int64, url: URL, video: Bool, verifyUpgrade: Bool = false) {
         guard !importingMedia else { return }
-        importingMedia = true; operationMessage = AureaText.t("ios_importing_media")
+        if verifyUpgrade && exporting { toast = AureaText.t("msg_aguarde_a_exportacao_terminar"); return }
+        importingMedia = true
+        operationMessage = AureaText.t(verifyUpgrade ? "layer_improve_source_checking" : "ios_importing_media")
         let operation = beginProjectOperation()
         let scoped = url.startAccessingSecurityScopedResource()
         let name = url.deletingPathExtension().lastPathComponent
@@ -8810,7 +8837,7 @@ extension AureaModel {
             var failure = ""
             do {
                 let destination = try AureaPaths.importIntoMedia(url)
-                result = video ? importer.replaceLayer(layer, withVideo: destination.path, name: name)
+                result = video ? importer.replaceLayer(layer, withVideo: destination.path, name: name, verifyUpgrade: verifyUpgrade)
                                : importer.replaceLayer(layer, withImageFile: destination.path, name: name)
                 if result < 0 {
                     let raw = importer.lastImportError
@@ -8824,12 +8851,19 @@ extension AureaModel {
                 self.endProjectOperation(operation)
                 self.importingMedia = false
                 if replaced < 0 {
-                    self.toast = AureaText.t("layer_replace_failed", reason.isEmpty ? String(-replaced) : reason)
+                    if verifyUpgrade && replaced == -2 {
+                        self.toast = AureaText.t("layer_improve_source_resolution")
+                    } else if verifyUpgrade && replaced == -13 {
+                        self.toast = AureaText.t("layer_improve_source_mismatch")
+                    } else {
+                        self.toast = AureaText.t(verifyUpgrade ? "layer_improve_source_failed" : "layer_replace_failed",
+                                                 reason.isEmpty ? String(-replaced) : reason)
+                    }
                     return
                 }
                 self.refreshModel(force: true)
                 self.select(layerId: replaced, openOptions: false)
-                self.toast = AureaText.t("layer_media_replaced", name)
+                self.toast = verifyUpgrade ? AureaText.t("layer_improve_source_done") : AureaText.t("layer_media_replaced", name)
                 _ = self.saveProject(writeThumbnail: false)
             }
         }

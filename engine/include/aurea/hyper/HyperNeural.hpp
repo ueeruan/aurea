@@ -65,11 +65,10 @@ void set_model_directory(const std::string& path);
 // --- Medidor -----------------------------------------------------------------
 
 struct NeuralMeter {
-    bool cpuOk = false;            ///< SPAN ×2 deu a referência na CPU (fp32 e fp16 onde a CPU tem)
-    bool cpuInt8Ok = false;        ///< animevideov3 int8 misto ≥ 30 dB do fp32 nesta CPU
+    bool cpuOk = false;            ///< o modelo opcional de limpeza produziu a referência na CPU
     bool vulkanOk = false;         ///< idem no Vulkan (fp32 na conta)
     bool vulkanFp16Ok = false;     ///< idem no Vulkan com conta fp16
-    f32 cpuMsPerTile = 0.0f;       ///< um tile Lite (tile + 2·margem) na CPU, modo rápido
+    f32 cpuMsPerTile = 0.0f;       ///< um tile Lite (tile + 2·margem) na CPU
     f32 vulkanMsPerTile = 0.0f;
     f32 bestMsPerTile = 0.0f;      ///< o que vai para DeviceProfile::liteMsPerTile
     bool bestIsVulkan = false;

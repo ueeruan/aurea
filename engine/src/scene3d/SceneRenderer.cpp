@@ -1359,7 +1359,7 @@ void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
 bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& frame, u32 width, u32 height,
                           u64 frameNumber, FGTexture& outColor, const std::vector<ScenePlane>* planes,
                           const SceneParticleDraw* particles, u32 particleCount, FGTexture* outDepth, FGTexture* outExposureHdr,
-                          Vec2 previewJitterPixels) noexcept {
+                          Vec2 previewJitterPixels, ExposureShadow* exposureShadow) noexcept {
     if (outDepth) *outDepth = FGTexture{};
     if (outExposureHdr) *outExposureHdr = FGTexture{};
     if (frameNumber != statsFrame_) {
@@ -1488,7 +1488,9 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                                                                   : Vec4{l.position, type};
         header.lightColor[i] = Vec4{l.color * l.intensity, l.range};
         header.lightSpot[i] = Vec4{l.direction.normalized(), std::cos(l.outerCone)};
-        header.lightSpot2[i] = Vec4{std::cos(l.innerCone), std::clamp(l.shadowStrength, 0.0f, 1.0f), 0, 0};
+        const f32 cloudCoreRadius = 0.35f * std::max(1.0f, frame.camera.pixelsPerMeter);
+        header.lightSpot2[i] = Vec4{std::cos(l.innerCone), std::clamp(l.shadowStrength, 0.0f, 1.0f), 0,
+                                  cloudCoreRadius * cloudCoreRadius};
     }
     // 0.5.1: sombra de contato: o sol que projeta sombra, ou o primeiro direcional.
     i32 contactSun = -1;
@@ -2103,7 +2105,25 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     const u32 mapSize = std::clamp(std::max(shadowSize_, std::min(frame.shadow.mapResolution, 4096u)), 256u, mapCap);
     Vec4 shadowParams2{};
     f32 shadowBiasDepth = 0.0f;
-    if (shadowLight >= 0) {
+    const bool reuseShadow = [&] {
+        if (!exposureShadow || !exposureShadow->texture.valid() || !exposureShadow->source
+            || exposureShadow->params.w != static_cast<f32>(shadowLight)) return false;
+        if (shadowLight < 0) return true;  // shared cleared depth texel
+        // Quality and lights are fixed across this graph's exposure samples.
+        // Only camera-independent, exactly identical casters can share depth.
+        const auto& source = exposureShadow->source->instances;
+        return std::equal(frame.instances.begin(), frame.instances.end(), source.begin(), source.end(),
+            [](const SceneInstance& current, const SceneInstance& saved) {
+                if (!current.castShadows && !saved.castShadows) return true;
+                return current.castShadows == saved.castShadows
+                    && current.asset.get() == saved.asset.get() && current.assetKey == saved.assetKey
+                    && current.sharedPose && current.sharedPose == saved.sharedPose
+                    && current.replicaOpacity == saved.replicaOpacity && current.holdout == saved.holdout
+                    && current.doubleSided == saved.doubleSided && current.unlitColors == saved.unlitColors
+                    && std::memcmp(current.world.col, saved.world.col, sizeof(current.world.col)) == 0;
+            });
+    }();
+    if (shadowLight >= 0 && !reuseShadow) {
         PipelineHandle shadowPipelines[2][2]{};
         const SceneLight& sl = frame.lights[static_cast<usize>(shadowLight)];
         const Vec3 fwd = sl.direction.normalized();
@@ -2217,15 +2237,22 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             shadowDraws.clear();
         }
     }
-    const bool shadowsOn = !shadowDraws.empty();
+    const bool shadowsOn = reuseShadow ? exposureShadow->params.x > 0.f : !shadowDraws.empty();
     header.shadowMatrix = shadowMatrix;
     header.shadowParams = Vec4{shadowsOn ? static_cast<f32>(pcfTaps) : 0.0f, 1.0f / static_cast<f32>(mapSize),
                                shadowBiasDepth, static_cast<f32>(shadowLight)};
     header.shadowParams2 = shadowParams2;
     // Sem sombra o mapa é 1×1 limpo: o slot de comparação do PBR precisa de uma
     // textura de PROFUNDIDADE (Metal: depth2d; Vulkan: formato com comparação).
-    FGTexture shadowTex{};
-    {
+    FGTexture shadowTex;
+    if (reuseShadow) {
+        shadowTex = exposureShadow->texture;
+        shadowMatrix = exposureShadow->matrix;
+        shadowBiasDepth = exposureShadow->params.z;
+        header.shadowMatrix = exposureShadow->matrix;
+        header.shadowParams = exposureShadow->params;
+        header.shadowParams2 = exposureShadow->params2;
+    } else {
         TextureDesc sd;
         sd.width = sd.height = shadowsOn ? mapSize : 1u;
         sd.format = SurfaceFormat::Depth32F;
@@ -2546,7 +2573,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         }
     }
 
-    {
+    if (!reuseShadow) {
         // Sem sombra: o passe só limpa o mapa 1×1 (nenhum desenho).
         const u32 n = static_cast<u32>(shadowDraws.size());
         ShadowDraw* sl = n ? arena.alloc_array<ShadowDraw>(n) : nullptr;
@@ -2561,7 +2588,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             BufferHandle morph;
         } scap{sl, n, joints, instBuf, morphBuf};
         const SamplerHandle cutoutSampler = shaders_->sampler(CommonSampler::LinearClamp);
-        graph.add_raster_pass_depth("3d-sombra", PassStage::Scene3D, FGTexture{}, LoadOp::DontCare, Vec4{}, shadowTex,
+        const u32 pass = graph.add_raster_pass_depth("3d-sombra", PassStage::Scene3D, FGTexture{}, LoadOp::DontCare, Vec4{}, shadowTex,
                                     LoadOp::Clear, true, 1.0f, [scap, white = white_, cutoutSampler](PassContext& pc) {
             CommandList& c = pc.cmds;
             PipelineHandle bound{};
@@ -2582,6 +2609,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 c.draw_indexed(d.prim->indexCount, std::max(1u, d.instanceCount), d.prim->firstIndex, d.morph ? 0 : d.prim->vertexOffset, 0);
             }
         });
+        if (exposureShadow && pass != kInvalidIndex && !incomplete())
+            *exposureShadow = ExposureShadow{&frame, shadowTex, header.shadowMatrix, header.shadowParams, header.shadowParams2};
     }
 
     // ===== OCLUSÃO AMBIENTE DE TELA (GTAO, 0.4.6) ================================

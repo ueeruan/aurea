@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="caption_star_title">Auto Caption Star</string>
+    <string name="caption_star_setup">Configuração</string>
+    <string name="caption_star_motion">Ritmo</string>
+    <string name="caption_star_cut">Corte seco</string>
+    <string name="caption_star_impact">Estilo Impacto</string>
+    <string name="caption_star_save">Salvar como preset</string>
+    <string name="caption_star_empty_presets">Seus presets salvos aparecem aqui.</string>
+    <string name="caption_star_save_failed">Não foi possível salvar este preset.</string>
+    <string name="caption_star_reflow_failed">Não foi possível reagrupar estas legendas.</string>
+    <string name="caption_star_to_layers">Transformar em camadas</string>
+    <string name="caption_star_to_layers_failed">Não foi possível transformar esta faixa em camadas. Verifique se ela está bloqueada, se outras camadas dependem dela ou se a composição atingiu o limite de camadas.</string>
+</resources>

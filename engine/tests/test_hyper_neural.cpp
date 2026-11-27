@@ -1,20 +1,11 @@
-// =============================================================================
-//  AureaHyper 0.3.2 — as redes Lite/Max (src/hyper/neural/**), no HOST.
-//
-//  O que isto prova: cada modelo carrega e dá a mesma saída duas vezes; o
-//  SPAN ganha do bicúbico em PSNR; o RIFE põe o quadrado no meio; o GFPGAN só
-//  mexe dentro da área do rosto injetado; pular tile parado dá a mesma saída;
-//  o pico de memória fica dentro do orçamento de 32 bits; e imprime ms por
-//  tile/quadro na CPU e no Vulkan (quando o host tem).
-//  O que isto NÃO prova: execução nativa no Android/iOS, NEON/int8 do ARM,
-//  drivers Vulkan de celular, ML Kit/Vision (o detector aqui é injetado).
-// =============================================================================
+// Tests for the optional cleanup, interpolation and face models.
 #include "TestFramework.hpp"
 
 #include "aurea/hyper/HyperNeural.hpp"
 #include "aurea/hyper/HyperStage.hpp"
 
 #include "../src/hyper/neural/NeuralStages.hpp"
+#include "../src/hyper/neural/NeuralRetime.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -73,53 +64,6 @@ std::vector<u8> synthetic_rgb(u32 w, u32 h, u32 seed = 1) {
     return img;
 }
 
-/// Reamostragem cúbica separável (Keys a = −0,5) com antialias na redução
-/// (o "bicúbico" do MATLAB imresize, base do treino do SPAN).
-std::vector<u8> resize_cubic(const std::vector<u8>& src, u32 w, u32 h, u32 W, u32 H) {
-    auto kernel = [](f32 x) {
-        x = std::fabs(x);
-        if (x < 1) return 1.5f * x * x * x - 2.5f * x * x + 1;
-        if (x < 2) return -0.5f * x * x * x + 2.5f * x * x - 4 * x + 2;
-        return 0.0f;
-    };
-    auto pass = [&](const std::vector<f32>& in, u32 iw, u32 ih, u32 ow, bool horizontal) {
-        const u32 n = horizontal ? iw : ih, m = horizontal ? ow : (horizontal ? 0 : ow);
-        const f32 scale = static_cast<f32>(m) / n;
-        const f32 support = scale < 1 ? 2.0f / scale : 2.0f;
-        std::vector<f32> out(static_cast<usize>(horizontal ? ow : iw) * (horizontal ? ih : ow) * 3);
-        for (u32 o = 0; o < m; ++o) {
-            const f32 center = (o + 0.5f) / scale - 0.5f;
-            const int lo = static_cast<int>(std::floor(center - support)), hi = static_cast<int>(std::ceil(center + support));
-            std::vector<std::pair<int, f32>> taps;
-            f32 sum = 0;
-            for (int i = lo; i <= hi; ++i) {
-                const f32 wgt = kernel((i - center) * (scale < 1 ? scale : 1.0f));
-                if (wgt == 0) continue;
-                taps.push_back({std::clamp(i, 0, static_cast<int>(n) - 1), wgt});
-                sum += wgt;
-            }
-            for (auto& t : taps) t.second /= sum;
-            const u32 lines = horizontal ? ih : iw;
-            for (u32 l = 0; l < lines; ++l)
-                for (u32 c = 0; c < 3; ++c) {
-                    f32 acc = 0;
-                    for (auto& t : taps)
-                        acc += t.second * (horizontal ? in[(static_cast<usize>(l) * iw + t.first) * 3 + c]
-                                                      : in[(static_cast<usize>(t.first) * iw + l) * 3 + c]);
-                    if (horizontal) out[(static_cast<usize>(l) * ow + o) * 3 + c] = acc;
-                    else out[(static_cast<usize>(o) * iw + l) * 3 + c] = acc;
-                }
-        }
-        return out;
-    };
-    std::vector<f32> f(src.begin(), src.end());
-    const std::vector<f32> a = pass(f, w, h, W, true);
-    const std::vector<f32> b = pass(a, W, h, H, false);
-    std::vector<u8> out(b.size());
-    for (usize i = 0; i < b.size(); ++i) out[i] = static_cast<u8>(std::clamp(b[i] + 0.5f, 0.0f, 255.0f));
-    return out;
-}
-
 FrameBuffer to_nv12(const std::vector<u8>& rgb, u32 w, u32 h) {
     FrameBuffer fb;
     (void)fb.resize(w, h);
@@ -163,9 +107,9 @@ std::string msg(const Status& s) {
     return std::string(s.message()) + (s.detail().empty() ? "" : ": " + std::string(s.detail()));
 }
 
-std::unique_ptr<HyperStage> prepared(StageKind kind, Path path, UpscaleMode mode, const DeviceProfile& p, const Recipe& recipe,
+std::unique_ptr<HyperStage> prepared_clean(Path path, const DeviceProfile& p, const Recipe& recipe,
                                      u32 w, u32 h, StageFormat& out) {
-    auto stage = neural::make_upscale_stage(kind, path, mode);
+    auto stage = neural::make_clean_stage(path);
     StageFormat in{w, h, 30.0};
     const Status s = stage->prepare(p, recipe, in, out);
     if (!s.ok()) {
@@ -191,15 +135,15 @@ AUREA_TEST(HyperNeural, RegistryHasEveryLiteAndMaxStage) {
     DeviceProfile p = cpu_profile();
     const i32 g = static_cast<i32>(UpscaleMode::General), a = static_cast<i32>(UpscaleMode::Anime);
     for (Path path : {Path::Lite, Path::Max}) {
-        AUREA_CHECK(r.find(StageKind::Upscale, path, g, p) != nullptr);
-        AUREA_CHECK(r.find(StageKind::Upscale, path, a, p) != nullptr);
+        AUREA_CHECK(r.find(StageKind::Upscale, path, g, p) == nullptr);
+        AUREA_CHECK(r.find(StageKind::Upscale, path, a, p) == nullptr);
         AUREA_CHECK(r.find(StageKind::Clean, path, -1, p) != nullptr);
         AUREA_CHECK(r.find(StageKind::Motion, path, -1, p) != nullptr);
     }
     // Face: só com o modelo sob demanda baixado e conferido.
     set_model_directory("");
     AUREA_CHECK(r.find(StageKind::Face, Path::Max, -1, p) == nullptr);
-    AUREA_CHECK_EQ(r.all().size(), static_cast<usize>(10));
+    AUREA_CHECK_EQ(r.all().size(), static_cast<usize>(6));
 }
 
 // 0.3.4 (bugs-034, hyper): nenhum caminho depende do aparelho. A Face só
@@ -215,8 +159,8 @@ AUREA_TEST(HyperNeural, NoStageIsRefusedByDeviceTraits) {
     weak.liteMsPerTile = 5000.0f;
     const i32 g = static_cast<i32>(UpscaleMode::General), a = static_cast<i32>(UpscaleMode::Anime);
     for (Path path : {Path::Lite, Path::Max}) {
-        AUREA_CHECK(r.find(StageKind::Upscale, path, g, weak) != nullptr);
-        AUREA_CHECK(r.find(StageKind::Upscale, path, a, weak) != nullptr);
+        AUREA_CHECK(r.find(StageKind::Upscale, path, g, weak) == nullptr);
+        AUREA_CHECK(r.find(StageKind::Upscale, path, a, weak) == nullptr);
         AUREA_CHECK(r.find(StageKind::Clean, path, -1, weak) != nullptr);
         AUREA_CHECK(r.find(StageKind::Motion, path, -1, weak) != nullptr);
     }
@@ -233,84 +177,12 @@ AUREA_TEST(HyperNeural, MeterChecksReferenceTileOnCpuAndVulkan) {
     std::printf("\n    %s\n    melhor: %.2f ms/tile (%s), tile %u+%u ", m.note.c_str(), m.bestMsPerTile,
                 m.bestIsVulkan ? "Vulkan" : "CPU", m.tile, m.margin);
     AUREA_CHECK(m.cpuOk);
-    AUREA_CHECK(m.cpuInt8Ok);
     AUREA_CHECK(m.bestMsPerTile > 0.0f);
     DeviceProfile applied = p;
     apply_neural_meter(m, applied);
     AUREA_CHECK_NEAR(applied.liteMsPerTile, m.bestMsPerTile, 1e-6f);
     AUREA_CHECK(applied.vulkan == m.bestIsVulkan);
     AUREA_CHECK(!applied.backendNote.empty());
-}
-
-AUREA_TEST(HyperNeural, EveryUpscaleModelLoadsAndIsDeterministic) {
-    const u32 w = 96, h = 64;
-    const auto rgb = synthetic_rgb(w, h, 3);
-    const FrameBuffer in = to_nv12(rgb, w, h);
-    struct Case { StageKind kind; Path path; UpscaleMode mode; u32 scale; const char* what; };
-    const Case cases[] = {
-        {StageKind::Upscale, Path::Lite, UpscaleMode::General, 2, "SPAN x2 CPU rapido"},
-        {StageKind::Upscale, Path::Lite, UpscaleMode::General, 4, "SPAN x4 CPU rapido"},
-        {StageKind::Upscale, Path::Max, UpscaleMode::General, 2, "x4v3+wdn x2"},
-        {StageKind::Upscale, Path::Max, UpscaleMode::General, 4, "x4v3+wdn x4"},
-        {StageKind::Upscale, Path::Lite, UpscaleMode::Anime, 2, "animevideov3 int8 x2"},
-        {StageKind::Upscale, Path::Max, UpscaleMode::Anime, 4, "animevideov3 x4"},
-        {StageKind::Clean, Path::Max, UpscaleMode::General, 1, "clean x4v3/4"},
-    };
-    for (const Case& c : cases) {
-        Recipe recipe;
-        recipe.upscale = c.scale == 1 ? 1 : c.scale;
-        recipe.upscaleMode = c.mode;
-        recipe.denoise = 0.5f;
-        recipe.deblock = c.kind == StageKind::Clean;
-        StageFormat o1{}, o2{};
-        auto s1 = prepared(c.kind, c.path, c.mode, cpu_profile(), recipe, w, h, o1);
-        auto s2 = prepared(c.kind, c.path, c.mode, cpu_profile(), recipe, w, h, o2);
-        AUREA_CHECK(s1 && s2);
-        if (!s1 || !s2) continue;
-        AUREA_CHECK_EQ(o1.width, w * c.scale);
-        AUREA_CHECK_EQ(o1.height, h * c.scale);
-        const RunResult a = run_stage(*s1, in, o1.width, o1.height);
-        const RunResult b = run_stage(*s2, in, o2.width, o2.height);
-        AUREA_CHECK(a.status.ok() && b.status.ok());
-        AUREA_CHECK(a.out.nv12 == b.out.nv12);
-        const auto st = neural::upscale_stage_stats(*s1);
-        std::printf("\n    %-22s %4.0f ms (%u tiles, %s%s)", c.what, a.ms, st.tiles, st.vulkan ? "Vulkan" : "CPU",
-                    st.fastCpu ? " modo rapido (int8 anime / fp16 SPAN)" : "");
-    }
-    std::printf("\n  ");
-}
-
-AUREA_TEST(HyperNeural, SpanBeatsBicubicOnDownscaledImage) {
-    for (u32 scale : {2u, 4u}) {
-        const u32 W = 256, H = 192, w = W / scale, h = H / scale;
-        const auto hr = synthetic_rgb(W, H, 7);
-        const auto lr = resize_cubic(hr, W, H, w, h);
-        const auto bic = resize_cubic(lr, w, h, W, H);
-        const FrameBuffer gt = to_nv12(hr, W, H), bicubic = to_nv12(bic, W, H), in = to_nv12(lr, w, h);
-        Recipe recipe;
-        recipe.upscale = scale;
-        // Lite com int8 (CPU) e Lite fp32 (o mesmo SPAN, pesos fp16) e o Max.
-        StageFormat out{};
-        auto lite = prepared(StageKind::Upscale, Path::Lite, UpscaleMode::General, cpu_profile(), recipe, w, h, out);
-        AUREA_CHECK(lite != nullptr);
-        if (!lite) continue;
-        const RunResult r = run_stage(*lite, in, out.width, out.height);
-        AUREA_CHECK(r.status.ok());
-        auto max = prepared(StageKind::Upscale, Path::Max, UpscaleMode::General, cpu_profile(), recipe, w, h, out);
-        const RunResult m = max ? run_stage(*max, in, out.width, out.height) : RunResult{};
-        const f64 pb = psnr_y(bicubic, gt, 4), ps = psnr_y(r.out, gt, 4), pm = max ? psnr_y(m.out, gt, 4) : 0.0;
-        std::printf("\n    x%u: bicubico %.2f dB, SPAN Lite (CPU) %.2f dB, x4v3 Max %.2f dB", scale, pb, ps, pm);
-        DeviceProfile vk = cpu_profile();
-        vk.vulkan = true;
-        auto lv = prepared(StageKind::Upscale, Path::Lite, UpscaleMode::General, vk, recipe, w, h, out);
-        if (lv && neural::upscale_stage_stats(*lv).vulkan) {
-            const RunResult rv = run_stage(*lv, in, out.width, out.height);
-            std::printf(", SPAN Lite (Vulkan fp16) %.2f dB", psnr_y(rv.out, gt, 4));
-        }
-        AUREA_CHECK(ps > pb);
-        AUREA_CHECK(pm > 20.0);   // GAN (Real-ESRGAN) não otimiza PSNR; só não pode ser lixo
-    }
-    std::printf("\n  ");
 }
 
 AUREA_TEST(HyperNeural, DenoiseStrengthInterpolatesX4v3AndWdnWeights) {
@@ -338,11 +210,11 @@ AUREA_TEST(HyperNeural, TiledOutputMatchesSingleTileWithin8To12PxMargins) {
     const auto rgb = synthetic_rgb(w, h, 11);
     const FrameBuffer in = to_nv12(rgb, w, h);
     Recipe recipe;
-    recipe.upscale = 2;
+    recipe.denoise = 0.5f;
     DeviceProfile whole = cpu_profile();
     whole.tile = 128;   // um tile só: sem costura
     StageFormat out{};
-    auto ref = prepared(StageKind::Upscale, Path::Lite, UpscaleMode::General, whole, recipe, w, h, out);
+    auto ref = prepared_clean(Path::Lite, whole, recipe, w, h, out);
     AUREA_CHECK(ref != nullptr);
     if (!ref) return;
     const RunResult a = run_stage(*ref, in, out.width, out.height);
@@ -350,11 +222,11 @@ AUREA_TEST(HyperNeural, TiledOutputMatchesSingleTileWithin8To12PxMargins) {
         DeviceProfile tiled = cpu_profile();
         tiled.tile = 64;
         tiled.tileMargin = margin;
-        auto t = prepared(StageKind::Upscale, Path::Lite, UpscaleMode::General, tiled, recipe, w, h, out);
+        auto t = prepared_clean(Path::Lite, tiled, recipe, w, h, out);
         const RunResult b = run_stage(*t, in, out.width, out.height);
         const f64 p = psnr_y(a.out, b.out);
         std::printf("\n    tile 64, margem %u px vs tile unico: %.2f dB (%u tiles)", margin, p,
-                    neural::upscale_stage_stats(*t).tiles);
+                    neural::clean_stage_stats(*t).tiles);
         AUREA_CHECK(p > 38.0);
     }
     std::printf("\n  ");
@@ -364,12 +236,12 @@ AUREA_TEST(HyperNeural, StaticTilesAreSkippedAndMatchRecomputedOutput) {
     const u32 w = 192, h = 128;
     auto rgb = synthetic_rgb(w, h, 5);
     Recipe recipe;
-    recipe.upscale = 2;
+    recipe.denoise = 0.5f;
     DeviceProfile p = cpu_profile();
     p.tile = 64;
     p.tileMargin = 8;
     StageFormat out{};
-    auto stage = prepared(StageKind::Upscale, Path::Lite, UpscaleMode::General, p, recipe, w, h, out);
+    auto stage = prepared_clean(Path::Lite, p, recipe, w, h, out);
     AUREA_CHECK(stage != nullptr);
     if (!stage) return;
     const FrameBuffer f0 = to_nv12(rgb, w, h);
@@ -380,12 +252,12 @@ AUREA_TEST(HyperNeural, StaticTilesAreSkippedAndMatchRecomputedOutput) {
     for (usize i = 0; i < noisy.size(); i += 97) noisy[i] = static_cast<u8>(std::clamp(int(noisy[i]) + ((i / 97) % 2 ? 1 : -1), 0, 255));
     const FrameBuffer f1 = to_nv12(noisy, w, h);
     const RunResult r1 = run_stage(*stage, f1, out.width, out.height, 1);
-    const auto st1 = neural::upscale_stage_stats(*stage);
+    const auto st1 = neural::clean_stage_stats(*stage);
     std::printf("\n    parado: %u de %u tiles pulados (%.0f ms; quadro cheio %.0f ms)", st1.skipped, st1.tiles, r1.ms, r0.ms);
     AUREA_CHECK_EQ(st1.skipped, st1.tiles);
     AUREA_CHECK(r1.out.nv12 == r0.out.nv12);
     // A mesma entrada sem pular (etapa nova): dentro da tolerância.
-    auto fresh = prepared(StageKind::Upscale, Path::Lite, UpscaleMode::General, p, recipe, w, h, out);
+    auto fresh = prepared_clean(Path::Lite, p, recipe, w, h, out);
     const RunResult rf = run_stage(*fresh, f1, out.width, out.height, 0);
     const f64 diff = psnr_y(r1.out, rf.out);
     std::printf("\n    pulado vs recalculado: %.2f dB", diff);
@@ -396,43 +268,10 @@ AUREA_TEST(HyperNeural, StaticTilesAreSkippedAndMatchRecomputedOutput) {
         for (u32 x = 4; x < 40; ++x)
             for (u32 c = 0; c < 3; ++c) moved[(static_cast<usize>(y) * w + x) * 3 + c] = 250;
     const RunResult r2 = run_stage(*stage, to_nv12(moved, w, h), out.width, out.height, 2);
-    const auto st2 = neural::upscale_stage_stats(*stage);
+    const auto st2 = neural::clean_stage_stats(*stage);
     std::printf("\n    canto mudou: %u de %u tiles pulados (%.0f ms)\n  ", st2.skipped, st2.tiles, r2.ms);
     AUREA_CHECK(r2.status.ok());
     AUREA_CHECK(st2.skipped >= st2.tiles - 2 && st2.skipped < st2.tiles);
-}
-
-AUREA_TEST(HyperNeural, MemoryPeakStaysUnderThe32BitBudget) {
-    // Perfil de 32 bits: tile 64–96, margem 8, 600 MB livres.
-    DeviceProfile p = cpu_profile();
-    p.abi64 = false;
-    p.tile = 80;
-    p.tileMargin = 8;
-    p.freeRamBytes = 600ull << 20;
-    const u32 w = 640, h = 360;
-    const auto rgb = synthetic_rgb(w, h, 9);
-    const FrameBuffer in = to_nv12(rgb, w, h);
-    for (u32 scale : {2u, 4u}) {
-        Recipe recipe;
-        recipe.upscale = scale;
-        StageFormat out{};
-        auto stage = prepared(StageKind::Upscale, Path::Lite, UpscaleMode::General, p, recipe, w, h, out);
-        AUREA_CHECK(stage != nullptr);
-        if (!stage) continue;
-        const RunResult r = run_stage(*stage, in, out.width, out.height);
-        AUREA_CHECK(r.status.ok());
-        const auto st = neural::upscale_stage_stats(*stage);
-        const u64 fixed = static_cast<u64>(w) * h * 3 + static_cast<u64>(out.width) * out.height * 3 * 2;
-        const u64 budget = neural::inference_budget(p, fixed);
-        std::printf("\n    32 bits x%u: pico %.1f MB (orcamento %.1f MB, %u workers, tile %u+%u%s), %.0f ms/quadro 640x360",
-                    scale, st.peakBytes / 1048576.0, budget / 1048576.0, st.workers, st.tile, st.margin,
-                    st.finalCatmull ? ", rede x2 + FSR x2" : "", r.ms);
-        AUREA_CHECK(st.peakBytes <= budget);
-        AUREA_CHECK(st.tile <= 96 && st.margin <= 12 && st.margin >= 8);
-        AUREA_CHECK(st.workers <= 2);
-        if (scale == 4) AUREA_CHECK(st.finalCatmull);
-    }
-    std::printf("\n  ");
 }
 
 AUREA_TEST(HyperNeural, CleanStageKeepsSizeAndRemovesNoise) {
@@ -448,7 +287,7 @@ AUREA_TEST(HyperNeural, CleanStageKeepsSizeAndRemovesNoise) {
     Recipe recipe;
     recipe.denoise = 1.0f;
     StageFormat out{};
-    auto stage = prepared(StageKind::Clean, Path::Max, UpscaleMode::General, cpu_profile(), recipe, w, h, out);
+    auto stage = prepared_clean(Path::Max, cpu_profile(), recipe, w, h, out);
     AUREA_CHECK(stage != nullptr);
     if (!stage) return;
     AUREA_CHECK(out.width == w && out.height == h);
@@ -520,6 +359,48 @@ AUREA_TEST(HyperNeural, RifePutsTheMovingSquareHalfway) {
         AUREA_CHECK(out == cut);
     }
     std::printf("\n  ");
+}
+
+AUREA_TEST(HyperNeural, FlowRetimeAcceptsSoftwareDecodedChroma) {
+    constexpr u32 width = 128, height = 96;
+    const FrameBuffer a = to_nv12(square_frame(width, height, 20, 30, 24), width, height);
+    const FrameBuffer b = to_nv12(square_frame(width, height, 44, 30, 24), width, height);
+    const FrameView first = a.view(), second = b.view();
+    std::vector<u8> u(width * height / 4), v(u.size()), vu(u.size() * 2);
+    for (usize i = 0; i < u.size(); ++i) {
+        u[i] = first.uv[2 * i];
+        v[i] = first.uv[2 * i + 1];
+        vu[2 * i] = v[i];
+        vu[2 * i + 1] = u[i];
+    }
+    DecodedFrame source, next;
+    source.width = next.width = width;
+    source.height = next.height = height;
+    source.format = PixelFormat::YUV420P;
+    source.planeCount = 3;
+    source.planes[0] = first.y; source.planes[1] = u.data(); source.planes[2] = v.data();
+    source.strides[0] = width;
+    source.strides[1] = source.strides[2] = width / 2;
+    next.format = PixelFormat::NV12;
+    next.planeCount = 2;
+    next.planes[0] = second.y; next.planes[1] = second.uv;
+    next.strides[0] = next.strides[1] = width;
+    AUREA_CHECK(NeuralRetime::supported(source, next));
+    NeuralRetime retime;
+    NeuralRetime::Field planar, swapped;
+    AUREA_CHECK(retime.compute(1, source, next, 0.5f, planar));
+    AUREA_CHECK(!planar.copyA && !planar.copyB && !planar.flow.empty());
+
+    source.format = PixelFormat::NV21;
+    source.planeCount = 2;
+    source.planes[1] = vu.data();
+    source.planes[2] = nullptr;
+    source.strides[1] = width;
+    AUREA_CHECK(NeuralRetime::supported(source, next));
+    AUREA_CHECK(retime.compute(2, source, next, 0.5f, swapped));
+    AUREA_CHECK(swapped.flow == planar.flow && swapped.mask == planar.mask);
+    source.strides[1] = width - 1;
+    AUREA_CHECK(!NeuralRetime::supported(source, next));
 }
 
 AUREA_TEST(HyperNeural, MotionStageFillsRepeatedFramesAtTheMidpoint) {
@@ -645,36 +526,16 @@ AUREA_TEST(HyperNeural, PrintsMsPerFrameOnCpuAndVulkan) {
     for (bool vulkan : {false, true}) {
         DeviceProfile p = cpu_profile();
         p.vulkan = vulkan;
-        struct Case { StageKind kind; Path path; UpscaleMode mode; u32 scale; const char* what; };
-        const Case cases[] = {
-            {StageKind::Upscale, Path::Lite, UpscaleMode::General, 2, "General Lite x2 (SPAN)"},
-            {StageKind::Upscale, Path::Lite, UpscaleMode::General, 4, "General Lite x4 (SPAN)"},
-            {StageKind::Upscale, Path::Max, UpscaleMode::General, 2, "General Max x2 (x4v3)"},
-            {StageKind::Upscale, Path::Lite, UpscaleMode::Anime, 2, "Anime Lite x2"},
-            {StageKind::Upscale, Path::Max, UpscaleMode::Anime, 2, "Anime Max x2"},
-            {StageKind::Clean, Path::Lite, UpscaleMode::General, 1, "Clean Lite (x4v3/4)"},
-        };
-        bool any = false;
-        for (const Case& c : cases) {
-            Recipe recipe;
-            recipe.upscale = c.scale == 1 ? 1 : c.scale;
-            recipe.upscaleMode = c.mode;
-            recipe.denoise = 0.5f;
-            StageFormat out{};
-            auto stage = prepared(c.kind, c.path, c.mode, p, recipe, w, h, out);
-            AUREA_CHECK(stage != nullptr);
-            if (!stage) continue;
-            const auto st0 = neural::upscale_stage_stats(*stage);
-            if (vulkan && !st0.vulkan) { std::printf("\n    Vulkan ausente no host"); break; }
-            any = true;
-            const RunResult r = run_stage(*stage, in, out.width, out.height);
+        Recipe recipe;
+        recipe.denoise = 0.5f;
+        StageFormat fmt{};
+        auto stage = prepared_clean(Path::Lite, p, recipe, w, h, fmt);
+        AUREA_CHECK(stage != nullptr);
+        if (stage && (!vulkan || neural::clean_stage_stats(*stage).vulkan)) {
+            const RunResult r = run_stage(*stage, in, fmt.width, fmt.height);
             AUREA_CHECK(r.status.ok());
-            const auto st = neural::upscale_stage_stats(*stage);
-            std::printf("\n    %-6s %-24s %7.0f ms/quadro 640x360 (%u tiles de %u+%u, %u worker(s)%s, %.1f ms/tile)",
-                        vulkan ? "Vulkan" : "CPU", c.what, r.ms, st.tiles, st.tile, st.margin, st.workers,
-                        st.fastCpu ? ", rapido" : "", r.ms / std::max(1u, st.tiles) * st.workers);
+            std::printf("\n    %-6s Clean Lite: %.0f ms/quadro 640x360", vulkan ? "Vulkan" : "CPU", r.ms);
         }
-        if (!any && vulkan) continue;
         MotionInterpolator interp;
         for (Path path : {Path::Lite, Path::Max}) {
             if (!interp.prepare(p, path, w, h).ok()) continue;

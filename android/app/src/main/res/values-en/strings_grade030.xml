@@ -81,6 +81,12 @@
     <string name="grade_scope_parade">RGB parade</string>
     <string name="grade_scope_vectorscope">Vectorscope</string>
     <string name="fx030_name_color_grade">Color Grade</string>
+    <string name="fx_studio_grade_name">Color Studio</string>
+    <string name="fx_studio_grade_desc">Correct exposure and white balance. Refine color with wheels, curves, and selective adjustments.</string>
+    <string name="fx_studio_look_name">Look Studio</string>
+    <string name="fx_studio_look_desc">Choose a look, adjust its strength, or import a .cube LUT to finish the image.</string>
+    <string name="fx_studio_look_preset">Look preset</string>
+    <string name="fx_studio_look_import_ffx">Import After Effects CC (.ffx)</string>
     <string name="fx030_desc_color_grade">Full color grader: log input, white balance, wheels, curves, HSL, secondary correction, LUT and ready-made looks.</string>
     <string name="grade_log_slog3">S-Log3 (Sony)</string>
     <string name="grade_log_logc3">LogC3 (ARRI)</string>

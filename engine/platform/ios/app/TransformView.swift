@@ -552,7 +552,7 @@ struct TransformView: View {
         if pivot {
             guard let start = PivotDragSession.pivotPoint(model), let drag = PivotDragSession(model: model, pivot: start) else { return }
             model.beginGesture("empurrar o pivô")
-            drag.move(to: start + SIMD2(dx, dy), model: model)
+            drag.move(to: drag.start + SIMD2(dx, dy), model: model)
             model.endGesture()
             return
         }

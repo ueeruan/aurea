@@ -7,6 +7,7 @@
 // aciona. Os painéis são os da Composição.
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// Os níveis do Dock. `root` = nada escolhido; os `*Clip` seguem o tipo do corte.
 enum EditDockLevel: Hashable { case root, audio, text, videoClip, textClip, audioClip, otherClip }
@@ -39,6 +40,8 @@ struct EditModeView: View {
     @State private var renameDraft = ""
     @ScaledMetric(relativeTo: .caption) private var dockLabelSize: CGFloat = 12
     @State private var replaceTarget: LayerItem?
+    @State private var improveSourceTarget: Int64?
+    @State private var pickingBetterSource = false
     /// O corte cujas transições estão abertas (saída, entrada).
     @State private var cut: EditCut?
 
@@ -115,6 +118,10 @@ struct EditModeView: View {
                 replaceTarget = nil
                 if let (url, video) = items.first { model.replaceMedia(layer: target.id, url: url, video: video) }
             }
+        }
+        .fileImporter(isPresented: $pickingBetterSource, allowedContentTypes: [.movie, .video]) { result in
+            model.completeVideoSourcePicker(layer: improveSourceTarget, result: result)
+            improveSourceTarget = nil
         }
     }
 
@@ -204,6 +211,7 @@ struct EditModeView: View {
                     .frame(width: 40, height: 40).background(AureaColors.accentDim, in: Circle())
                     .frame(width: 44, height: 44).contentShape(Rectangle())
             }.buttonStyle(AureaPressStyle(shrink: 0.9))
+                .modifier(PlaybackShortcut(enabled: !model.textModeActive))
                 .accessibilityLabel(AureaText.t(model.status.playing != 0 ? "editor_pausar" : "editor_reproduzir"))
                 .accessibilityIdentifier("edit.play")
         }
@@ -371,6 +379,13 @@ struct EditModeView: View {
             if video { list.append(item("volume", .speaker, "edit_clip_volume") { panel(.audio) }) }
             list += [transform, opacity, duplicate]
             if clip.kind != 12 { list.append(item("replace", .replace, "edit_clip_replace") { replaceTarget = clip }) }
+            if video && !clip.locked {
+                list.append(item("improveSource", .replace, "layer_improve_source") {
+                    if model.status.playing != 0 { model.pause() }
+                    improveSourceTarget = clip.id
+                    pickingBetterSource = true
+                })
+            }
             // 0.4.5: Remover fundo (vídeo/imagem): efeito + análise do clipe.
             if clip.kind == 1 || clip.kind == 2 {
                 list.append(item("bgRemove", .cutout, "bg_remove_action") { model.removeBackground(clip.id) })
@@ -385,7 +400,7 @@ struct EditModeView: View {
                 list.append(item("extract", .extract, "edit_clip_extract_audio") {
                     _ = model.engine.extractAudio(fromLayer: clip.id); model.refreshModel(force: true)
                 })
-                list.append(item("stabilize", .track, "edit_clip_stabilize") { panel(.tracking) })
+                list.append(item("stabilize", .track, "edit_clip_stabilize") { fxOpenEffectTool(.tracking, in: model) })
                 // 1.0.8: Edição automática do clipe (cortes, zoom, sons, música, voz, cor, legendas).
                 list.append(item("autoEdit", .sequence, "autoedit_title") { model.pause(); model.autoEdit.open(clip.id, model: model) })
             }

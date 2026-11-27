@@ -1,0 +1,5 @@
+<resources>
+    <string name="trk_motion_title">मोशन ट्रैकर</string>
+    <string name="trk_video_required">एक वीडियो लेयर चुनें।</string>
+    <string name="trk_back_to_result">नतीजे पर लौटें</string>
+</resources>

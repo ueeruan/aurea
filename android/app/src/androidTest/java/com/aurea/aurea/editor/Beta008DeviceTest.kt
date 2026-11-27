@@ -65,6 +65,42 @@ class Beta008DeviceTest {
     }
     private fun note(text: String) { File(context.filesDir, "beta008-result.txt").appendText(text + "\n") }
 
+    @Test fun sameLengthTypingAndDuplicateKeepLiveTextLabels() {
+        launch("Live text labels")
+        val id = compose.runOnIdle { store.addText(openEditor = false) }
+        assertTrue(id > 0)
+        compose.waitUntil(5000) { store.primary == id }
+        compose.runOnIdle { store.setTextContent("SOL") }
+        compose.waitUntil(5000) { store.layers.single { it.id == id }.name == "SOL" }
+        compose.runOnIdle { store.setTextContent("MAR") }
+        compose.waitUntil(5000) { store.layers.single { it.id == id }.name == "MAR" }
+        compose.runOnIdle { store.duplicateLayers(listOf(id)) }
+        compose.waitUntil(5000) { store.layers.count { it.name == "MAR" } == 2 }
+    }
+
+    @Test fun nearbyPointLightDoesNotWashOutTheCloud() {
+        launch("Cloud volume lighting")
+        val cloud = compose.runOnIdle { store.addShape3D(19) }
+        assertTrue(cloud > 0)
+        compose.waitUntil(10000) { store.layers.any { it.id == cloud } }
+        val engine = store.engineForStress
+        val light = compose.runOnIdle { engine.addLight(1) }
+        assertTrue(light > 0)
+        assertTrue(engine.setLightParam(light, 1, 0f))
+        val dark = capture()
+        assertTrue(engine.setLightParam(light, 1, 8f))
+        val lit = capture()
+        var changed = 0
+        var clipped = 0
+        for (i in lit.indices step 4) {
+            val red = lit[i].toInt() and 255
+            if (abs(red - (dark[i].toInt() and 255)) > 12) changed++
+            if (red >= 250 && (lit[i + 1].toInt() and 255) >= 250 && (lit[i + 2].toInt() and 255) >= 250) clipped++
+        }
+        assertTrue("The cloud must respond to the point light ($changed pixels)", changed > 70)
+        assertTrue("Dense cloud detail must remain below white clipping ($clipped/$changed)", clipped < changed / 3)
+    }
+
     @Test fun tintAndEffectChainsRenderOnImageTextAndExtrudedTextWithoutCrash() {
         launch("008 effects image")
         // Repeat project transitions while the app also saves its thumbnail.
@@ -207,5 +243,32 @@ class Beta008DeviceTest {
         compose.onNodeWithTag("property.light.intensity")
             .assert(hasAnyDescendant(hasText(String.format(java.util.Locale.getDefault(), "%.2f", 3f))))
         note("PASS directional native shadow/intensity controls refresh and undo")
+    }
+
+    @Test fun draggingModelPivotMovesTheMarkerAndPreservesTheModelBounds() {
+        launch("3D pivot drag")
+        val id = compose.runOnIdle { store.addShape3D(0) }
+        assertTrue(id > 0)
+        compose.waitUntil(10000) { store.detail?.kind == 10 && store.detail?.hasWorldCorners == true }
+        compose.runOnIdle {
+            store.setTransform(6, 24f)
+            store.setTransform(7, 37f)
+            store.setTransform(2, -80f)
+        }
+        compose.waitUntil(5000) { store.detail?.rotation?.get(1) == 37f && store.detail?.position?.get(2) == -80f }
+        val corners = store.detail!!.worldCorners.copyOf()
+        val before = compose.runOnIdle { requireNotNull(store.sceneGizmoOf(id)) }
+        compose.onNodeWithTag("layer.panel.moveTransform").performClick()
+        compose.onNodeWithTag("panel.tab.0").performClick()
+        compose.onNodeWithTag("transform.pivot.pad").performTouchInput {
+            down(center)
+            moveBy(Offset(45f, -35f), 16)
+            moveBy(Offset(32f, -29f), 16)
+            up()
+        }
+        compose.waitUntil(5000) { store.gizmo?.let { it[0] > before[0] + 10f && it[1] < before[1] - 10f } == true }
+        assertArrayEquals("Changing the pivot must preserve the projected model", corners, store.detail!!.worldCorners, 0.15f)
+        compose.runOnIdle { store.undo() }
+        compose.waitUntil(5000) { store.gizmo?.let { abs(it[0] - before[0]) < 0.1f && abs(it[1] - before[1]) < 0.1f } == true }
     }
 }

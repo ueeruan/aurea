@@ -66,6 +66,19 @@ Rect snap_to_input(const Rect& region, const LayerImage& in) noexcept {
 // =============================================================================
 // Partes dos objetos 3D (lidas pelo renderer 3D)
 // =============================================================================
+class Spacing3D final : public Effect {
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{effect_keys::kSpacing3D, "3D Spacing", "3D", EffectClass::Domain};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_float("spacing", "Espaçamento", 32.0f, 0.0f, 200.0f, kAnimPct, "%");
+        p.typed_range(0.0f, 1000.0f);
+    }
+    bool is_identity(const EffectEval&) const noexcept override { return true; }
+};
+
 class Part3DTransform final : public Effect {
 public:
     const EffectInfo& info() const noexcept override {
@@ -582,6 +595,7 @@ void register_object3d_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<Part3DTransform>());
     (void)r.add(std::make_unique<Part3DHide>());
     (void)r.add(std::make_unique<Part3DTexture>());
+    (void)r.add(std::make_unique<Spacing3D>());
     (void)r.add(std::make_unique<Shatter3D>());
     (void)r.add(std::make_unique<Stroke3D>());
     register_explode3d_effect(r);   // Explosão (23/11/2026), no fim

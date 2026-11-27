@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="psyko_color_cycles">Циклы цвета</string>
+    <string name="psyko_source_detail">Детали изображения</string>
+    <string name="psyko_blobs_desc">Перекрашивает изображение органическими пятнами с цветами, меняющимися со временем.</string>
+    <string name="psyko_stripes_desc">Перекрашивает изображение направленными полосами с цветами, меняющимися со временем.</string>
+</resources>

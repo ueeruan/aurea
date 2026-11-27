@@ -24,5 +24,5 @@
     <string name="app_export_hevc_to_h264">Este aparelho não tem codificador HEVC para este tamanho: exportando em H.264.</string>
     <!-- 0.4.5: falha depois de a escada (ExportAttempts.hpp) já ter tentado os modos compatíveis.
          %1$d motivo (ExportFailure), %2$d código (Errc), %3$d degrau. Frase inteira, vai depois de app_export_failed. -->
-    <string name="expfail_after_ladder">Também tentamos modos mais compatíveis (H.264, codificador por software e resolução menor) e nenhum funcionou neste aparelho. Código para o suporte: E%1$d-%2$d-%3$d.</string>
+    <string name="expfail_after_ladder">Código para o suporte: E%1$d-%2$d-%3$d.</string>
 </resources>

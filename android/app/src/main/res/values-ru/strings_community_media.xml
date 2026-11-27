@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="social_activity">Уведомления</string>
+    <string name="social_activity_unread">Уведомления, непрочитанных: %1$d</string>
+    <string name="social_activity_empty">Пока нет уведомлений.</string>
+    <string name="social_activity_mark_read">Отметить как прочитанные</string>
+    <string name="social_activity_reply">%1$s ответил на ваш комментарий.</string>
+    <string name="social_activity_announcement">%1$s опубликовал объявление.</string>
+    <string name="social_activity_comment">%1$s оставил комментарий к вашей публикации.</string>
+    <string name="social_attach_media">Добавить фото или видео</string>
+    <string name="social_media_limits">Фото до 8 МБ. Видео MP4 или MOV до 90 МБ.</string>
+    <string name="social_media_error">Не удалось открыть медиафайл.</string>
+    <string name="social_open_post">Открыть публикацию</string>
+    <string name="social_play_video">Воспроизвести видео</string>
+    <string name="social_post_title">Публикация</string>
+    <string name="social_reply">Ответить</string>
+    <string name="social_reply_to">Ответ для %1$s</string>
+    <string name="social_my_profile">Мой профиль</string>
+    <string name="social_feed_options">Настройки ленты</string>
+    <string name="social_media_saved_gallery">Медиафайл сохранён в галерее.</string>
+    <string name="social_media_saved_file">Файл сохранён.</string>
+    <string name="social_media_save_failed">Не удалось сохранить медиафайл.</string>
+</resources>

@@ -46,6 +46,11 @@ using RotoStrokes = std::vector<RotoStroke>;
 
 /// O parâmetro de curva oculto do Rotobrush que guarda os traços.
 inline constexpr u32 kRotoStrokesParam = 11;
+// Both effect types keep strokes at slot 11. The earlier slots are serialized
+// with different layouts and must stay compatible with existing projects.
+inline constexpr u32 kBgRotoViewParam = 5;
+inline constexpr u32 kBgRotoDecontaminateParam = 8;
+inline constexpr u32 kBgRotoEdgeRadiusParam = 9;
 /// Outros parâmetros do Rotobrush que o Roto lê (índices gravados nos
 /// projetos: nunca reordenar; os novos só no fim, depois dos traços).
 inline constexpr u32 kRotoChatterParam = 8;         ///< "Reduzir trepidação" (%)

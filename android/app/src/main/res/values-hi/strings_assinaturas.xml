@@ -2,9 +2,9 @@
 <resources>
     <!-- 16/11/2026: assinaturas; 1.0.9: AureaHyper semanal, mensal e anual (hyper/Paywall.kt, AureaSubscriptions.swift; docs/release/assinaturas.md). -->
     <string name="assinatura_badge">सशुल्क सुविधा</string>
-    <string name="assinatura_intro_efeito">यह इफ़ेक्ट AureaHyper का हिस्सा है। AureaHyper की साप्ताहिक, मासिक या वार्षिक सदस्यता लें और सभी सशुल्क इफ़ेक्ट, 3D टेक्स्ट और Hyper टूल अनलॉक करें।</string>
+    <string name="assinatura_intro_efeito">यह इफ़ेक्ट AureaHyper का हिस्सा है। AureaHyper की साप्ताहिक, मासिक या वार्षिक सदस्यता लें और सभी सशुल्क इफ़ेक्ट और Hyper टूल अनलॉक करें।</string>
     <string name="assinatura_intro_texto3d">3D टेक्स्ट AureaHyper का हिस्सा है। AureaHyper की साप्ताहिक, मासिक या वार्षिक सदस्यता लें और सभी सशुल्क इफ़ेक्ट और Hyper टूल भी अनलॉक करें।</string>
-    <string name="assinatura_intro_hyper">AureaHyper सभी सशुल्क इफ़ेक्ट, 3D टेक्स्ट और Hyper टूल अनलॉक करता है।</string>
+    <string name="assinatura_intro_hyper">AureaHyper सभी सशुल्क इफ़ेक्ट और Hyper टूल अनलॉक करता है।</string>
     <string name="assinatura_so_efeito">सिर्फ़ इस इफ़ेक्ट की सदस्यता लें</string>
     <string name="assinatura_so_texto3d">सिर्फ़ 3D टेक्स्ट की सदस्यता लें</string>
     <string name="assinatura_escolha_plano">अपना AureaHyper प्लान चुनें। हर प्लान सब कुछ अनलॉक करता है।</string>

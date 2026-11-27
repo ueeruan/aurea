@@ -487,6 +487,7 @@ public:
     void defer_until_gpu_done(void (*fn)(void*), void* ctx) noexcept override;
 
     void wait_idle() noexcept override;
+    [[nodiscard]] bool has_pending_gpu_work() const noexcept override;
     [[nodiscard]] Status poll_export_work(Status* completedFailure = nullptr) noexcept override;
     void set_export_pass_split(bool split, u32 passes = 1) noexcept override;
     [[nodiscard]] bool export_pass_split() const noexcept override { return passesPerCommandBuffer_ != 0; }

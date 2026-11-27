@@ -163,6 +163,7 @@ data class PreviewState(
 private const val ERRC_UNSUPPORTED_FORMAT = 17L
 /** Linhas de parâmetro lidas por efeito (o iOS dobra o buffer quando enche; aqui cabe o maior efeito). */
 private const val MAX_EFFECT_PARAM_ROWS = 1024
+private const val MAX_LAYER_NAME_BUFFER = 8 * 1024 * 1024
 /** Quadros que o leitor de sequência do motor abre (media/ImageSequence.hpp). */
 private val SEQUENCE_FRAME_EXTENSIONS = setOf("png", "exr", "tga", "jpg", "jpeg", "bmp")
 /** `aurea::Errc::IoError` / `StorageFull` (TEMP_STORAGE_FULL). */
@@ -937,6 +938,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private var layerCapacity = 256
     private var layerBuffer = directBuffer(layerCapacity * PodLayout.LAYER_ROW_BYTES)
     private var nameBlob = directBuffer(32 * 1024)
+    private var layerNameSnapshot = ByteBuffer.allocate(0)
     private var keyIndexCapacity = 256
     private var keyIndex = directBuffer(keyIndexCapacity * KeyframeSnapshot.INDEX_BYTES)
     private var allKeysCapacity = 4096
@@ -1867,19 +1869,30 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             // Cheio = pode haver mais: dobra e pergunta de novo. Nomes perto do fim
             // do blob (o motor pula o que não cabe) também dobram o blob.
             var used = 0
+            var namesFull = false
             for (i in 0 until n) {
                 val b = i * PodLayout.LAYER_ROW_BYTES
                 used = max(used, layerBuffer.getInt(b + PodLayout.LAYER_OFF_NAME_OFFSET) + layerBuffer.getInt(b + PodLayout.LAYER_OFF_NAME_LENGTH))
+                namesFull = namesFull || layerBuffer.getInt(b + PodLayout.LAYER_OFF_RESERVED0) and PodLayout.LAYER_NAME_BUFFER_FULL != 0
             }
             val full = n >= layerCapacity
-            val namesFull = used > nameBlob.capacity() * 3 / 4
-            if (!full && !namesFull) return List(n) { LayerRow.read(layerBuffer, it, nameBlob) }
+            if (!full && (!namesFull || nameBlob.capacity() >= MAX_LAYER_NAME_BUFFER)) {
+                layerNameSnapshot = snapshotLayerNames(nameBlob, used, layerNameSnapshot)
+                return List(n) { LayerRow.read(layerBuffer, it, layerNameSnapshot) }
+            }
             if (full) {
                 layerCapacity *= 2
                 layerBuffer = directBuffer(layerCapacity * PodLayout.LAYER_ROW_BYTES)
             }
-            if (namesFull || full) nameBlob = directBuffer(nameBlob.capacity() * 2)
+            if (namesFull && nameBlob.capacity() < MAX_LAYER_NAME_BUFFER) nameBlob = directBuffer(nameBlob.capacity() * 2)
         }
+    }
+
+    private fun snapshotLayerNames(blob: ByteBuffer, used: Int, previous: ByteBuffer? = null): ByteBuffer {
+        if (previous != null && previous.capacity() == used && (0 until used).all { previous.get(it) == blob.get(it) }) return previous
+        val bytes = ByteArray(used)
+        blob.duplicate().get(bytes)
+        return ByteBuffer.wrap(bytes).asReadOnlyBuffer()
     }
 
     /** Keyframes de todas as camadas numa consulta; devolve se o mapa mudou. */
@@ -4506,19 +4519,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     // --- Camadas ------------------------------------------------------------
     fun deleteLayers(ids: Collection<Long> = editingSelection, ripple: Boolean? = null) {
-        val targets = editingLayers.filter { it.id in ids && !it.locked }.map { it.id }
+        val targets = editingLayers.filter { it.id in ids && !it.locked }
         if (targets.isEmpty()) return
         if (playing) pause()
-        // A LINHA MAGNÉTICA manda: apagar um trecho dela fecha o buraco mesmo
-        // no modo Composição. Sem nenhum trecho magnético na seleção, vale o
-        // modo Edição de sempre.
-        val closes = ripple ?: (editMode || editingLayers.any { it.id in ids && it.magnetic })
+        // Na Composição, só linhas magnéticas participam do ripple automático
+        // e apenas enquanto o ímã geral está ligado. Edição tem a fita principal.
+        val closes = ripple ?: (engine.editMode() && (uiMode == UI_MODE_EDIT || targets.any { it.magnetic }))
         if (closes) {
             // Modo Edição: some e o buraco fecha (um passo de desfazer).
-            engine.rippleDelete(targets.toLongArray())
+            engine.rippleDelete(targets.map { it.id }.toLongArray())
             refreshNow()
         } else {
-            group("apagar") { targets.forEach { deleteLayer(it) } }
+            group("apagar") { targets.forEach { deleteLayer(it.id) } }
         }
         clearSelection()
     }
@@ -5105,11 +5117,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = layer ?: return
         if (anchor.size != 3 || position.size != 3 || anchor.any { !it.isFinite() } || position.any { !it.isFinite() }) return
         val d = (if (id == primary) detail else detailOf(id)) ?: return
-        for ((base, values) in listOf(TrackProperty.ANCHOR_X to anchor, TrackProperty.POSITION_X to position)) {
-            if (keyTransformGroup(id, d, (0..2).associate { base + it to values[it] })) continue
-            val animated = (0..2).any { d.isAnimated(base + it) }
-            val keyHere = (0..2).any { d.hasKeyAtPlayhead(base + it) }
-            send {
+        send {
+            for ((base, values) in listOf(TrackProperty.ANCHOR_X to anchor, TrackProperty.POSITION_X to position)) {
+                val animated = (0..2).any { d.isAnimated(base + it) }
+                val keyHere = (0..2).any { d.hasKeyAtPlayhead(base + it) }
                 when (transformWrite(sceneEditor, autoKeyTransforms, animated, keyHere)) {
                     // Como `setScale3`: o vetor inteiro no cabeçote (Z incluso).
                     TransformWrite.Keyframe -> (0..2).forEach { gestureKeyframe(id, base + it, values[it], gestureKeyFlags(wholeGroup = true)) }
@@ -6845,6 +6856,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         applyGizmoComponents(id, d, base, current, values)
     }
     fun previewGestureBasis(id: Long): FloatArray? = engine.previewGestureBasis(id)
+    internal fun pivotDragBasis(id: Long): FloatArray? = engine.pivotDragBasis(id)
     /** Trackball do gizmo de girar (TrackballStage.kt). */
     fun queryTrackball(id: Long): FloatArray? = engine.queryTrackball(id)
 
@@ -7153,7 +7165,6 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun beginMotionPick(tool: Int, rectangle: Boolean = false, confirm: Boolean = false,
                         modelOverride: Int? = null, auto: Boolean = false) {
-        cameraTrackerVisible = false
         val id = primary ?: return
         val source = layers.firstOrNull { it.id == id }
         if (source?.kind != com.aurea.aurea.ui.theme.LayerType.Video.kind) {
@@ -8050,6 +8061,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         private set
     private var cameraTrackPoll: kotlinx.coroutines.Job? = null
     private var cameraTrackLayer: Long? = null
+    val selectedCameraTrack get() = cameraTrack.takeIf { cameraTrackLayer == primary }
     var cameraMultiSelect by mutableStateOf(false)
     var cameraTargetMode by mutableStateOf(true)
     var cameraTarget by mutableStateOf<FloatArray?>(null)
@@ -8095,7 +8107,6 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var cameraSelectionFrame: Long = -1
     var cameraFeatures by mutableStateOf<FloatArray?>(null)
         private set
-    var cameraTrackerVisible by mutableStateOf(true)
     private val featureBuf = FloatArray(6 * 1500)
 
     /** Chamado a cada atualização: mostra os pontos enquanto o painel de rastreio está aberto. */
@@ -10240,21 +10251,25 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         while (true) {
             val n = max(0, engine.queryGroupLayers(group, groupRowBuffer, capacity, groupNameBlob))
             var used = 0
+            var namesFull = false
             for (i in 0 until n) {
                 val b = i * PodLayout.LAYER_ROW_BYTES
                 used = max(used, groupRowBuffer.getInt(b + PodLayout.LAYER_OFF_NAME_OFFSET) + groupRowBuffer.getInt(b + PodLayout.LAYER_OFF_NAME_LENGTH))
+                namesFull = namesFull || groupRowBuffer.getInt(b + PodLayout.LAYER_OFF_RESERVED0) and PodLayout.LAYER_NAME_BUFFER_FULL != 0
             }
             val full = n >= capacity
-            val namesFull = used > groupNameBlob.capacity() * 3 / 4
-            if (!full && !namesFull) return List(n) {
-                GroupInnerRow(group, LayerRow.read(groupRowBuffer, it, groupNameBlob),
-                    groupRowBuffer.getInt(it * PodLayout.LAYER_ROW_BYTES + PodLayout.LAYER_OFF_RESERVED0) and 1 != 0)
+            if (!full && (!namesFull || groupNameBlob.capacity() >= MAX_LAYER_NAME_BUFFER)) {
+                val names = snapshotLayerNames(groupNameBlob, used)
+                return List(n) {
+                    GroupInnerRow(group, LayerRow.read(groupRowBuffer, it, names),
+                        groupRowBuffer.getInt(it * PodLayout.LAYER_ROW_BYTES + PodLayout.LAYER_OFF_RESERVED0) and 1 != 0)
+                }
             }
             if (full) {
                 capacity *= 2
                 groupRowBuffer = directBuffer(capacity * PodLayout.LAYER_ROW_BYTES)
             }
-            if (namesFull || full) groupNameBlob = directBuffer(groupNameBlob.capacity() * 2)
+            if (namesFull && groupNameBlob.capacity() < MAX_LAYER_NAME_BUFFER) groupNameBlob = directBuffer(groupNameBlob.capacity() * 2)
         }
     }
 
@@ -11465,17 +11480,28 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * keyframes, efeitos, máscaras e tempo ficam; vídeo mais curto encurta o
      * fim). Um passo de desfazer, feito pelo motor.
      */
-    fun replaceMedia(layer: Long, uri: Uri) {
+    fun replaceMedia(layer: Long, uri: Uri, verifyUpgrade: Boolean = false) {
         if (!acceptsImport()) return
         takePermission(uri)
         val app = getApplication<Application>()
         val mime = runCatching { app.contentResolver.getType(uri) }.getOrNull().orEmpty()
-        val name = displayName(uri) ?: appText(if (mime.startsWith("video/")) R.string.target_video else R.string.target_image)
-        busyMessage = appText(R.string.layer_replacing_media)
+        val video = verifyUpgrade || mime.startsWith("video/")
+        val name = displayName(uri) ?: appText(if (video) R.string.target_video else R.string.target_image)
+        busyMessage = appText(if (verifyUpgrade) R.string.layer_improve_source_checking else R.string.layer_replacing_media)
         launchImport launch@{
             val id = withContext(Dispatchers.IO) {
+                if (verifyUpgrade) {
+                    val file = copyIntoApp(uri, deduplicate = false) ?: return@withContext -ERRC_IO.toLong()
+                    var result = -ERRC_IO.toLong()
+                    try {
+                        result = engine.replaceLayerVideo(layer, file.absolutePath, name, verifyUpgrade = true)
+                        return@withContext result
+                    } finally {
+                        if (result < 0) file.delete()
+                    }
+                }
                 val source = durableSource(uri)
-                if (mime.startsWith("video/")) {
+                if (video) {
                     engine.replaceLayerVideo(layer, source, name)
                 } else {
                     val orientation = AureaEngine.exifOrientation(app, uri)
@@ -11490,13 +11516,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
             busyMessage = null
             if (id < 0) {
-                errorMessage = appText(R.string.layer_replace_failed, humanError((-id).toInt()))
+                val code = (-id).toInt()
+                errorMessage = if (verifyUpgrade) when (code) {
+                    2 -> appText(R.string.layer_improve_source_resolution)
+                    13 -> appText(R.string.layer_improve_source_mismatch)
+                    else -> appText(R.string.layer_improve_source_failed, humanError(code))
+                } else appText(R.string.layer_replace_failed, humanError(code))
                 return@launch
             }
             thumbnails.clear()
             refreshNow()
             select(id)
-            showToast(appText(R.string.layer_media_replaced, name))
+            showToast(if (verifyUpgrade) appText(R.string.layer_improve_source_done) else appText(R.string.layer_media_replaced, name))
         }
     }
 
@@ -11678,14 +11709,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun copyIntoApp(uri: Uri): File? {
+    private fun copyIntoApp(uri: Uri, deduplicate: Boolean = true): File? {
         val app = getApplication<Application>()
         val dir = File(app.filesDir, "projetos/import-sources").apply { mkdirs() }
         val ext = (displayName(uri) ?: uri.lastPathSegment)?.substringAfterLast('.', "")?.lowercase(java.util.Locale.ROOT)
             ?.takeIf { it.length in 1..5 && it.all(Char::isLetterOrDigit) }
-        val tmp = File(dir, "copy-${System.nanoTime()}.tmp")
+        val stamp = System.nanoTime()
+        val tmp = File(dir, "copy-$stamp.tmp")
         return try {
-            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            val digest = if (deduplicate) java.security.MessageDigest.getInstance("SHA-256") else null
             var bytes = 0L
             val input = app.contentResolver.openInputStream(uri) ?: return null
             input.use { source ->
@@ -11694,17 +11726,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     while (true) {
                         val n = source.read(buffer)
                         if (n < 0) break
-                        out.write(buffer, 0, n); digest.update(buffer, 0, n); bytes += n
+                        out.write(buffer, 0, n); digest?.update(buffer, 0, n); bytes += n
                     }
                     out.fd.sync()
                 }
             }
             if (bytes == 0L) { tmp.delete(); return null }
             // Mesmo conteúdo importado de novo reaproveita a cópia.
-            val hex = digest.digest().take(8).joinToString("") { "%02x".format(it) }
-            val target = File(dir, "$hex-$bytes" + (ext?.let { ".$it" } ?: ""))
+            val name = digest?.digest()?.take(8)?.joinToString("") { "%02x".format(it) } ?: "source-$stamp"
+            val target = File(dir, "$name-$bytes" + (ext?.let { ".$it" } ?: ""))
             when {
-                target.length() == bytes -> { tmp.delete(); target }
+                deduplicate && target.length() == bytes -> { tmp.delete(); target }
                 tmp.renameTo(target) -> target
                 else -> { tmp.delete(); null }
             }
@@ -12578,7 +12610,7 @@ internal const val LAYER_KIND_GROUP = 12
 /** 0.5.3: uma camada de DENTRO de um grupo aberto na timeline (o id só vale com [group]). */
 class GroupInnerRow(val group: Long, val row: LayerRow, val editable: Boolean) {
     override fun equals(other: Any?): Boolean = other is GroupInnerRow && other.group == group &&
-        other.editable == editable && LayerRow.sameRows(listOf(row), listOf(other.row))
+        other.editable == editable && row.sameAs(other.row)
     override fun hashCode(): Int = (group * 31 + row.id).hashCode()
 }
 

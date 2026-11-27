@@ -167,7 +167,12 @@ class HyperFlow internal constructor(
 
     private fun unpack(v: DoubleArray): HyperRecipe? {
         if (v.size < HyperRecipe.PACKED_SIZE) return null
-        return HyperRecipe(upscale = v[0].toInt(), upscaleMode = if (v[1] >= 0.5) HyperUpscaleMode.Anime else HyperUpscaleMode.General,
+        val mode = when {
+            v[1] == 2.0 -> HyperUpscaleMode.Enchance
+            v[1] >= 0.5 -> HyperUpscaleMode.Anime
+            else -> HyperUpscaleMode.General
+        }
+        return HyperRecipe(upscale = v[0].toInt(), upscaleMode = mode,
             denoise = v[2].toFloat(), deblock = v[3] >= 0.5, deinterlace = v[4].toInt(), face = v[5] >= 0.5, faceStrength = v[6].toFloat(),
             targetFps = v[7], slowMotion = v[8].toInt(), stabilize = v[9] >= 0.5, stabilizeStrength = v[10].toFloat(),
             stabilizeToKeyframes = v[11] >= 0.5, path = HyperPath.of(v[12].toInt()))

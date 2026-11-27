@@ -22,7 +22,7 @@
     <string name="hyper_adjust_stable_on">تثبيت</string>
     <string name="hyper_adjust_strength">الشدة</string>
     <string name="hyper_adjust_target_fps">إطارات في الثانية</string>
-    <string name="hyper_adjust_upscale">الدقة</string>
+    <string name="hyper_adjust_upscale">Aurea Detail</string>
     <string name="hyper_always">دائمًا</string>
     <string name="hyper_audio_muted">الحركة البطيئة: يخرج الفيديو بلا صوت (لا يُمدَّد الصوت).</string>
     <string name="hyper_back_to_preview">العودة إلى المعاينة</string>
@@ -56,7 +56,7 @@
     <string name="hyper_feature_motion">60 إطارًا في الثانية وحركة بطيئة ×2 أو ×4 أو ×8 بإطارات جديدة</string>
     <string name="hyper_feature_offline">كل شيء على الجهاز: لا يُرسل الفيديو إلى أي مكان</string>
     <string name="hyper_feature_stable">تثبيت الصورة، مع خيار حفظه كإطارات مفتاحية</string>
-    <string name="hyper_feature_upscale">تكبير ×2 أو ×4 (فيديو حقيقي أو أنمي)</string>
+    <string name="hyper_feature_upscale">يحافظ Aurea Detail على الحجم الأصلي أو يكبّره بمقدار 2× أو 4×.</string>
     <string name="hyper_frames">الإطار %1$d من %2$d</string>
     <string name="hyper_keep">إبقاء</string>
     <string name="hyper_locked_badge">اشتراك شهري</string>
@@ -66,7 +66,7 @@
     <string name="hyper_locked_intro">يرمّم AureaHyper الفيديوهات ويحسّنها على جهازك نفسه: وضوح أكبر، تشويش أقل، إطارات أكثر وصورة ثابتة.</string>
     <string name="hyper_locked_not_owned">هذا الحساب لا يتضمن AureaHyper بعد.</string>
     <string name="hyper_locked_offline">تعذّر تأكيد الوصول الآن. اتصل بالإنترنت وحاول مرة أخرى.</string>
-    <string name="hyper_locked_payment_note">اشتراك شهري مرتبط بحسابك في Aurea. يفتح AureaHyper أيضًا كل التأثيرات المدفوعة والنص ثلاثي الأبعاد.</string>
+    <string name="hyper_locked_payment_note">اشتراك شهري مرتبط بحسابك في Aurea. يفتح AureaHyper أيضًا كل التأثيرات المدفوعة.</string>
     <string name="hyper_locked_signed_out">سجّل الدخول إلى حسابك في Aurea للتحقق مما إذا كان يتضمن AureaHyper.</string>
     <string name="hyper_measure_again">قِس الجهاز مرة أخرى</string>
     <string name="hyper_meter_almost">أوشك على الانتهاء…</string>
@@ -91,13 +91,15 @@
     <string name="hyper_path_turbo">Turbo</string>
     <string name="hyper_path_turbo_body">الأسرع، على وحدة الرسوميات. يعمل على أي جهاز.</string>
     <string name="hyper_preset_anime">أنمي</string>
-    <string name="hyper_preset_anime_body">يضاعف الدقة بالشبكة المخصصة للرسوم المتحركة والأنمي.</string>
+    <string name="hyper_preset_anime_body">يكبّر الرسوم المتحركة والأنمي مع حواف أكثر وضوحًا.</string>
     <string name="hyper_preset_fps60">60 إطارًا/ث</string>
     <string name="hyper_preset_fps60_body">ينشئ إطارات بين الإطارات الأصلية لحركة أكثر سلاسة.</string>
     <string name="hyper_preset_restore">ترميم فيديو قديم</string>
     <string name="hyper_preset_restore_body">يزيل التشويش والكتل، ويصلح التشابك، ويضاعف الدقة ويحسّن الوجوه.</string>
-    <string name="hyper_preset_sharper">أوضح</string>
-    <string name="hyper_preset_sharper_body">يرفع الدقة بتفاصيل جديدة.</string>
+    <string name="hyper_preset_sharper">Aurea Detail</string>
+    <string name="hyper_preset_sharper_body">يعزّز التفاصيل ويحسّن الحواف في تمريرة واحدة على وحدة الرسومات.</string>
+    <string name="hyper_preset_enchance">AureaEnchance</string>
+    <string name="hyper_preset_enchance_body">يعيد بناء التفاصيل بتكبير 2× باستخدام مرشحات مدرَّبة على وحدة الرسومات.</string>
     <string name="hyper_preset_slowmo">حركة بطيئة</string>
     <string name="hyper_preset_slowmo_body">يبطئ الفيديو بإنشاء إطارات جديدة، دون تقطّع.</string>
     <string name="hyper_preset_stabilize">تثبيت</string>
@@ -126,7 +128,7 @@
     <string name="hyper_step_of">%1$d من %2$d</string>
     <string name="hyper_step_prepare">التحضير</string>
     <string name="hyper_step_stable">التثبيت</string>
-    <string name="hyper_step_upscale">رفع الدقة</string>
+    <string name="hyper_step_upscale">Aurea Detail</string>
     <string name="hyper_time_hours">%1$d س %2$d د</string>
     <string name="hyper_time_left">متبقٍّ %1$s</string>
     <string name="hyper_time_minutes">%1$d د</string>
@@ -146,4 +148,5 @@
     <string name="licenses_oss_intro">يستخدم Aurea برامج ونماذج مفتوحة المصدر. اضغط على عنصر لقراءة الترخيص كما هو مرفق بالتطبيق.</string>
     <string name="licenses_oss_title">تراخيص المصادر المفتوحة</string>
     <string name="licenses_read_failed">تعذّرت قراءة هذا الملف.</string>
+    <string name="hyper_detail_same_size">نفس الحجم</string>
 </resources>

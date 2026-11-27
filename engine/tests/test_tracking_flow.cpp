@@ -20,6 +20,7 @@
 #include "aurea/tracking/MotionGeometry.hpp"
 #include "aurea/tracking/MotionTrackData.hpp"
 #include "aurea/tracking/CameraTrackData.hpp"
+#include "aurea/tracking/TrackerEffects.hpp"
 #include "../src/tracking/AnalysisDecode.hpp"
 
 #if defined(AUREA_TEST_VULKAN)
@@ -313,6 +314,33 @@ bool walking_detail(f64 t, f64& x, f64& y) {
 }
 
 } // namespace
+
+AUREA_TEST(TrackingFlow, CameraAndMotionEffectsCanShareTheSameVideoWithoutRenderPasses) {
+    FlowScene scene;
+    FlowFactory factory(scene);
+    Rig rig(factory, 640, 360, 30);
+    AUREA_CHECK(rig.ok);
+    if (!rig.ok) return;
+    const auto camera = effect_type_id(kCameraTrackerEffect);
+    const auto motion = effect_type_id(kMotionTrackerEffect);
+    Command add;
+    add.type = CommandType::EffectAdd;
+    add.effect_add.layer = LayerId::unpack(rig.video);
+    add.effect_add.index = kInvalidIndex;
+    for (const auto type : {camera, motion, camera}) {
+        add.effect_add.effectType = type;
+        AUREA_CHECK(rig.e.apply_command(add).ok());
+    }
+    const Layer* layer = rig.layer(rig.video);
+    AUREA_CHECK(layer && layer->effects.size() == 2);
+    if (!layer || layer->effects.size() != 2) return;
+    AUREA_CHECK_EQ(layer->effects[0].type, camera);
+    AUREA_CHECK_EQ(layer->effects[1].type, motion);
+    for (const auto type : {camera, motion}) {
+        const Effect* effect = rig.e.effects().find(type);
+        AUREA_CHECK(effect && effect->is_identity(EffectEval{}));
+    }
+}
 
 // =============================================================================
 // Ponto: escolhido no cabeçote, seguido até o fim, vira Nulo e alvo

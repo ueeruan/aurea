@@ -61,6 +61,9 @@
     <string name="ae_reason_param_unknown">parameter with no Aurea equivalent (the rest of the effect was imported)</string>
     <string name="ae_reason_media_missing">source file missing; relink the original media or import a package that includes it</string>
     <string name="ae_reason_text_document">the AE text still needs to be filled in</string>
+    <string name="ae_reason_looks_invalid">This Looks effect contains incomplete or invalid data.</string>
+    <string name="ae_reason_looks_missing">Looks data is missing or uses a version that Aurea doesn’t yet support.</string>
+    <string name="ae_reason_looks_tool_partial">Conversion is partial or unavailable for this Looks setting.</string>
     <string name="ae_reason_params_approx">approximate parameters: what Aurea can’t read from the plugin uses Aurea’s defaults</string>
     <string name="ae_reason_params_doc_order">parameters follow the AE documentation order</string>
     <string name="ae_reason_curve_defaults">approximate curve: AE points aren’t read; the curve came in neutral for you to adjust</string>

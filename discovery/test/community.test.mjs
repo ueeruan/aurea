@@ -11,7 +11,12 @@ async function fixture() {
   const files = new Map();
   env.COMMUNITY_FILES = {
     async put(id, data) { const bytes = data instanceof ReadableStream ? new Uint8Array(await new Response(data).arrayBuffer()) : data; files.set(id, bytes); return { size: bytes.length }; },
-    async get(id) { const bytes = files.get(id); return bytes && { body: bytes, size: bytes.length }; },
+    async head(id) { const bytes = files.get(id); return bytes && { size: bytes.length }; },
+    async get(id, options) {
+      const bytes = files.get(id);
+      const range = options?.range;
+      return bytes && { body: range ? bytes.subarray(range.offset, range.offset + range.length) : bytes, size: bytes.length };
+    },
     async delete(id) { files.delete(id); },
   };
   const users = [];
@@ -30,6 +35,85 @@ async function fixture() {
   for (let i = 0; i < 3; ++i) assert.equal((await call('/me', i, 'PUT', { username: `person_${i}`, name: `Person ${i}`, bio: 'Bio' })).status, 200);
   return { env, users, call, files };
 }
+test('community media stays private before publishing, supports ranges and is removed with the post', async () => {
+  const { env, users, call, files } = await fixture();
+  const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+  async function send(kind, name, bytes) {
+    const req = new Request(`https://test.local/api/community/media?kind=${kind}&name=${name}`, {
+      method: 'POST', headers: { authorization: `Bearer ${users[1].token}`, 'content-length': String(bytes.length) }, body: bytes,
+    });
+    return communityRoute(req, env, {}, new URL(req.url));
+  }
+  async function media(id, options) {
+    const req = new Request(`https://test.local/api/community/media/${id}`, options);
+    return communityRoute(req, env, {}, new URL(req.url));
+  }
+  assert.equal((await send('image', 'bad.png', Buffer.alloc(100))).status, 400);
+  assert.equal((await send('video', 'bad.mp4', Buffer.alloc(100))).status, 400);
+  const imageUpload = await send('image', 'frame.png', image);
+  assert.equal(imageUpload.status, 201);
+  const { id } = await imageUpload.json();
+  assert.equal((await media(id)).status, 404);
+  assert.equal((await call('/posts', 2, 'POST', { body: '', media: id })).status, 400);
+  const post = await call('/posts', 1, 'POST', { body: '', media: id });
+  assert.equal(post.status, 201);
+  assert.equal((await call('/posts', 1, 'POST', { body: '', media: id })).status, 400);
+  assert.equal((await call('/posts/' + post.data.id, 2)).data.media.id, id);
+  assert.deepEqual(Buffer.from(await (await media(id)).arrayBuffer()), image);
+  const part = await media(id, { headers: { range: 'bytes=2-5' } });
+  assert.equal(part.status, 206);
+  assert.deepEqual(Buffer.from(await part.arrayBuffer()), image.subarray(2, 6));
+  assert.equal((await media(id, { method: 'HEAD' })).headers.get('content-length'), String(image.length));
+  assert.equal((await call('/posts/' + post.data.id, 1, 'DELETE')).status, 200);
+  assert.equal((await media(id)).status, 404);
+  assert.equal(files.size, 0);
+  const clip = Buffer.alloc(1024); clip.write('ftypisom', 4);
+  const video = await send('video', 'clip.mp4', clip);
+  assert.equal(video.status, 201);
+  const pending = (await video.json()).id;
+  await call('/media/' + pending, 2, 'DELETE');
+  assert.equal(files.size, 1);
+  await call('/media/' + pending, 1, 'DELETE');
+  assert.equal(files.size, 0);
+});
+
+test('comment, reply and announcement notifications are personal, can be read and honor moderation', async () => {
+  const { call } = await fixture();
+  const post = (await call('/posts', 1, 'POST', { body: 'A project' })).data.id;
+  const comments = `/posts/${post}/comments`;
+  const parent = (await call(comments, 2, 'POST', { body: 'First comment' })).data.id;
+  const other = (await call('/posts', 2, 'POST', { body: 'Another post' })).data.id;
+  assert.equal((await call(`/posts/${other}/comments`, 0, 'POST', { body: 'Wrong post', replyTo: parent })).status, 400);
+  const reply = (await call(comments, 1, 'POST', { body: 'My reply', replyTo: parent })).data.id;
+  const list = (await call(comments, 2)).data.items;
+  assert.equal(list.find(x => x.id === reply).replyTo, parent);
+  assert.equal(list.find(x => x.id === reply).replyName, 'Person 2');
+  const announce = (await call('/posts', 0, 'POST', { body: 'Aurea news', category: 'announcement' })).data.id;
+  const own = (await call('/notifications', 1)).data;
+  assert.equal(own.unread, 2);
+  assert.deepEqual(new Set(own.items.map(x => x.kind)), new Set(['comment', 'announcement']));
+  const responder = (await call('/notifications', 2)).data;
+  assert.deepEqual(new Set(responder.items.map(x => x.id)), new Set([reply, announce]));
+  assert.equal((await call('/notifications?summary=1', 0)).data.unread, 0);
+  assert.equal((await call('/notifications/read', 1, 'PUT', { through: own.through })).status, 200);
+  assert.equal((await call('/notifications?summary=1', 1)).data.unread, 0);
+  assert.equal((await call('/notifications?summary=1', 2)).data.unread, 2);
+  await call('/comments/' + reply, 1, 'DELETE');
+  assert.equal((await call('/notifications?summary=1', 2)).data.unread, 1);
+});
+
+test('bundled first page is compact and its cursor continues the same feed', async () => {
+  const { call } = await fixture();
+  for (let i = 0; i < 14; ++i) await call('/posts', 1, 'POST', { body: `Item ${i}` });
+  const bundled = (await call('/me?includeFeed=1')).data;
+  assert.equal(bundled.feed.items.length, 12);
+  assert.equal(bundled.activity, true);
+  assert.equal(bundled.mediaPosts, true);
+  const next = (await call('/posts?compact=1&cursor=' + encodeURIComponent(bundled.feed.cursor))).data;
+  assert.equal(next.items.length, 2);
+  assert.equal(new Set([...bundled.feed.items, ...next.items].map(p => p.id)).size, 14);
+  assert.equal(next.cursor, null);
+});
 test('profiles use existing accounts, unique usernames and never expose email/session', async () => {
   const { call, users } = await fixture();
   assert.equal((await call('/me', null)).status, 401);

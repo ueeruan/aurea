@@ -15,6 +15,13 @@ main = "worker.js"
 compatibility_date = "2025-01-01"
 workers_dev = true
 
+# 1.0.9: o D1 fica em WEUR e quase todo usuário está no Brasil. Com Smart
+# Placement o Worker roda perto do D1: o pedido paga uma viagem longa e as
+# consultas (várias por pedido) ficam locais. As fotos e vídeos dos posts não
+# passam por aqui: saem da CDN (COMMUNITY_MEDIA_URL), na borda perto de quem vê.
+[placement]
+mode = "smart"
+
 # O documento é um punhado de chaves: um namespace simples resolve.
 [[kv_namespaces]]
 binding = "AUREA_KV"
@@ -48,6 +55,8 @@ binding = "AI"
 [vars]
 # 0.4.1: login com Google pelo Firebase Auth (firebase.js confere o aud/iss deste projeto).
 FIREBASE_PROJECT_ID = "aurea-8e5f1"
+# 1.0.9: a CDN do bucket COMMUNITY_MEDIA (o Worker confere a moderação e redireciona).
+COMMUNITY_MEDIA_URL = "https://media.aureaeditor.com"
 # Recuperação de senha: configure ACCOUNT_EMAIL_FROM com um remetente de domínio
 # verificado na Resend e use RESEND_API_KEY no secret do Worker.
 # AureaMCP: "false" desliga /mcp, o OAuth e o relay (503) sem deploy de código.
@@ -123,6 +132,13 @@ migrations_dir = "migrations"
 [[r2_buckets]]
 binding = "COMMUNITY_FILES"
 bucket_name = "aurea-community-files"
+
+# 1.0.9: fotos e vídeos dos posts (community_media.js), só eles. O bucket é
+# público pelo domínio media.aureaeditor.com (cache da CDN); projetos e presets
+# continuam no COMMUNITY_FILES, que não tem domínio público.
+[[r2_buckets]]
+binding = "COMMUNITY_MEDIA"
+bucket_name = "aurea-community-media"
 
 # Caminho "cloudflare" do e-mail de crash (Email Workers). Só descomente depois
 # de ativar o Email Routing num domínio da conta e VERIFICAR o destino nele —

@@ -1,0 +1,5 @@
+<resources>
+    <string name="trk_motion_title">Rastreador de movimento</string>
+    <string name="trk_video_required">Selecione uma camada de vídeo.</string>
+    <string name="trk_back_to_result">Voltar ao resultado</string>
+</resources>

@@ -1390,6 +1390,8 @@
     <string name="fx_name_light_sweep">شريط ضوئي</string>
     <string name="fx_name_shake">اهتزاز</string>
     <string name="fx_name_turbulence">إزاحة مضطربة</string>
+    <string name="fx_name_turbulence_legacy">اضطراب كلاسيكي</string>
+    <string name="fx_name_turbulent_displace">إزاحة مضطربة</string>
     <string name="fx_name_wave_warp">التواء موجي</string>
     <string name="fx_name_warp">عدسة</string>
     <string name="fx_name_ripple_dissolve">ذوبان متموّج</string>
@@ -2946,6 +2948,13 @@
     <string name="afx_name_particular">جسيمات ثلاثية الأبعاد</string>
     <string name="afx_desc_particular">نظام جسيمات ثلاثي الأبعاد: باعث صندوقي أو كروي، سرعة، جاذبية، رياح، مقاومة الهواء، اضطراب، ولون وحجم على مدى العمر. تصبح الطبقة هي الباعث.</string>
     <string name="layer_replace_media">استبدال الوسائط</string>
+    <string name="layer_improve_source">تحسين المصدر</string>
+    <string name="layer_improve_source_detail">اختر التسجيل الكامل نفسه بدقة أعلى</string>
+    <string name="layer_improve_source_checking">جارٍ التحقق من التسجيل…</string>
+    <string name="layer_improve_source_done">تم تحديث المصدر بدقة أعلى</string>
+    <string name="layer_improve_source_resolution">اختر فيديو بعرض وارتفاع أكبر.</string>
+    <string name="layer_improve_source_mismatch">اختر التسجيل نفسه بالتأطير والتوقيت والصوت نفسه.</string>
+    <string name="layer_improve_source_failed">تعذّر تحسين المصدر. %1$s</string>
     <string name="layer_replace_media_detail">صورة أو فيديو آخر؛ يبقى التحويل والإطارات المفتاحية والتأثيرات والأقنعة</string>
     <string name="layer_replacing_media">جارٍ استبدال الوسائط…</string>
     <string name="layer_media_replaced">تم استبدال الوسائط بـ ⁨%1$s⁩</string>
@@ -4456,7 +4465,7 @@
     <string name="fxo_apply_distortion">تطبيق التشوّه</string>
     <string name="fxo_2">2×</string>
     <string name="fxo_4">4×</string>
-    <string name="fxt_upscales_the_layer_when_it_appears_large">يكبّر الطبقة عندما تظهر أكبر من مصدرها (مقياس الطبقة في التركيب). بدون تكبير على الشاشة، تعمل الحدة فقط.</string>
+    <string name="fxt_upscales_the_layer_when_it_appears_large">يعزّز التفاصيل بالحجم الحالي ويعيد بناء الحواف عند تكبير الطبقة.</string>
     <string name="fxl_content">المحتوى</string>
     <string name="fxo_general">عام</string>
     <string name="fxo_anime">أنمي</string>

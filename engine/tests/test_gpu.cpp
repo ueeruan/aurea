@@ -378,7 +378,8 @@ struct Scene {
     }
 
     /// Renderiza o instante `t` fora da tela e lê a composição de volta.
-    FloatImage render(FrameIndex t = FrameIndex{0}, u32 den = 1, bool finalQuality = false, SceneEditorView editor = {}) {
+    FloatImage render(FrameIndex t = FrameIndex{0}, u32 den = 1, bool finalQuality = false,
+                      SceneEditorView editor = {}, u32 outputMultiplier = 1) {
         Gpu& g = gpu();
         RenderSettings rs;
         rs.previewDenominator = den;
@@ -395,8 +396,8 @@ struct Scene {
             for (RenderLayer& l : snap.layers) l.source.frame.reset();
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
-        const u32 w = std::max(1u, comp->width() / den);
-        const u32 h = std::max(1u, comp->height() / den);
+        const u32 w = std::max(1u, comp->width() * outputMultiplier / den);
+        const u32 h = std::max(1u, comp->height() * outputMultiplier / den);
         OffscreenTarget off{g.target(w, h), w, h};
         FrameStats stats;
         RenderTimings timings;
@@ -15172,6 +15173,41 @@ AUREA_TEST(Gpu, BorderOnOpaqueImageUsesTheChosenColor) {
 
 // Lote "AE 2026": contas dos efeitos novos e consertos dos parciais.
 #include "AeEffects2026Gpu.inl"
+
+AUREA_TEST(PsykoColorGpu, OriginalPatternsAnimateAndPreserveTransparency) {
+    AUREA_REQUIRE_GPU();
+    const auto difference = [](const FloatImage& a, const FloatImage& b) {
+        f32 maxRgb = 0.0f, maxAlpha = 0.0f;
+        for (usize i = 0; i < a.px.size(); ++i) {
+            const f32 delta = std::fabs(a.px[i] - b.px[i]);
+            if ((i % 4) == 3) maxAlpha = std::max(maxAlpha, delta);
+            else maxRgb = std::max(maxRgb, delta);
+        }
+        return Vec2{maxRgb, maxAlpha};
+    };
+    std::array<FloatImage, 2> first;
+    const char* keys[] = {"aurea.stylize.psyko_blobs", "aurea.stylize.psyko_stripes"};
+    for (usize mode = 0; mode < first.size(); ++mode) {
+        Scene s(128, 96);
+        s.comp->set_background(Color{0, 0, 0, 0});
+        const LayerId layer = s.solid(88, 72, Vec4{0.49f, 0.34f, 0.63f, 0.65f}, 64, 48);
+        const FloatImage original = s.render();
+        AUREA_CHECK_MSG(gpu().effects.params(effect_type_id(keys[mode])) != nullptr, keys[mode]);
+        auto& effect = s.add_effect(layer, keys[mode]);
+        first[mode] = s.render();
+        const FloatImage later = s.render(FrameIndex{24});
+        const auto changed = difference(first[mode], original);
+        AUREA_CHECK(changed.x > 0.1f && changed.y < 0.002f);
+        AUREA_CHECK(difference(first[mode], later).x > 0.1f);
+        const FloatImage seekBack = s.render();
+        const auto replay = difference(first[mode], seekBack);
+        AUREA_CHECK(replay.x < 0.002f && replay.y < 0.002f);
+        effect.params[0].constant = ParamValue::scalar(0.0f);
+        const auto bypassed = difference(original, s.render(FrameIndex{24}));
+        AUREA_CHECK(bypassed.x < 0.002f && bypassed.y < 0.002f);
+    }
+    AUREA_CHECK(difference(first[0], first[1]).x > 0.15f);
+}
 
 // Pacote "Mar" (0.5.2): oceano, embaixo d'água, cáusticas, onda na praia, ondulação e reflexo.
 #include "SeaEffectsGpu.inl"

@@ -10,6 +10,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.aurea.aurea.editor.panels.effectTypeId
 import com.aurea.aurea.effects.effectToolOf
 import com.aurea.aurea.effects.pickableEffects
+import com.aurea.aurea.engine.AureaEngine
 import com.aurea.aurea.hyper.EntitlementCheck
 import com.aurea.aurea.hyper.EntitlementProvider
 import com.aurea.aurea.hyper.HyperAccess
@@ -100,6 +101,55 @@ class AllEffectsSmokeDeviceTest {
             if (diff >= 0.05) return "OK_PARAM:${p.label}=${"%.2f".format(v)}"
         }
         return null
+    }
+
+    @Test fun psykoEffectsRenderAndTwitchIsFree() {
+        check(context.packageName.endsWith(".uitest"))
+        compose.runOnUiThread { HyperEntitlements.clear() }
+        compose.setContent {
+            store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            AureaTheme { EditorScreen(store) }
+        }
+        compose.waitUntil(30_000) { ::store.isInitialized && store.engineReady }
+        compose.runOnIdle { store.newProject(360, 360, 30f, "Psyko e Twitch") }
+        compose.waitUntil(15_000) { store.project.title == "Psyko e Twitch" && !store.projectOperationBusy }
+        compose.runOnIdle { store.addShape(1) }
+        compose.waitUntil(10_000) { store.detail != null && store.catalog.isNotEmpty() }
+
+        val twitch = effectTypeId("aurea.motion.twitch_reference")
+        assertTrue(!AureaEngine.nativeEffectRequiresHyper(twitch))
+        assertTrue(!AureaEngine.nativeEffectRequiresHyper(effectTypeId("aurea.motion.twitch")))
+        compose.runOnIdle { store.addEffect(twitch) }
+        compose.waitUntil(10_000) { store.effects.any { it.typeId == twitch } }
+        compose.runOnIdle { store.removeEffect(store.effects.first { it.typeId == twitch }.effectId) }
+        compose.waitUntil(10_000) { store.effects.isEmpty() }
+
+        val original = checkNotNull(capture())
+        try {
+            for (key in listOf("aurea.stylize.psyko_blobs", "aurea.stylize.psyko_stripes")) {
+                val id = effectTypeId(key)
+                assertTrue("$key belongs to the catalog", store.catalog.any { it.typeId == id })
+                compose.runOnIdle { store.seek(0); store.addEffect(id) }
+                compose.waitUntil(10_000) { store.effects.any { it.typeId == id } }
+                val still = checkNotNull(capture())
+                try {
+                    assertTrue("$key recolors the layer", stats(still, original).first > 0.5)
+                    compose.runOnIdle { store.seek(24) }
+                    val advanced = checkNotNull(capture())
+                    try {
+                        assertTrue("$key animates its phase", stats(advanced, still).first > 0.5)
+                    } finally {
+                        advanced.recycle()
+                    }
+                } finally {
+                    still.recycle()
+                }
+                compose.runOnIdle { store.removeEffect(store.effects.first { it.typeId == id }.effectId) }
+                compose.waitUntil(10_000) { store.effects.isEmpty() }
+            }
+        } finally {
+            original.recycle()
+        }
     }
 
     @Test fun everyBrowserEffectRenders() {

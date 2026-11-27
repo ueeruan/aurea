@@ -111,7 +111,7 @@ enum class EffectTool(val key: String, val category: String) {
     // Aurea" ([EffectGroup.AureaTools]). O toque abre o painel da função (o de
     // sempre), nada entra na pilha de efeitos. A ordem aqui é a da tela.
     Animation("aurea.tool.animation", "Ferramentas"),
-    Tracking("aurea.tool.tracking", "Ferramentas"),
+    Tracking("aurea.tool.tracking", "Rastreio"),
     PreciseCut("aurea.tool.precise_cut", "Ferramentas"),
     Puppet("aurea.tool.puppet", "Ferramentas"),
     RigMocap("aurea.tool.rig_mocap", "Ferramentas"),
@@ -133,13 +133,13 @@ fun effectToolOf(typeId: Int): EffectTool? = EffectTool.entries.firstOrNull { it
  * no iOS). Tipos: 1 vídeo, 2 imagem, 3 áudio, 5 forma, 10 objeto 3D.
  * [vector]: forma vetorial (caminhos editáveis). [importedModel]: objeto 3D vindo
  * de arquivo (o que tem esqueleto); forma, texto e imagem 3D não têm.
- * Rastreio de câmera só tem o que analisar num VÍDEO; Máscara e Legendas servem
- * para qualquer camada.
+ * Legendas tem acesso próprio na barra inferior.
  */
 fun pickableTools(layerKind: Int, vector: Boolean = false, importedModel: Boolean = false): List<EffectTool> =
     EffectTool.entries.filter { tool ->
         when (tool) {
-            EffectTool.Captions, EffectTool.Mask, EffectTool.LayerOptions -> true
+            EffectTool.Captions -> false
+            EffectTool.Mask, EffectTool.LayerOptions -> true
             EffectTool.CameraTrack, EffectTool.Tracking -> layerKind == 1
             EffectTool.PreciseCut -> layerKind == 1 || layerKind == 3
             EffectTool.Puppet -> layerKind == 2

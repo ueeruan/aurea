@@ -1,5 +1,82 @@
 [
   {
+    "id": "aurea-television",
+    "names": {
+      "pt": "TV",
+      "en": "TV"
+    },
+    "provider": "Aurea",
+    "category": "realistic",
+    "source": "builtin:aurea-original",
+    "license": ""
+  },
+  {
+    "id": "aurea-phone",
+    "names": {
+      "pt": "Celular",
+      "en": "Smartphone"
+    },
+    "provider": "Aurea",
+    "category": "realistic",
+    "source": "builtin:aurea-original",
+    "license": ""
+  },
+  {
+    "id": "aurea-microphone",
+    "names": {
+      "pt": "Microfone de estúdio",
+      "en": "Studio microphone"
+    },
+    "provider": "Aurea",
+    "category": "realistic",
+    "source": "builtin:aurea-original",
+    "license": ""
+  },
+  {
+    "id": "aurea-headphones",
+    "names": {
+      "pt": "Fones de ouvido",
+      "en": "Headphones"
+    },
+    "provider": "Aurea",
+    "category": "realistic",
+    "source": "builtin:aurea-original",
+    "license": ""
+  },
+  {
+    "id": "aurea-console",
+    "names": {
+      "pt": "Console branco",
+      "en": "White game console"
+    },
+    "provider": "Aurea",
+    "category": "realistic",
+    "source": "builtin:aurea-original",
+    "license": ""
+  },
+  {
+    "id": "aurea-mouse",
+    "names": {
+      "pt": "Mouse sem fio",
+      "en": "Wireless mouse"
+    },
+    "provider": "Aurea",
+    "category": "realistic",
+    "source": "builtin:aurea-original",
+    "license": ""
+  },
+  {
+    "id": "aurea-building",
+    "names": {
+      "pt": "Prédio urbano",
+      "en": "City building"
+    },
+    "provider": "Aurea",
+    "category": "realistic",
+    "source": "builtin:aurea-original",
+    "license": ""
+  },
+  {
     "id": "kenney-tree_pinedefaulta",
     "names": {
       "pt": "Pinheiro",

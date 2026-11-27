@@ -36,7 +36,7 @@ enum HyperPath: Int, CaseIterable, Equatable {
     }
 }
 
-enum HyperUpscaleMode: Int, Equatable { case general = 0, anime = 1 }
+enum HyperUpscaleMode: Int, Equatable { case general = 0, anime = 1, enchance = 2 }
 
 /// hyper::Recipe. Zeros/false = etapa desligada.
 struct HyperRecipe: Equatable {
@@ -57,13 +57,13 @@ struct HyperRecipe: Equatable {
     var stabilizeToKeyframes = false
     var path: HyperPath = .auto
 
-    static let upscaleFactors = [1, 2, 4]
+    static let upscaleFactors = [1, 0, 2, 4]
     static let slowMotionFactors = [1, 2, 4, 8]
     static let targetFpsChoices: [Double] = [0, 30, 60]
     static let packedSize = 13
 
     var identity: Bool {
-        upscale <= 1 && denoise <= 0 && !deblock && deinterlace == 0 && !face && targetFps <= 0 && slowMotion <= 1 && !stabilize
+        upscale == 1 && denoise <= 0 && !deblock && deinterlace == 0 && !face && targetFps <= 0 && slowMotion <= 1 && !stabilize
     }
 
     /// A ordem que a ponte lê (AureaEngine.mm / aurea_jni.cpp `hyper_recipe_from`).
@@ -76,7 +76,8 @@ struct HyperRecipe: Equatable {
 
     init?(packed v: [Double]) {
         guard v.count >= Self.packedSize else { return nil }
-        upscale = Int(v[0]); upscaleMode = v[1] >= 0.5 ? .anime : .general; denoise = v[2]; deblock = v[3] >= 0.5
+        upscale = Int(v[0]); upscaleMode = v[1] == 2 ? .enchance : (v[1] >= 0.5 ? .anime : .general)
+        denoise = v[2]; deblock = v[3] >= 0.5
         deinterlace = Int(v[4]); face = v[5] >= 0.5; faceStrength = v[6]; targetFps = v[7]; slowMotion = Int(v[8])
         stabilize = v[9] >= 0.5; stabilizeStrength = v[10]; stabilizeToKeyframes = v[11] >= 0.5; path = .of(Int(v[12]))
     }
@@ -86,7 +87,8 @@ struct HyperRecipe: Equatable {
         var parts: [String] = []
         if denoise > 0 || deblock || deinterlace > 0 { parts.append("Clean") }
         if stabilize { parts.append("Stable") }
-        if upscale > 1 { parts.append("Upscale \(upscale)×") }
+        if upscale == 0 { parts.append("Aurea Detail") }
+        if upscale > 1 { parts.append(upscaleMode == .enchance ? "AureaEnchance 2×" : "Aurea Detail \(upscale)×") }
         if face { parts.append("Face") }
         if targetFps > 0 { parts.append("\(Int(targetFps.rounded())) fps") }
         if slowMotion > 1 { parts.append("Slow \(slowMotion)×") }
@@ -96,11 +98,11 @@ struct HyperRecipe: Equatable {
 
 /// As receitas da tela 2 (as mesmas do Android: HyperPreset).
 enum HyperPreset: String, CaseIterable, Identifiable {
-    case restore, sharper, fps60, slowmo, anime, stabilize
+    case restore, sharper, enchance, fps60, slowmo, anime, stabilize
     var id: String { rawValue }
     var variants: [Int] {
         switch self {
-        case .sharper: return [2, 4]
+        case .sharper: return [0, 2, 4]
         case .slowmo: return [2, 4, 8]
         default: return []
         }
@@ -109,6 +111,7 @@ enum HyperPreset: String, CaseIterable, Identifiable {
         switch self {
         case .restore: return "hyper_preset_restore"
         case .sharper: return "hyper_preset_sharper"
+        case .enchance: return "hyper_preset_enchance"
         case .fps60: return "hyper_preset_fps60"
         case .slowmo: return "hyper_preset_slowmo"
         case .anime: return "hyper_preset_anime"
@@ -120,6 +123,7 @@ enum HyperPreset: String, CaseIterable, Identifiable {
         switch self {
         case .restore: return "wand.and.stars"
         case .sharper: return "sparkles"
+        case .enchance: return "wand.and.stars"
         case .fps60: return "hare"
         case .slowmo: return "tortoise"
         case .anime: return "paintbrush"
@@ -133,7 +137,8 @@ enum HyperPreset: String, CaseIterable, Identifiable {
         case .restore:
             // Clean + Upscale 2× + Face (o rosto é o risco; a tela avisa).
             r.upscale = 2; r.denoise = 0.5; r.deblock = true; r.deinterlace = 1; r.face = true; r.faceStrength = 0.5
-        case .sharper: r.upscale = v == 4 ? 4 : 2
+        case .sharper: r.upscale = [2, 4].contains(v) ? v : 0
+        case .enchance: r.upscale = 2; r.upscaleMode = .enchance
         case .fps60: r.targetFps = 60
         case .slowmo: r.slowMotion = [2, 4, 8].contains(v) ? v : 2
         case .anime: r.upscale = 2; r.upscaleMode = .anime
@@ -508,12 +513,10 @@ enum PaidGate {
     static func locked(paid: Bool, access: HyperAccess) -> Bool { paid && access != .unlocked }
 }
 
-/// 0.5.4 (pedido do dono, 15/11/2026): o TEXTO 3D é pago (16/11/2026: assinatura própria ou AureaHyper). Toda entrada
-/// que CRIA texto 3D (+ › Texto 3D, o dock/menu da cena 3D, os presets de texto 3D) passa
-/// por AureaModel.addText3D, que confere `locked()`; as células levam o cadeado.
+/// Política compartilhada do Texto 3D, usada pelos menus, presets e AureaModel.addText3D.
 enum Text3DGate {
     static func isPaid() -> Bool { AureaEngine.text3DRequiresHyper() }
-    /// Assinatura do Texto 3D ou AureaHyper (16/11/2026).
+    /// Só consulta a assinatura quando o motor exige acesso pago.
     @MainActor static func locked() -> Bool {
         guard isPaid() else { return false }
         return PaidGate.locked(paid: true, access: HyperEntitlements.shared.accessFor(AureaEngine.text3DProductId()))

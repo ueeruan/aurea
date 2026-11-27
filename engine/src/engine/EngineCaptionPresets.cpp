@@ -1,5 +1,6 @@
 #include "aurea/Engine.hpp"
 #include "aurea/project/Presets.hpp"
+#include "../text/CaptionReflow.hpp"
 #include <algorithm>
 #include <cmath>
 namespace aurea {
@@ -48,8 +49,16 @@ bool Engine::apply_caption_bundle(u64 layerId, const std::string& data) noexcept
     if (!layer || layer->locked || layer->captions.empty()) return false;
     Layer candidate = *layer;
     candidate.captionOptions = parsed[0].caption;
+    const auto* reflow = root.get("reflowWords");
+    if (reflow && reflow->type == json::Value::Type::Bool && reflow->boolean &&
+        (candidate.captionOptions.mode != layer->captionOptions.mode || candidate.captionOptions.maxWords != layer->captionOptions.maxWords) &&
+        !text::reflow_caption_track(candidate.captions, candidate.captionOptions, comp->fps())) return false;
     candidate.effects.clear();
     for (u32 i = 1; i < 4; ++i) if (present[i] && !presets::apply(parsed[i], candidate, 0, 0, comp->fps(), &effectRegistry_)) return false;
+    if ((candidate.captionOptions.look & text::kCaptionLookFont) &&
+        candidate.captionOptions.fontPath.rfind("docs:", 0) == 0 &&
+        candidate.text.fontFamily == candidate.captionOptions.fontFamily)
+        candidate.text.fontPath = candidate.captionOptions.fontPath;
     candidate.text.size *= static_cast<f32>(std::min(comp->width(), comp->height()) / std::min(width->number, height->number));
     auto f = [&](u32 i) { return static_cast<f32>(transform->array[i].number); };
     candidate.transform.position = {f(0)*comp->width(), f(1)*comp->height(), f(2)};

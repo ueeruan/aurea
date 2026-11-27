@@ -33,4 +33,7 @@
     <string name="fxp_explode_glass">Pecahkan kaca</string>
     <string name="fxp_explode_assemble">Rakit</string>
     <string name="fxp_explode_side_impact">Benturan samping</string>
+    <string name="fx3d_name_spacing">Jarak 3D</string>
+    <string name="fx3d_desc_spacing">Merenggangkan bagian model. Animasikan jarak untuk merakit atau memisahkan objek.</string>
+    <string name="fx3d_name_money">Hujan Uang 3D</string>
 </resources>

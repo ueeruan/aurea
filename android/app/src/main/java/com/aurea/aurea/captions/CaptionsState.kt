@@ -244,7 +244,10 @@ class CaptionsState(
     private val cache = TranscriptCache(app)
     var track by mutableStateOf<CaptionTrack?>(null)
         private set
-    fun capturePreset(name: String): String = track?.let { engine.saveCaptionBundle(it.layer, name) }.orEmpty()
+    fun capturePreset(name: String, includeLayout: Boolean = false): String {
+        val bundle = track?.let { engine.saveCaptionBundle(it.layer, name) }.orEmpty()
+        return if (includeLayout && bundle.isNotEmpty()) JSONObject(bundle).put("reflowWords", true).toString() else bundle
+    }
     fun applyPreset(data: String) {
         val current = track ?: return
         error = if (engine.applyCaptionBundle(current.layer, data)) null else AppText.get(app, R.string.app_caption_preset_incompatible)
@@ -356,6 +359,15 @@ class CaptionsState(
      * mudam na hora (um passo de desfazer); agrupamento vale ao refazer.
      */
     override val lookEnabled: Boolean get() = busy == null
+
+    fun setWordsPerBlock(count: Int) {
+        if (busy != null || count !in 1..12) return
+        if (track == null) {
+            update(custom = false) { it.copy(mode = if (count == 1) 1 else 0, maxWords = count) }
+        } else if (editBlocks(JSONObject().put("op", "layout").put("words", count), R.string.caption_star_reflow_failed)) {
+            loadTrackOptions()
+        }
+    }
 
     override fun update(custom: Boolean, f: (CaptionSettings) -> CaptionSettings) {
         val next = f(settings)

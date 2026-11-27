@@ -29,8 +29,9 @@ class AnalysisFramePicker {
 public:
     enum class Result { Ok, Cancelled, Failed };
 
-    AnalysisFramePicker(VideoDecoderBackend& decoder, f64 fps, const std::atomic<bool>& cancel) noexcept
-        : dec_(decoder), cancel_(cancel) {
+    AnalysisFramePicker(VideoDecoderBackend& decoder, f64 fps, const std::atomic<bool>& cancel,
+                        u64 deadlineNs = 0) noexcept
+        : dec_(decoder), cancel_(cancel), deadlineNs_(deadlineNs) {
         const f64 rate = fps > 0.0 ? fps : 30.0;
         half_ = static_cast<i64>(5e5 / rate);
         // Quadros que começaram até 2,5 durações nominais antes do alvo ainda
@@ -41,6 +42,7 @@ public:
     /// Quadro mostrado em `wantUs` (instante da fonte).
     Result pick(i64 wantUs, FrameRef& out) noexcept {
         out = {};
+        if (expired()) return Result::Cancelled;
         // Seek: no começo, ao voltar no tempo (rastreio para trás) e ao pular
         // mais que um GOP para a frente (velocidade/remapeamento de tempo).
         // A target before the retained window can still be covered by the
@@ -56,7 +58,7 @@ public:
         }
         // Lê até passar do alvo (+ meio quadro) ou acabar o vídeo.
         for (int guard = 0; !eos_ && (window_.empty() || window_.back()->ptsUs <= wantUs + half_); ++guard) {
-            if (cancel_.load(std::memory_order_relaxed)) return Result::Cancelled;
+            if (expired()) return Result::Cancelled;
             if (guard > 20000) return Result::Failed;
             FrameRef f;
             i64 pts = 0;
@@ -79,8 +81,13 @@ public:
     }
 
 private:
+    bool expired() const noexcept {
+        return cancel_.load(std::memory_order_relaxed) || (deadlineNs_ && monotonic_ns() >= deadlineNs_);
+    }
+
     VideoDecoderBackend& dec_;
     const std::atomic<bool>& cancel_;
+    u64 deadlineNs_;
     std::deque<FrameRef> window_;
     i64 half_ = 16667, early_ = 83333;
     bool eos_ = false, started_ = false;

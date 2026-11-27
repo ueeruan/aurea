@@ -8,10 +8,8 @@
 //  guardado no projeto. Os mesmos passes renderizam o job: a prévia de um
 //  quadro e o export Turbo do mesmo quadro são o mesmo cálculo.
 //
-//  Hyper Upscale — General: FSR 1 (EASU + RCAS, AMD, MIT); Anime: EASU +
-//    afinamento de linhas + endurecimento de bordas (ideia do Anime4K 0.9,
-//    MIT). A densidade de saída é a que a tela pede (a escala da camada na
-//    composição), limitada a 2x/4x da entrada e ao teto de textura.
+//  Aurea Detail — one spatial GPU pass for general video and animation.
+//    Output density follows the layer's projected scale in the composition.
 //  Hyper Clean — desentrelaçar (pente + direção de borda, detecção
 //    automática), desbloquear (grade 8x8) e reduzir ruído no tempo (3 a 5
 //    quadros alinhados por blocos 16x16, pesos de semelhança) + bilateral.
@@ -200,6 +198,44 @@ Vec4 size_vec(u32 w, u32 h) noexcept {
     return Vec4{static_cast<f32>(w), static_cast<f32>(h), 1.0f / static_cast<f32>(w), 1.0f / static_cast<f32>(h)};
 }
 
+f32 detail_texture_limit(EffectBuildContext& ctx, const LayerImage& image) noexcept {
+    constexpr f32 kMaxPixels = 8294400.0f;
+    return std::min(static_cast<f32>(ctx.max_texture_size()) / std::max(image.width, image.height),
+                    std::sqrt(kMaxPixels / (static_cast<f32>(image.width) * image.height)));
+}
+
+f32 projected_scale(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& image) noexcept {
+    if (!e.placement || e.placement->inScene3d) return 1.0f;
+    const Mat4& m = e.placement->compFromLayer;
+    const Vec2 raster = ctx.raster_per_comp_pixel();
+    const f32 sx = std::hypot(m.col[0].x * raster.x, m.col[0].y * raster.y) / std::max(image.texel_scale_x(), 1e-3f);
+    const f32 sy = std::hypot(m.col[1].x * raster.x, m.col[1].y * raster.y) / std::max(image.texel_scale_y(), 1e-3f);
+    return std::isfinite(sx) && std::isfinite(sy) ? std::max(sx, sy) : 1.0f;
+}
+
+Status render_spatial_detail(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input,
+                             u32 factor, bool anime, f32 sharp, LayerImage& out) {
+    out = input;
+    if (sharp == 0.0f) return OkStatus;
+    const u32 w = input.width, h = input.height;
+    const f32 ratio = std::clamp(std::min(projected_scale(ctx, e, input), detail_texture_limit(ctx, input)),
+                                 1.0f, static_cast<f32>(factor));
+    const u32 ow = std::max(w, static_cast<u32>(std::floor(w * ratio)));
+    const u32 oh = std::max(h, static_cast<u32>(std::floor(h * ratio)));
+    const bool enlarge = ow != w || oh != h;
+    const TwoU params{size_vec(w, h), Vec4{sharp, anime ? 1.0f : 0.0f, enlarge ? 1.0f : 0.0f, 0.0f}};
+    const FGTexture result = ctx.texture("aurea-detail", ow, oh);
+    if (ctx.fullscreen_pass("aurea-detail", PassStage::Effects, result, ShaderId::effects_adaptive_detail_frag,
+                            {PassTexture{input.texture, {}, CommonSampler::LinearClamp}}, &params, sizeof(params)) == kInvalidIndex)
+        return Errc::PipelineCompileFailed;
+    out.texture = result;
+    out.width = ow;
+    out.height = oh;
+    out.history = {};
+    out.neighbors = {};
+    return OkStatus;
+}
+
 // =============================================================================
 // Hyper Upscale
 // =============================================================================
@@ -208,7 +244,7 @@ public:
     enum : u32 { kScale = 0, kMode, kSharpness, kPath, kCount };
 
     const EffectInfo& info() const noexcept override {
-        static const EffectInfo i{hyper::effect_keys::kHyperUpscale, "Hyper Upscale", "Hyper", EffectClass::Neighborhood};
+        static const EffectInfo i{hyper::effect_keys::kHyperUpscale, "Aurea Detail", "Hyper", EffectClass::Neighborhood};
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
@@ -216,98 +252,101 @@ public:
         static const char* const kModes[] = {"Geral", "Anime"};
         p.add_enum("scale", "Escala", kScales, 2, 0);
         p.add_enum("mode", "Conteúdo", kModes, 2, 0);
-        p.add_float("sharpness", "Nitidez", 50.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
-        p.add_enum("path", "Caminho", kPathLabels, 3, 0);
-        p.set_tip(kScale, "Amplia a camada quando ela aparece maior que a fonte (a escala da camada na composição). "
-                          "Sem ampliação na tela, só a nitidez age.");
-        p.set_tip(kPath, "A prévia usa sempre o Turbo. Lite e Max (redes) valem no job Hyper da Home; "
-                         "no export do editor o Turbo é usado.");
+        p.add_float("sharpness", "Nitidez", hyper::kDetailStrength, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        // Same ID, type and slot for projects saved with Turbo/Lite/Max.
+        ParamSpec path{};
+        path.id = "path";
+        path.label = "Caminho";
+        path.type = ParamType::Enum;
+        path.flags = kParamHidden;
+        path.enumLabels = kPathLabels;
+        path.enumCount = 3;
+        path.maxValue = 2.0f;
+        p.add(path);
+        p.set_tip(kScale, "Realça detalhes no tamanho atual e reconstrói bordas quando a camada é ampliada.");
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         if (v.size() < kCount) return false;
         v[kSharpness] = ParamValue::scalar(80.0f);
         return true;
     }
-    f32 input_margin(const EffectEval&) const noexcept override { return 3.0f; }
+    f32 input_margin(const EffectEval&) const noexcept override { return 2.0f; }
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
-        for (ShaderId id : {ShaderId::hyper_to_perc_frag, ShaderId::hyper_fsr_easu_frag, ShaderId::hyper_fsr_rcas_frag,
-                            ShaderId::hyper_a4k_thin_frag, ShaderId::hyper_a4k_grad_frag, ShaderId::hyper_a4k_refine_frag})
-            out.push_back(PipelineKey::fullscreen(id, work));
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_adaptive_detail_frag, work));
     }
 
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32, LayerImage& out) const override {
         if (!input.valid() || e.count < kCount) return Errc::InvalidArgument;
         const u32 factor = e.e(kScale) >= 1 ? 4u : 2u;
         const bool anime = e.e(kMode) >= 1;
-        const f32 sharp = std::clamp(finite_or(e.f(kSharpness), 50.0f) * 0.01f, 0.0f, 1.0f);
-        const u32 W = input.width, H = input.height;
-        const f32 k = std::max(input.texel_scale_x(), 1e-3f);
-        // Densidade que a tela pede (px da composição por px da camada).
-        f32 onScreen = static_cast<f32>(factor);
-        if (e.placement && !e.placement->inScene3d) {
-            const Mat4& m = e.placement->compFromLayer;
-            const f32 sx = std::sqrt(m.col[0].x * m.col[0].x + m.col[0].y * m.col[0].y);
-            const f32 sy = std::sqrt(m.col[1].x * m.col[1].x + m.col[1].y * m.col[1].y);
-            if (std::isfinite(sx) && std::isfinite(sy) && std::max(sx, sy) > 0.0f) onScreen = std::max(sx, sy);
-        }
-        f32 ratio = std::clamp(onScreen / k, 1.0f, static_cast<f32>(factor));
-        // Teto: lado de textura e ~16,7 MP (4096²) por camada.
-        const u32 maxTex = std::max(1u, ctx.max_texture_size());
-        ratio = std::min(ratio, static_cast<f32>(maxTex) / static_cast<f32>(std::max(W, H)));
-        ratio = std::min(ratio, std::sqrt(16777216.0f / static_cast<f32>(static_cast<u64>(W) * H)));
-        ratio = std::max(ratio, 1.0f);
-        const u32 oW = std::max(1u, static_cast<u32>(std::lround(static_cast<f32>(W) * ratio)));
-        const u32 oH = std::max(1u, static_cast<u32>(std::lround(static_cast<f32>(H) * ratio)));
+        const f32 sharp = std::clamp(finite_or(e.f(kSharpness), hyper::kDetailStrength) * 0.01f, 0.0f, 1.0f);
+        return render_spatial_detail(ctx, e, input, factor, anime, sharp, out);
+    }
+};
 
-        FGTexture cur = ctx.texture("hyper-perceptual", W, H);
-        if (ctx.fullscreen_pass("hyper-perceptual", PassStage::Effects, cur, ShaderId::hyper_to_perc_frag,
-                                {PassTexture{input.texture, {}, CommonSampler::NearestClamp}}, nullptr, 0) == kInvalidIndex)
-            return Errc::PipelineCompileFailed;
-        u32 cw = W, ch = H;
-        // EASU: até 2,5x numa passada (480p -> 1080p é uma); 4x = duas.
-        while (cw < oW || ch < oH) {
-            const bool last = static_cast<f32>(oW) <= 2.5f * static_cast<f32>(cw) && static_cast<f32>(oH) <= 2.5f * static_cast<f32>(ch);
-            const u32 nw = last ? oW : std::min(oW, cw * 2), nh = last ? oH : std::min(oH, ch * 2);
-            const TwoU u{size_vec(cw, ch), size_vec(nw, nh)};
-            const FGTexture next = ctx.texture("hyper-easu", nw, nh);
-            if (ctx.fullscreen_pass("hyper-easu", PassStage::Effects, next, ShaderId::hyper_fsr_easu_frag,
-                                    {PassTexture{cur, {}, CommonSampler::NearestClamp}}, &u, sizeof(u)) == kInvalidIndex)
-                return Errc::PipelineCompileFailed;
-            cur = next;
-            cw = nw;
-            ch = nh;
-        }
+class AureaEnchance final : public Effect {
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{hyper::effect_keys::kHyperEnchance, "AureaEnchance", "Hyper", EffectClass::Neighborhood};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_float("amount", "Intensidade", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+    }
+    bool is_identity(const EffectEval& e) const noexcept override { return e.f(0) <= 0.0f; }
+    f32 input_margin(const EffectEval&) const noexcept override { return 2.0f; }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_adaptive_detail_frag, work));
+        out.push_back(PipelineKey::compute_shader(ShaderId::effects_aurea_enchance_comp));
+    }
+    void resolve_resources(EffectEval& e) const noexcept override {
+        if (!e.resources) return;
+        static const Vec4 weights[] = {
+#include "AureaEnchanceWeights.inl"
+        };
+        static_assert(sizeof(weights) == 24 * 12 * sizeof(Vec4));
+        e.aux = e.resources->data_texture(0x41454e4348410001ull, weights, 24, 12);
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32, LayerImage& out) const override {
+        if (!input.valid() || e.count == 0) return Errc::InvalidArgument;
+        const f32 amount = std::clamp(finite_or(e.f(0), 100.0f) * 0.01f, 0.0f, 1.0f);
         out = input;
-        out.history = FGTexture{};
-        out.neighbors = TemporalNeighbors{};
-        out.width = cw;
-        out.height = ch;
-        if (anime) {
-            const TwoU tu{size_vec(cw, ch), Vec4{0.20f + 0.25f * sharp, 0, 0, 0}};
-            const FGTexture thin = ctx.texture("hyper-linhas", cw, ch);
-            if (ctx.fullscreen_pass("hyper-linhas", PassStage::Effects, thin, ShaderId::hyper_a4k_thin_frag,
-                                    {PassTexture{cur, {}, CommonSampler::NearestClamp}}, &tu, sizeof(tu)) == kInvalidIndex)
-                return Errc::PipelineCompileFailed;
-            const SizeU su{size_vec(cw, ch)};
-            const FGTexture grad = ctx.texture("hyper-gradiente", cw, ch);
-            if (ctx.fullscreen_pass("hyper-gradiente", PassStage::Effects, grad, ShaderId::hyper_a4k_grad_frag,
-                                    {PassTexture{thin, {}, CommonSampler::NearestClamp}}, &su, sizeof(su)) == kInvalidIndex)
-                return Errc::PipelineCompileFailed;
-            const TwoU ru{size_vec(cw, ch), Vec4{0.45f + 0.55f * sharp, 1.0f, 0, 0}};
-            out.texture = ctx.texture("hyper-upscale", cw, ch);
-            if (ctx.fullscreen_pass("hyper-bordas", PassStage::Effects, out.texture, ShaderId::hyper_a4k_refine_frag,
-                                    {PassTexture{thin, {}, CommonSampler::NearestClamp}, PassTexture{grad, {}, CommonSampler::NearestClamp}},
-                                    &ru, sizeof(ru)) == kInvalidIndex)
-                return Errc::PipelineCompileFailed;
-            return OkStatus;
-        }
-        // RCAS: nitidez em paradas (0 = máxima); 50% = 1 parada.
-        const f32 stops = 2.0f * (1.0f - sharp);
-        const TwoU ru{size_vec(cw, ch), Vec4{std::exp2(-stops), 1.0f, 1.0f, 0}};
-        out.texture = ctx.texture("hyper-upscale", cw, ch);
-        if (ctx.fullscreen_pass("hyper-rcas", PassStage::Effects, out.texture, ShaderId::hyper_fsr_rcas_frag,
-                                {PassTexture{cur, {}, CommonSampler::NearestClamp}}, &ru, sizeof(ru)) == kInvalidIndex)
-            return Errc::PipelineCompileFailed;
+        if (amount == 0.0f) return OkStatus;
+        if (!ctx.shaders().supports_rgba16f_storage() || !e.aux.valid() ||
+            projected_scale(ctx, e, input) < 1.125f || detail_texture_limit(ctx, input) < 2.0f)
+            return render_spatial_detail(ctx, e, input, 2, false, amount * 0.7f, out);
+
+        const auto pipeline = ctx.shaders().pipeline(PipelineKey::compute_shader(ShaderId::effects_aurea_enchance_comp));
+        if (!pipeline.ok()) return render_spatial_detail(ctx, e, input, 2, false, amount * 0.7f, out);
+
+        TextureDesc desc;
+        desc.width = input.width * 2;
+        desc.height = input.height * 2;
+        desc.format = SurfaceFormat::RGBA16F;
+        desc.sampled = true;
+        desc.storage = true;
+        const FGTexture result = ctx.graph().create_texture("aurea-enchance", desc);
+        const auto sourceSampler = ctx.shaders().sampler(CommonSampler::LinearBorder);
+        const auto filterSampler = ctx.shaders().sampler(CommonSampler::NearestClamp);
+        const u32 groupsX = (input.width + 7) / 8, groupsY = (input.height + 7) / 8;
+        const u32 pass = ctx.graph().add_compute_pass("aurea-enchance", PassStage::Effects,
+            [pipe = *pipeline, source = input.texture, table = e.aux, result, sourceSampler, filterSampler,
+             groupsX, groupsY, amount](PassContext& pc) {
+                const Vec4 params{amount, 0, 0, 0};
+                pc.cmds.bind_pipeline(pipe);
+                pc.cmds.bind_texture(0, pc.texture(source), sourceSampler);
+                pc.cmds.bind_texture(1, table, filterSampler);
+                pc.cmds.bind_storage_image(0, pc.texture(result));
+                pc.cmds.set_uniforms(&params, sizeof(params));
+                pc.cmds.dispatch(groupsX, groupsY, 1);
+            });
+        ctx.graph().read(pass, input.texture);
+        ctx.graph().write_storage(pass, result);
+        out.texture = result;
+        out.width = desc.width;
+        out.height = desc.height;
+        out.history = {};
+        out.neighbors = {};
         return OkStatus;
     }
 };
@@ -525,6 +564,7 @@ public:
 
 void register_hyper_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<HyperUpscale>());
+    (void)r.add(std::make_unique<AureaEnchance>());
     (void)r.add(std::make_unique<HyperClean>());
     (void)r.add(std::make_unique<HyperMotion>());
 }

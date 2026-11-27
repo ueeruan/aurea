@@ -606,18 +606,20 @@ scene3d::SceneCamera camera_for_frac(const Composition& comp, f64 timeF, u32 w, 
     const Mat4 group = world_3d_frac(*pt.parent, *pt.group, outer);
     cam.view = cam.view * group;
     cam.position = affine_inverse(group).transform_point(cam.position);
+    cam.pixelsPerMeter = scene3d::scene_pixels_per_meter(comp.height());
     return cam;
 }
 
 scene3d::SceneCamera camera_for_frac_own(const Composition& comp, f64 timeF, u32 w, u32 h) noexcept {
     scene3d::SceneCamera cam = scene3d::default_camera(w, h);
+    cam.pixelsPerMeter = scene3d::scene_pixels_per_meter(comp.height());
     const OrderedIds<LayerId>& order = comp.order();
     // Como no After Effects: a câmera visível mais de CIMA no instante (0.3.0;
     // antes, a de baixo). Várias câmeras com trechos diferentes = cortes.
     for (u32 i = order.size(); i-- > 0;) {
         const Layer* l = comp.layer(order.at(i));
-        if (!l || !l->visible || !contains_time_frac(*l, timeF)) continue;
-        if (l->kind != LayerKind::Camera || !l->camera.active) continue;
+        if (!l || l->kind != LayerKind::Camera || !l->camera.active || !l->visible
+            || !contains_time_frac(*l, timeF)) continue;
         const f64 local = timeF - static_cast<f64>(l->start.value) + static_cast<f64>(l->offset.value);
         const Mat4 wm = world_3d_frac(comp, *l, timeF);
         const Vec3 right{wm.col[0].x, wm.col[0].y, wm.col[0].z};
@@ -663,7 +665,6 @@ scene3d::SceneCamera camera_for_frac_own(const Composition& comp, f64 timeF, u32
             cam.focusDistance = std::max(0.01f, lens(TrackProperty::FocusDistance, l->camera.focusDistance));
             cam.fStop = std::clamp(lens(TrackProperty::Aperture, l->camera.aperture), 0.5f, 64.0f);
             cam.blurAmount = std::clamp(lens(TrackProperty::CameraBlur, l->camera.blurAmount), 0.0f, 4.0f);
-            cam.pixelsPerMeter = scene3d::scene_pixels_per_meter(comp.height());
         }
         const Vec2 sourceSize = l->camera.trackingSourceSize;
         const Layer* source = comp.layer(l->cameraTrackSource);
@@ -1304,6 +1305,8 @@ void Renderer::release_project_resources() noexcept {
 
 void Renderer::release_project_resources_impl(bool gpuDone) noexcept {
     cancel_preview_graph();
+    cutoutViewOverride_ = 0;
+    cutoutViewTrack_ = 0;
     staticPoses_.clear(); staticPoseBytes_ = 0; poseWorkspace_ = {};
     warmSceneQualities_ = 0;
     renderInstancePath_.clear();
@@ -2219,13 +2222,18 @@ FlowTuning flow_tuning(u8 quality) noexcept {
     return t;
 }
 
-/// O quadro intermediário pelo fluxo (flow_warp.frag): o maior vetor de cada
-/// vizinhança nos dois sentidos (a segunda hipótese de cada lado) e a
-/// deformação com mistura pela confiança. `bias` = Fantasma (0) ↔ Deformação (1).
+bool flow_has_wide_gap(i64 first, i64 second) noexcept {
+    return first >= 0 && second >= 0 && std::max(first, second) - std::min(first, second) > 45'000;
+}
+
+/// O quadro intermediário pelo fluxo (flow_warp.frag): duas hipóteses por lado
+/// ou uma trajetória comum em intervalos mais longos. `bias` controla a mistura.
 bool flow_interpolate(EffectBuildContext& ctx, PassStage stage, FGTexture target, FGTexture a, FGTexture b, FGTexture flow,
-                      u32 baseW, u32 baseH, u32 w, u32 h, f32 t, f32 bias, const FlowTuning& tune) noexcept {
+                      u32 baseW, u32 baseH, u32 w, u32 h, f32 t, f32 bias, const FlowTuning& tune,
+                      bool wideSourceGap = false) noexcept {
+    const bool coherent = wideSourceGap && !tune.legacyWarp;
     FGTexture tile[2]{flow, flow};
-    if (tune.hyp2 && !tune.legacyWarp) {
+    if (tune.hyp2 && !tune.legacyWarp && !coherent) {
         constexpr u32 kTile = 8;
         const u32 tileW = std::max(1u, baseW / kTile), tileH = std::max(1u, baseH / kTile);
         for (u32 dir = 0; dir < 2; ++dir) {
@@ -2245,7 +2253,7 @@ bool flow_interpolate(EffectBuildContext& ctx, PassStage stage, FGTexture target
     }
     struct { Vec4 blend; Vec4 image; } wp{Vec4{t, 1.0f / static_cast<f32>(baseW), 1.0f / static_cast<f32>(baseH), std::clamp(bias, 0.0f, 1.0f)},
                                           Vec4{1.0f / static_cast<f32>(std::max(w, 1u)), 1.0f / static_cast<f32>(std::max(h, 1u)),
-                                               tune.hyp2 ? 2.0f : 1.0f, tune.legacyWarp ? 0.0f : 1.0f}};
+                                               tune.hyp2 ? 2.0f : 1.0f, tune.legacyWarp ? 0.0f : (coherent ? 2.0f : 1.0f)}};
     const PassTexture wt[5] = {PassTexture{a}, PassTexture{b}, PassTexture{flow},
                                PassTexture{tile[0], {}, CommonSampler::NearestClamp}, PassTexture{tile[1], {}, CommonSampler::NearestClamp}};
     return ctx.fullscreen_pass("flow-deforma", stage, target, ShaderId::video_flow_warp_frag, wt, 5, &wp, sizeof(wp)) != kInvalidIndex;
@@ -2788,8 +2796,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     const f32 previewFactor = static_cast<f32>(settings.previewNumerator)
                             / static_cast<f32>(std::max(1u, settings.previewDenominator));
     // Câmera da cena para camadas 2D que vivem no espaço 3D.
-    const scene3d::SceneCamera cam3d = settings.sceneEditor.enabled && !settings.finalQuality
+    scene3d::SceneCamera cam3d = settings.sceneEditor.enabled && !settings.finalQuality
         ? scene_editor_camera(out.compWidth, out.compHeight, settings.sceneEditor) : camera_for(comp, time, out.compWidth, out.compHeight);
+    cam3d.pixelsPerMeter = scene3d::scene_pixels_per_meter(comp.height());
     const Mat4 viewProj3d = cam3d.imageTransform * scene3d::camera_projection(cam3d, static_cast<f32>(out.compWidth) / static_cast<f32>(std::max(1u, out.compHeight))) * cam3d.view;
     const Mat4 compFromClip = comp_from_clip(static_cast<f32>(out.compWidth), static_cast<f32>(out.compHeight));
     // 0.3.1 (plugins "shader3d"): a câmera da cena inteira, sempre (ativa ou padrão).
@@ -3738,27 +3747,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     const auto* segment = text::active_caption(l->captions, local.value);
                     if (!segment) continue;
                     captionText = l->text;
-                    // 0.4.6: bloco com estilo próprio, por cima do texto da faixa.
-                    const text::CaptionOptions blockOptions = text::caption_block_options(l->captionOptions, *segment);
-                    if (segment->look)
-                        text::apply_caption_block_look(l->captionOptions, blockOptions, std::min(comp.width(), comp.height()), captionText);
-                    // CAIXA ALTA aqui, não no texto guardado: ligar/desligar a
-                    // opção (ou aplicar um preset que a muda) vale na hora, e o
-                    // texto original continua intacto para editar.
-                    captionText.content = blockOptions.uppercase ? text::upper_text(segment->text) : segment->text;
                     captionTracks = l->tracks;
-                    std::vector<i64> starts;
-                    for (const auto& word : segment->words) starts.push_back(word.start);
-                    TextData timedText;
-                    TrackSet timedTracks;
-                    text::apply_caption_animation(blockOptions, timedText, timedTracks, starts, segment->end);
-                    const u32 animatorBase = static_cast<u32>(captionText.animators.size());
-                    captionText.animators.insert(captionText.animators.end(), timedText.animators.begin(), timedText.animators.end());
-                    for (u32 i = 0; i < timedTracks.size(); ++i) {
-                        Track track = timedTracks.at(i);
-                        track.effectIndex += animatorBase;
-                        captionTracks.add(std::move(track));
-                    }
+                    text::resolve_caption_block(l->captionOptions, *segment, std::min(comp.width(), comp.height()),
+                                                captionText, captionTracks);
                     textData = &captionText; textTracks = &captionTracks;
                 }
                 // AE animation (v68): o key do texto-fonte congelado no instante
@@ -6205,12 +6196,34 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             for (const auto& weights : p.morphWeights) bytes += weights.size() * sizeof(f32);
             return bytes;
         };
-        const auto cameraAt = [&](f64 offset) {
-            return settings.sceneEditor.enabled && !settings.finalQuality ? cam3d
-                : camera_for_frac(comp, time.value + offset, out.compWidth, out.compHeight);
+        struct ExposureCamera {
+            scene3d::SceneCamera camera;
+            Mat4 clip;
+            Mat4 pixels;
         };
-        const auto projection = [&](const scene3d::SceneCamera& camera) {
-            return camera.imageTransform * scene3d::camera_projection(camera, static_cast<f32>(out.compWidth) / std::max(1u, out.compHeight)) * camera.view;
+        const bool editorCamera = settings.sceneEditor.enabled && !settings.finalQuality;
+        const Mat4 compFromClip = comp_from_clip(static_cast<f32>(out.compWidth), static_cast<f32>(out.compHeight));
+        const Mat4 editorProjection = editorCamera ? scene_editor_projection(out.compWidth, out.compHeight, settings.sceneEditor)
+                                                  : Mat4::identity();
+        const f32 aspect = static_cast<f32>(out.compWidth) / std::max(1u, out.compHeight);
+        auto evaluateCamera = [&](f64 instant) {
+            const auto camera = editorCamera ? cam3d : camera_for_frac(comp, instant, out.compWidth, out.compHeight);
+            const Mat4 lens = scene3d::camera_projection(camera, aspect);
+            return ExposureCamera{camera, camera.imageTransform * lens * camera.view,
+                editorCamera ? editorProjection : compFromClip * camera.imageTransform * lens * camera.view};
+        };
+        // Every layer with the same exposure time sees the same camera,
+        // including camera cuts, expressions, and pass-through compositions.
+        // Bound storage when a project has many different blur amounts.
+        std::unordered_map<f64, ExposureCamera> exposureCameras;
+        const auto center = evaluateCamera(time.value);
+        auto cameraAt = [&](f64 offset) -> ExposureCamera {
+            if (editorCamera || offset == 0.0) return center;
+            const f64 instant = time.value + offset;
+            if (const auto found = exposureCameras.find(instant); found != exposureCameras.end()) return found->second;
+            const auto evaluated = evaluateCamera(instant);
+            if (exposureCameras.size() < 512) exposureCameras.emplace(instant, evaluated);
+            return evaluated;
         };
         // 0.3.2 MOTION BLUR 3D RÁPIDO (MotionBlurSettings::vectorBlur): o grupo
         // sai de UMA cena no centro do obturador + o passe de velocidade e a
@@ -6247,7 +6260,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             const ShutterPlan window = shutter_window(mb);
             if (window.duration <= 0.0) return false;
             const f64 begin = window.begin, end = window.begin + window.duration, mid = begin + window.duration * .5;
-            const Mat4 cameraBegin = projection(cameraAt(begin)), cameraEnd = projection(cameraAt(end));
+            const Mat4 cameraBegin = cameraAt(begin).clip, cameraEnd = cameraAt(end).clip;
             bool cameraMoves = false;
             for (int c = 0; c < 4; ++c) {
                 const Vec4 a = cameraBegin.col[c], b = cameraEnd.col[c];
@@ -6256,7 +6269,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             if (cameraMoves && f.floor.mode != 0) return false;
             if (cameraMoves && f.environment.showBackground) {
                 // Céu: o mesmo rastro em px que o passe vai gravar, nos cantos e no centro.
-                const Mat4 center = projection(cameraAt(mid));
+                const Mat4 center = cameraAt(mid).clip;
                 Mat4 hb, he;
                 if (!scene3d::velocity_sky_reprojection(center, cameraBegin, hb)
                     || !scene3d::velocity_sky_reprojection(center, cameraEnd, he)) return false;
@@ -6269,12 +6282,13 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             }
             f.blurFrames.clear();
             f.velocity.enabled = true;
-            f.velocity.viewProjCenter = projection(cameraAt(mid));
+            const auto middle = cameraAt(mid);
+            f.velocity.viewProjCenter = middle.clip;
             f.velocity.viewProjBegin = cameraBegin;
             f.velocity.viewProjEnd = cameraEnd;
             // Obturador fora do centro do quadro (fase ≠ −ângulo/2): a cena vai
             // para o centro do obturador, como a média das amostras faria.
-            if (mid != 0.0) f.camera = cameraAt(mid);
+            if (mid != 0.0) f.camera = middle.camera;
             for (auto& in : f.instances) {
                 const Layer* layer = sourceLayer(in.layerKey);
                 const f32 amount = layer && in.motionBlur ? motion_blur_amount(layer->transform.motionBlurAmount) : 0.f;
@@ -6285,14 +6299,14 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     // instante, como nas amostras da acumulação.
                     const auto camera = cameraAt(mid * amount);
                     in.cameraOverride = amount != 1.f;
-                    in.sampleViewProj = projection(camera); in.sampleView = camera.view;
-                    in.sampleCameraPosition = camera.position;
+                    in.sampleViewProj = camera.clip; in.sampleView = camera.camera.view;
+                    in.sampleCameraPosition = camera.camera.position;
                 }
                 in.velocity = moves;
                 if (!moves) continue;
                 const f64 b = begin * amount, e = end * amount;
-                in.velocityBegin = projection(cameraAt(b)) * world_3d_frac(comp, *layer, time.value + b) * layer_from_model(layer->model);
-                in.velocityEnd = projection(cameraAt(e)) * world_3d_frac(comp, *layer, time.value + e) * layer_from_model(layer->model);
+                in.velocityBegin = cameraAt(b).clip * world_3d_frac(comp, *layer, time.value + b) * layer_from_model(layer->model);
+                in.velocityEnd = cameraAt(e).clip * world_3d_frac(comp, *layer, time.value + e) * layer_from_model(layer->model);
             }
             return true;
         };
@@ -6369,23 +6383,32 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 const ShutterPlan own = shutter_window(mb, layer->transform.motionBlurAmount);
                 const auto& bounds = in.asset->bounds;
                 if (!bounds.valid()) { changing = true; continue; }
-                for (f32 z : {bounds.min.z, bounds.max.z}) {
-                    const Mat4 origin = Mat4::translation(Vec3{bounds.min.x, bounds.min.y, z});
-                    const auto matrixAt = [&](f64 offset) {
-                        const Mat4 camera = settings.sceneEditor.enabled && !settings.finalQuality
-                            ? scene_editor_projection(out.compWidth, out.compHeight, settings.sceneEditor)
-                            : comp_view_projection_frac(comp, time.value + offset, out.compWidth, out.compHeight);
+                // The front and back of the bounds share the same transform
+                // at each probe. Evaluate it once, including any parent rig.
+                std::array<std::pair<f64, Mat4>, 24> pathTransforms;
+                usize transformCount = 0;
+                const auto modelAt = [&](f64 offset) {
+                    for (usize i = 0; i < transformCount; ++i)
+                        if (pathTransforms[i].first == offset) return pathTransforms[i].second;
+                    const Mat4 matrix = [&] {
+                        const Mat4 camera = cameraAt(offset).pixels;
                         const f64 instant = time.value + offset;
                         const Mat4 world = world_3d_frac(comp, *layer, instant);
                         if (in.replicaIndex) {
                             if (const auto* repeat = repeat_layout::active(*layer, repeat_layout::kModelKey)) {
                                 const f64 local = instant - layer->start.value + layer->offset.value;
                                 return camera * replica_matrix(world, layer->model,
-                                    repeat_layout::sample_model(*layer, *repeat, local, in.replicaIndex - 1)) * origin;
+                                    repeat_layout::sample_model(*layer, *repeat, local, in.replicaIndex - 1));
                             }
                         }
-                        return camera * world * layer_from_model(layer->model) * origin;
-                    };
+                        return camera * world * layer_from_model(layer->model);
+                    }();
+                    if (transformCount < pathTransforms.size()) pathTransforms[transformCount++] = {offset, matrix};
+                    return matrix;
+                };
+                for (f32 z : {bounds.min.z, bounds.max.z}) {
+                    const Mat4 origin = Mat4::translation(Vec3{bounds.min.x, bounds.min.y, z});
+                    const auto matrixAt = [&](f64 offset) { return modelAt(offset) * origin; };
                     const f32 bw = bounds.max.x - bounds.min.x, bh = bounds.max.y - bounds.min.y;
                     const f64 path = shutter_projected_path(own, bw, bh, matrixAt, previewFactor);
                     travel = std::max(travel, path);
@@ -6478,9 +6501,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     const f64 offset = ps.blur ? shutter.offset(s) * ps.blurAmount : 0.;
                     const auto camera = cameraAt(offset);
                     auto& sub = ps.subs[s]; sub.shift = static_cast<f32>(offset / std::max(1.f, ps.fps));
-                    sub.clip = projection(camera);
-                    sub.right = Vec4{camera.view.col[0].x,camera.view.col[1].x,camera.view.col[2].x,0};
-                    sub.down = Vec4{camera.view.col[0].y,camera.view.col[1].y,camera.view.col[2].y,0};
+                    sub.clip = camera.clip;
+                    const Mat4& view = camera.camera.view;
+                    sub.right = Vec4{view.col[0].x, view.col[1].x, view.col[2].x, 0};
+                    sub.down = Vec4{view.col[0].y, view.col[1].y, view.col[2].y, 0};
                 }
             }
             // Resample planes on exactly the scene clock. Selecting the nearest
@@ -6495,17 +6519,17 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 ShutterPlan plan = own; plan.count = shutter.count;
                 plane.blurMatrices.resize(shutter.count);
                 for (u32 s = 0; s < shutter.count; ++s) {
-                    const f64 t = time.value + plan.offset(s);
-                    plane.blurMatrices[s] = (settings.sceneEditor.enabled && !settings.finalQuality
-                        ? scene_editor_projection(out.compWidth, out.compHeight, settings.sceneEditor)
-                        : comp_view_projection_frac(comp, t, out.compWidth, out.compHeight)) * world_3d_frac(comp, *layer, t) * plane.blurSourceTransform;
+                    const f64 offset = plan.offset(s);
+                    plane.blurMatrices[s] = cameraAt(offset).pixels * world_3d_frac(comp, *layer, time.value + offset)
+                        * plane.blurSourceTransform;
                 }
             }
             f.blurFrames.resize(shutter.count);
             for (u32 s = 0; s < shutter.count; ++s) {
                 auto& sf = f.blurFrames[s];
                 sf.subFrame = shutter.offset(s);
-                sf.camera = cameraAt(sf.subFrame);
+                const auto sampleCamera = cameraAt(sf.subFrame);
+                sf.camera = sampleCamera.camera;
                 sf.lights = f.lights; sf.ambientLight = f.ambientLight; sf.environment = f.environment; sf.post = f.post;
                 sf.shadow = f.shadow; sf.floor = f.floor;
                 sf.instances.reserve(f.instances.size());
@@ -6543,10 +6567,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     }
                     // A layer with blur off (or amount zero) retains its center
                     // camera too. Other blurred objects in the group cannot smear it.
-                    const auto camera = cameraAt(offset);
+                    const auto camera = amount == 1.f ? sampleCamera : cameraAt(offset);
                     in.cameraOverride = amount != 1.f;
-                    in.sampleViewProj = projection(camera); in.sampleView = camera.view;
-                    in.sampleCameraPosition = camera.position;
+                    in.sampleViewProj = camera.clip; in.sampleView = camera.camera.view;
+                    in.sampleCameraPosition = camera.camera.position;
                     sf.instances.push_back(std::move(in));
                 }
             }
@@ -6624,62 +6648,51 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
     const OrderedIds<LayerId>& order = comp.order();
     for (u32 i = 0; i < order.size(); ++i) {
         const Layer* l = comp.layer(order.at(i));
-        if (!l || !l->visible || !l->contains_time(time)) continue;
+        if (!l || l->kind != LayerKind::Light || !l->visible || !l->contains_time(time)) continue;
         const FrameIndex local = l->local_time(time);
-        if (l->kind == LayerKind::Light) {
-            planeLit = true;
-            const Vec3 color{l->tracks.sample_or(TrackProperty::LightColorR, local, l->light.color.x),
-                l->tracks.sample_or(TrackProperty::LightColorG, local, l->light.color.y),
-                l->tracks.sample_or(TrackProperty::LightColorB, local, l->light.color.z)};
-            const f32 intensity = std::max(0.0f, l->tracks.sample_or(TrackProperty::LightIntensity, local, l->light.intensity));
-            if (l->light.kind == LightKind::Ambient) {
-                hasAmbient = true;
-                planeLight.ambient = Vec4{planeLight.ambient.x + color.x * intensity, planeLight.ambient.y + color.y * intensity,
-                                          planeLight.ambient.z + color.z * intensity, 0.0f};
-            } else if (planeCount < scene3d::kPlaneMaxLights) {
-                const Mat4 w = world_3d(comp, *l, time);
-                const Vec3 dir = Vec3{w.col[2].x, w.col[2].y, w.col[2].z}.normalized();   // a luz aponta para +Z da layer
-                const f32 outer = std::clamp(l->tracks.sample_or(TrackProperty::LightConeAngle, local, l->light.coneAngle), 1.0f, 179.0f) * 0.5f * kDeg2Rad;
-                const f32 inner = outer * (1.0f - std::clamp(l->tracks.sample_or(TrackProperty::LightPenumbra, local, l->light.penumbra), 0.0f, 1.0f));
-                const f32 type = l->light.kind == LightKind::Point ? 1.0f : l->light.kind == LightKind::Spot ? 2.0f : 0.0f;
-                planeLight.lightPos[planeCount] = type == 0.0f ? Vec4{-dir.x, -dir.y, -dir.z, 0.0f}
-                                                               : Vec4{w.col[3].x, w.col[3].y, w.col[3].z, type};
-                planeLight.lightColor[planeCount] = Vec4{color.x * intensity, color.y * intensity, color.z * intensity,
-                                                         std::isfinite(l->light.range) ? std::max(0.0f, l->light.range) : 0.0f};
-                planeLight.lightSpot[planeCount] = Vec4{dir.x, dir.y, dir.z, std::cos(outer)};
-                planeLight.lightSpot2[planeCount] = Vec4{std::cos(inner), 0, 0, 0};
-                ++planeCount;
-            }
+        planeLit = true;
+        const Vec3 color{l->tracks.sample_or(TrackProperty::LightColorR, local, l->light.color.x),
+            l->tracks.sample_or(TrackProperty::LightColorG, local, l->light.color.y),
+            l->tracks.sample_or(TrackProperty::LightColorB, local, l->light.color.z)};
+        const f32 intensity = std::max(0.0f, l->tracks.sample_or(TrackProperty::LightIntensity, local, l->light.intensity));
+        if (l->light.kind == LightKind::Ambient) {
+            hasAmbient = true;
+            planeLight.ambient = Vec4{planeLight.ambient.x + color.x * intensity, planeLight.ambient.y + color.y * intensity,
+                                      planeLight.ambient.z + color.z * intensity, 0.0f};
+            continue;
         }
-        if (l->kind == LayerKind::Camera) {
-            continue;   // câmera resolvida em camera_for
-        } else if (l->kind == LayerKind::Light && l->light.kind != LightKind::Ambient) {
-            scene3d::SceneLight s;
-            const Mat4 w = world_3d(comp, *l, time);   // luz filha de nulo 3D acompanha
-            (void)local;
-            s.kind = l->light.kind == LightKind::Point ? scene3d::LightKindGpu::Point
-                   : l->light.kind == LightKind::Spot ? scene3d::LightKindGpu::Spot : scene3d::LightKindGpu::Directional;
-            s.position = Vec3{w.col[3].x, w.col[3].y, w.col[3].z};
-            s.direction = Vec3{w.col[2].x, w.col[2].y, w.col[2].z}.normalized();   // a luz aponta para +Z da layer
-            s.color = Vec3{l->tracks.sample_or(TrackProperty::LightColorR, local, l->light.color.x),
-                l->tracks.sample_or(TrackProperty::LightColorG, local, l->light.color.y),
-                l->tracks.sample_or(TrackProperty::LightColorB, local, l->light.color.z)};
-            s.intensity = std::max(0.0f, l->tracks.sample_or(TrackProperty::LightIntensity, local, l->light.intensity));
-            s.range = l->light.range;
-            s.outerCone = std::clamp(l->tracks.sample_or(TrackProperty::LightConeAngle, local, l->light.coneAngle), 1.0f, 179.0f) * 0.5f * kDeg2Rad;
-            s.innerCone = s.outerCone * (1.0f - std::clamp(l->tracks.sample_or(TrackProperty::LightPenumbra, local, l->light.penumbra), 0.0f, 1.0f));
-            s.castShadows = l->light.castShadows;
-            s.shadowBias = l->light.shadowBias;
-            s.shadowStrength = l->light.shadowStrength;
-            // Ponto/spot: candela (KHR_lights_punctual) → mundo em px. A queda
-            // 1/d² do shader é em px; × (px/m)² dá a mesma luz que 1/d² em
-            // metros na escala física da cena (altura do quadro = 2 m).
-            if (s.kind != scene3d::LightKindGpu::Directional) {
-                const f32 ppm = scene3d::scene_pixels_per_meter(comp.height());
-                s.intensity *= ppm * ppm;
-            }
-            lights.push_back(s);
+
+        // Sample the animated light and its parent transform once for the
+        // planar and mesh renderers. Each still gets its own intensity units.
+        scene3d::SceneLight s;
+        const Mat4 world = world_3d(comp, *l, time);
+        s.kind = l->light.kind == LightKind::Point ? scene3d::LightKindGpu::Point
+               : l->light.kind == LightKind::Spot ? scene3d::LightKindGpu::Spot : scene3d::LightKindGpu::Directional;
+        s.position = Vec3{world.col[3].x, world.col[3].y, world.col[3].z};
+        s.direction = Vec3{world.col[2].x, world.col[2].y, world.col[2].z}.normalized();
+        s.color = color;
+        s.intensity = intensity;
+        s.range = l->light.range;
+        s.outerCone = std::clamp(l->tracks.sample_or(TrackProperty::LightConeAngle, local, l->light.coneAngle), 1.0f, 179.0f) * 0.5f * kDeg2Rad;
+        s.innerCone = s.outerCone * (1.0f - std::clamp(l->tracks.sample_or(TrackProperty::LightPenumbra, local, l->light.penumbra), 0.0f, 1.0f));
+        s.castShadows = l->light.castShadows;
+        s.shadowBias = l->light.shadowBias;
+        s.shadowStrength = l->light.shadowStrength;
+        const bool directional = s.kind == scene3d::LightKindGpu::Directional;
+        if (planeCount < scene3d::kPlaneMaxLights) {
+            planeLight.lightPos[planeCount] = directional ? Vec4{-s.direction, 0.0f}
+                : Vec4{s.position, s.kind == scene3d::LightKindGpu::Point ? 1.0f : 2.0f};
+            planeLight.lightColor[planeCount] = Vec4{color * intensity, std::isfinite(s.range) ? std::max(0.0f, s.range) : 0.0f};
+            planeLight.lightSpot[planeCount] = Vec4{s.direction, std::cos(s.outerCone)};
+            planeLight.lightSpot2[planeCount] = Vec4{std::cos(s.innerCone), 0, 0, 0};
+            ++planeCount;
         }
+        // Ponto/spot: candela → pixels². A queda 1/d² do shader trabalha em pixels.
+        if (!directional) {
+            const f32 ppm = scene3d::scene_pixels_per_meter(comp.height());
+            s.intensity *= ppm * ppm;
+        }
+        lights.push_back(s);
     }
     // 0.5.2: uma luz ambiente é iluminação escolhida — com ela (e sem outra
     // luz) a cena fica só com a ambiente e o ambiente do grupo, como no AE.
@@ -7166,7 +7179,11 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
     baseH = lh;
     const u32 pyramidW = lw, pyramidH = lh;
     // O campo final fica 2,5× mais fino que a pirâmide (nunca maior que o vídeo).
-    const f32 fineScale = std::min(1.0f, base * 2.5f / static_cast<f32>(std::max(w, h)));
+    // Keep one smooth, low-resolution field for wide gaps. The fine pass
+    // selects different motion candidates on opposite sides of an occlusion
+    // and can split a moving contour when source endpoints are far apart.
+    const f32 fineScale = flow_has_wide_gap(ptsA, ptsB) && !tune.legacyWarp
+        ? s : std::min(1.0f, base * 2.5f / static_cast<f32>(std::max(w, h)));
     const u32 fineW = std::max(lw, static_cast<u32>(std::lround(static_cast<f32>(w) * fineScale)));
     const u32 fineH = std::max(lh, static_cast<u32>(std::lround(static_cast<f32>(h) * fineScale)));
     TextureDesc fd;
@@ -7693,6 +7710,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             }
             const Mat4 clipComp = clip_from_comp(static_cast<f32>(currentSnap_ ? currentSnap_->compWidth : layer.source.width),
                                                  static_cast<f32>(currentSnap_ ? currentSnap_->compHeight : layer.source.height));
+            scene3d::SceneRenderer::ExposureShadow exposureShadow;
             for (u32 s = 0; s < k; ++s) {
                 FGTexture sample, sampleHdr;
                 const std::vector<scene3d::ScenePlane>* samplePlanes = planes;
@@ -7723,7 +7741,9 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                 }
                 const u32 np = scene_particle_draws(group, group.blurFrames[s], parts);
                 if (!scene3d_.build(graph_, arena_, group.blurFrames[s], compTargetW_, compTargetH_, frameNumber, sample, samplePlanes,
-                                    parts, np, nullptr, &sampleHdr)) { mark_incomplete(__FILE__, __LINE__); continue; }
+                                    parts, np, nullptr, &sampleHdr, {}, &exposureShadow)) {
+                    mark_incomplete(__FILE__, __LINE__); continue;
+                }
                 struct Cap {
                     FGTexture sample; const u32* count; PipelineHandle p; u64 sampler; f32 w; f32 h; bool hdr = false;
                 } cap{sample, built, *pAdd, shaders_.sampler(CommonSampler::LinearClamp).id,
@@ -7963,8 +7983,21 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                 const bool needFlow = (layer.source.blendMode == 2 && layer.source.blendT > 0.0f) || layer.source.vectorBlur > 0.0f;
                 FGTexture flow{}, neuralFrame{};
                 u32 baseW = 0, baseH = 0;
+                bool wideSourceGap = false;
                 if (needFlow) {
-                    u64 pair = (static_cast<u64>(layer.source.frame->ptsUs) * 1000003ull) ^ static_cast<u64>(layer.source.frameB->ptsUs)
+                    const i64 ptsA = layer.source.frame->ptsUs;
+                    const i64 ptsB = layer.source.frameB->ptsUs;
+                    f32 flowBase = layer.source.flowBase;
+                    wideSourceGap = layer.source.blendMode == 2 && layer.source.blendT > 0.0f && flow_has_wide_gap(ptsA, ptsB);
+                    if (wideSourceGap && flowBase > 192.0f) {
+                        // Long source gaps can move an object beyond the patch
+                        // search radius. Estimate on a coarser grid, then warp
+                        // the original-resolution images as usual.
+                        const i64 gap = std::max(ptsA, ptsB) - std::min(ptsA, ptsB);
+                        const f32 scale = std::clamp(33'333.0f / static_cast<f32>(gap), 0.5f, 1.0f);
+                        flowBase = std::max(192.0f, flowBase * scale);
+                    }
+                    u64 pair = (static_cast<u64>(ptsA) * 1000003ull) ^ static_cast<u64>(ptsB)
                              ^ (static_cast<u64>(w) << 40) ^ (static_cast<u64>(h) << 52);
                     // A proxy and its original share timestamps and output
                     // dimensions, but not pixels. Decoder reopen/relink must
@@ -7972,7 +8005,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                     // Content IDs also remain stable for cached decoded frames.
                     for (const DecodedFrame* source : {layer.source.frame.get(), layer.source.frameB.get()})
                         pair ^= source->content_id() + 0x9e3779b97f4a7c15ull + (pair << 6) + (pair >> 2);
-                    pair ^= static_cast<u64>(std::lround(layer.source.flowBase)) << 20;
+                    pair ^= static_cast<u64>(std::lround(flowBase)) << 20;
                     // A qualidade muda o fluxo com a mesma base (Boa e Melhor).
                     pair ^= static_cast<u64>(layer.source.flowQuality) * 0xD6E8FEB86659FD93ull;
                     // Neural: com o quadro da rede pronto, o fluxo da GPU só
@@ -7982,8 +8015,8 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                         if (neural_interpolate(layer, pair, out.texture, b, moved)) neuralFrame = moved;
                     }
                     if (!neuralFrame.valid() || layer.source.vectorBlur > 0.0f) {
-                        flow = video_flow(layer.id.pack(), pair, out.texture, b, w, h, layer.source.flowBase, baseW, baseH, frameNumber,
-                                          layer.source.flowQuality, layer.source.frame->ptsUs, layer.source.frameB->ptsUs);
+                        flow = video_flow(layer.id.pack(), pair, out.texture, b, w, h, flowBase, baseW, baseH, frameNumber,
+                                          layer.source.flowQuality, ptsA, ptsB);
                         if (!flow.valid() && layer.source.vectorBlur > 0.0f) mark_incomplete(__FILE__, __LINE__);
                     }
                 }
@@ -7996,7 +8029,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                 } else if (layer.source.blendT > 0.0f && layer.source.blendMode == 2 && flow.valid()) {
                     const FGTexture moved = graph_.create_texture("layer-video-movimento", d);
                     if (flow_interpolate(ctx, PassStage::Decode, moved, out.texture, b, flow, baseW, baseH, w, h, layer.source.blendT,
-                                         layer.source.flowBias, flow_tuning(layer.source.flowQuality))) {
+                                         layer.source.flowBias, flow_tuning(layer.source.flowQuality), wideSourceGap)) {
                         out.texture = moved;
                         warped = true;
                     }
@@ -8465,7 +8498,8 @@ void Renderer::prepare_particle_extras(const Composition& comp, const Layer& lay
     const bool sourced = pd.emitterSource != 0 && pd.emitterType >= static_cast<u32>(ParticleEmitter::Layer)
                       && pd.emitterType <= static_cast<u32>(ParticleEmitter::Mesh);
     const bool texture = pd.particleType == static_cast<u32>(ParticleShape::Texture) && pd.textureAsset != 0;
-    const bool mesh = pd.particleType == static_cast<u32>(ParticleShape::Mesh) && pd.meshSource != 0;
+    const bool mesh = pd.particleType == static_cast<u32>(ParticleShape::Money)
+                   || (pd.particleType == static_cast<u32>(ParticleShape::Mesh) && pd.meshSource != 0);
     const bool look = pd.colorStopCount > 0 || pd.sizeCurveCount > 0 || pd.opacityCurveCount > 0
                    || pd.sizeRandom > 0.0f || pd.opacityRandom > 0.0f || pd.colorRandom > 0.0f
                    || pd.auxProbability < 1.0f || pd.trailWidth != 1.0f || pd.trailOpacity < 1.0f
@@ -9054,8 +9088,10 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         ~DepthScope() { depth = previous; }
     } restoreDepth{compositionDepth_, compositionDepth_};
     compositionDepth_ = depth;
+    const Vec2 rasterPerCompPixel{static_cast<f32>(compDesc.width) / std::max(1u, snap.compWidth),
+                                  static_cast<f32>(compDesc.height) / std::max(1u, snap.compHeight)};
     EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat,
-                           std::min<u32>(backend_->capabilities().maxTexture2D, 8192));
+                           std::min<u32>(backend_->capabilities().maxTexture2D, 8192), rasterPerCompPixel);
     struct CheckoutContext { Renderer* renderer; FrameSnapshot* snapshot; u64 frame; } checkout{this,&snap,frameNumber};
     ctx.set_temporal_checkout(&checkout,[](void* opaque,u32 index,LayerImage& image,Mat4& matrix,f32& opacity) {
         auto& owner=*static_cast<CheckoutContext*>(opaque);
@@ -10852,26 +10888,16 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         graph_.set_output(bb, displayTest ? ResourceState::ShaderRead : ResourceState::Present);
     } else if (offscreen && offscreen->yPlane.valid() && offscreen->uvPlane.valid()) {
         // Export: composição → NV12 na GPU (o encoder recebe planos prontos).
-        // Com upscale, antes: a composição (cw×ch) vira o tamanho de saída num
-        // passe só (textureNicest + TAA modo 4 opcional), e o NV12 lê dela.
-        const u32 ow = offscreen->planeWidth ? offscreen->planeWidth : cw;
-        const u32 oh = offscreen->planeHeight ? offscreen->planeHeight : ch;
+        const u32 ow = cw, oh = ch;
         FGTexture yuvSource = comp;
-        if (offscreen->upscaled.valid() && (ow != cw || oh != ch)) {
-            TextureDesc ad;
-            ad.width = ow; ad.height = oh;
-            ad.format = SurfaceFormat::RGBA16F;
-            ad.sampled = true; ad.renderTarget = true;
-            const FGTexture up = graph_.import_texture("export-upscale", offscreen->upscaled, ad);
-            const bool history = offscreen->upscaleTemporal && offscreen->upscaleHistoryValid && offscreen->upscaleHistory.valid();
-            const FGTexture prev = history ? graph_.import_texture("export-upscale-historico", offscreen->upscaleHistory, ad) : comp;
-            struct UpscaleUniforms { Vec4 res; Vec4 cfg; } uu{
-                Vec4{static_cast<f32>(cw), static_cast<f32>(ch), 1.0f / static_cast<f32>(cw), 1.0f / static_cast<f32>(ch)},
-                Vec4{offscreen->upscaleTemporal ? 1.0f : 0.0f, history ? 1.0f : 0.0f, 30.0f, 0.0f}};
-            const u32 pu = ctx.fullscreen_pass("export-upscale", PassStage::Output, up, ShaderId::export_upscale_nicest_frag,
-                {PassTexture{comp, {}, CommonSampler::LinearClamp}, PassTexture{prev, {}, CommonSampler::LinearClamp}},
-                &uu, sizeof(uu));
-            if (pu != kInvalidIndex) { graph_.mark_side_effect(pu); yuvSource = up; }
+        if (offscreen->enhanceDetail) {
+            const FGTexture enhanced = ctx.texture("export-detail", ow, oh);
+            struct DetailUniforms { Vec4 geometry; Vec4 detail; } detail{
+                Vec4{static_cast<f32>(cw), static_cast<f32>(ch), 1.0f / cw, 1.0f / ch},
+                Vec4{hyper::kDetailStrength * 0.01f, 0.0f, 0.0f, 0.0f}};
+            if (ctx.fullscreen_pass("export-detail", PassStage::Output, enhanced, ShaderId::effects_adaptive_detail_frag,
+                    {PassTexture{comp, {}, CommonSampler::LinearClamp}}, &detail, sizeof(detail)) != kInvalidIndex)
+                yuvSource = enhanced;
         }
         // Empacotado: 4 bytes por fragmento num RGBA8 de 1/4 da largura (a
         // memória é a mesma do R8/RG8; o custo do passe era por fragmento).

@@ -682,7 +682,7 @@ public:
         const f32 layerHeight = e.placement ? static_cast<f32>(e.placement->layerHeight) : input.region.h;
         const f32 complexity = std::clamp(finite_or(e.f(4), 1.0f), 1.0f, 10.0f);
         const f32 gain = octave_gain(complexity);
-        const f32 pinReach = std::max(0.0f, gain * amplitude * (4.0f / 3.0f));
+        const f32 pinReach = gain * std::fabs(amplitude) * (4.0f / 3.0f);
         const Vec2 point = e.p2(3);
         const Vec2 offset{finite_or(point.x, .5f), finite_or(point.y, .5f)};
         struct Uniforms {

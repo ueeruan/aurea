@@ -1,12 +1,10 @@
-// Roto Brush do Rotobrush IA (referência: Roto Brush do After Effects).
-// "Pintar recorte" no cartão liga o modo: o palco recebe traços de Objeto
-// (verde) ou Fundo (vermelho); o motor (EngineRoto.cpp) leva os pontos da
-// composição para a camada, guarda no efeito e refaz os recortes.
+// Brush controls and analysis feedback shared by both cutout effects.
 import SwiftUI
 import Vision
 import ImageIO
 
-/// O aviso de falha pelo motivo do motor (Renderer::roto_status [3]).
+let bgRemoveEffectKey = "aurea.key.background_remove"
+
 func rotoFailedKey(_ reason: Int64) -> String {
     switch reason {
     case 2, 4: return "om_roto_failed_model"
@@ -15,37 +13,67 @@ func rotoFailedKey(_ reason: Int64) -> String {
     }
 }
 
-@MainActor final class RotoPaintState: ObservableObject {
+func bgRemoveFailedKey(_ reason: Int64) -> String {
+    switch reason {
+    case 2, 4: return "bg_remove_failed_model"
+    case 3: return "bg_remove_failed_decode"
+    default: return "bg_remove_failed_frames"
+    }
+}
+
+private struct CutoutTarget: Hashable {
+    let layer: Int64
+    let effect: UInt32
+    let automatic: Bool
+}
+
+private struct CutoutStatus: Equatable {
+    var done: Int64 = 0
+    var total: Int64 = 0
+    var running = false
+    var failure: Int64 = 0
+    var frameReady = false
+    var framesReady: Int64 = 0
+    var frames: Int64 = 0
+    var strokesHere: Int64 = 0
+    var hasStrokes = false
+    var effectiveModel: Int64 = 0
+}
+
+@MainActor private final class CutoutMonitor: ObservableObject {
+    static let shared = CutoutMonitor()
+    @Published var statuses: [CutoutTarget: CutoutStatus] = [:]
+
+    func read(_ target: CutoutTarget, _ model: AureaModel) -> CutoutStatus? {
+        let brush = model.engine.rotoStatus(effect: target.effect, layer: target.layer).map(\.int64Value)
+        guard brush.count >= 11, brush[10] != 0 else { return nil }
+        if brush[9] != 0 {
+            return .init(done: brush[0], total: brush[1], running: brush[2] != 0, failure: brush[3],
+                         frameReady: brush[6] != 0, framesReady: brush[7], frames: brush[8], strokesHere: brush[4], hasStrokes: true)
+        }
+        guard target.automatic else { return CutoutStatus() }
+        let auto = model.engine.bgRemoveStatus(effect: target.effect, layer: target.layer).map(\.int64Value)
+        guard auto.count >= 9, auto[8] != 0 else { return nil }
+        return .init(done: auto[0], total: auto[1], running: auto[2] != 0, failure: auto[3],
+                     frameReady: auto[4] != 0, framesReady: auto[5], frames: auto[6], effectiveModel: auto[7])
+    }
+}
+
+@MainActor private final class RotoPaintState: ObservableObject {
     static let shared = RotoPaintState()
 
-    @Published var layer: Int64 = 0
-    @Published var effect: UInt32 = 0
-    @Published var active = false
-    var previousView: UInt32 = 0
+    @Published var target: CutoutTarget?
     @Published var background = false
-    /// Visualização DENTRO do modo pintar: 0 final, 1 máscara, 2 sobreposição.
     @Published var view: UInt32 = 2
-    /// Raio do pincel em px da composição.
     @Published var radius: CGFloat = 24
-    /// Traço em curso, em px da composição (desenho ao vivo).
     @Published var live: [CGPoint] = []
-    /// [propagados, total, propagando, falhou, traços aqui, traços total,
-    ///  quadro atual pronto, quadros do clipe prontos, quadros do clipe, há traços]
-    @Published var status: [Int64] = Array(repeating: 0, count: 10)
-
-    func painting(_ model: AureaModel) -> Bool { active && model.primarySelection == layer }
 
     func end(_ model: AureaModel) {
-        guard active else { return }
-        _ = model.engine.rotoSetView(previousView, effect: effect, layer: layer)
-        active = false
+        guard let target else { return }
+        _ = model.engine.rotoSetView(3, effect: target.effect, layer: target.layer)
+        self.target = nil
         live = []
         model.refreshModel(force: true)
-    }
-
-    func refresh(_ model: AureaModel) {
-        status = model.engine.rotoStatus(effect: effect, layer: layer).map { $0.int64Value }
-        if status.count < 10 { status = Array(repeating: 0, count: 10) }
     }
 }
 
@@ -55,332 +83,269 @@ func rotoFailedKey(_ reason: Int64) -> String {
     @ObservedObject private var viewZoom = StageViewZoom.shared
 
     var body: some View {
-        if roto.painting(model) {
+        if let target = roto.target, model.primarySelection == target.layer {
             GeometryReader { geo in
                 let placed = StageZoomMath.fit(size: geo.size,
                                                composition: CGSize(width: CGFloat(model.compositionWidth), height: CGFloat(model.compositionHeight)),
                                                zoom: viewZoom.zoom, pan: viewZoom.pan)
                 Canvas { context, _ in
-                    let color = roto.background ? Color(red: 0.9, green: 0.28, blue: 0.3).opacity(0.8)
-                                                : Color(red: 0.19, green: 0.77, blue: 0.42).opacity(0.8)
-                    let pts = roto.live.map { CGPoint(x: placed.origin.x + $0.x * placed.scale, y: placed.origin.y + $0.y * placed.scale) }
-                    let r = roto.radius * placed.scale
-                    if pts.count > 1 {
+                    let color = (roto.background ? AureaColors.danger : AureaColors.success).opacity(0.82)
+                    let points = roto.live.map { CGPoint(x: placed.origin.x + $0.x * placed.scale, y: placed.origin.y + $0.y * placed.scale) }
+                    let radius = roto.radius * placed.scale
+                    if points.count > 1 {
                         var path = Path()
-                        path.addLines(pts)
-                        context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: r * 2, lineCap: .round, lineJoin: .round))
+                        path.addLines(points)
+                        context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: radius * 2, lineCap: .round, lineJoin: .round))
                     }
-                    if let last = pts.last {
-                        context.fill(Path(ellipseIn: CGRect(x: last.x - r, y: last.y - r, width: r * 2, height: r * 2)), with: .color(color))
+                    if let last = points.last {
+                        context.fill(Path(ellipseIn: CGRect(x: last.x - radius, y: last.y - radius, width: radius * 2, height: radius * 2)), with: .color(color))
                     }
                 }
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 0)
-                    .onChanged { v in
-                        let p = CGPoint(x: (v.location.x - placed.origin.x) / max(placed.scale, 0.0001),
-                                        y: (v.location.y - placed.origin.y) / max(placed.scale, 0.0001))
-                        roto.live.append(p)
+                    .onChanged { value in
+                        let scale = max(placed.scale, 0.0001)
+                        let point = CGPoint(x: (value.location.x - placed.origin.x) / scale,
+                                            y: (value.location.y - placed.origin.y) / scale)
+                        let spacing = min(4, max(1, roto.radius * scale * 0.18)) / scale
+                        if let last = roto.live.last, hypot(point.x - last.x, point.y - last.y) < spacing { return }
+                        roto.live.append(point)
                     }
-                    .onEnded { _ in finish(scale: placed.scale) })
+                    .onEnded { value in
+                        let scale = max(placed.scale, 0.0001)
+                        let endpoint = CGPoint(x: (value.location.x - placed.origin.x) / scale,
+                                               y: (value.location.y - placed.origin.y) / scale)
+                        finish(target: target, scale: scale, endpoint: endpoint)
+                    })
                 .accessibilityElement()
-                .accessibilityLabel(AureaText.t("roto_paint"))
-                .accessibilityHint(AureaText.t("roto_hint"))
+                .accessibilityLabel(AureaText.t("cutout_brush"))
+                .accessibilityHint(AureaText.t("cutout_brush_help"))
                 .accessibilityIdentifier("stage.roto_paint")
             }
         }
     }
 
-    /// Um toque seleciona o objeto (RotoClick no motor); arrastar pinta um traço.
-    /// Soltar manda tudo ao motor, em um passo de desfazer.
-    private func finish(scale: CGFloat) {
-        let pts = roto.live
+    private func finish(target: CutoutTarget, scale: CGFloat, endpoint: CGPoint) {
+        var points = roto.live
         roto.live = []
-        guard let first = pts.first else { return }
-        let reach = pts.map { hypot($0.x - first.x, $0.y - first.y) }.max() ?? 0
+        guard roto.target == target, model.primarySelection == target.layer, let first = points.first else { return }
+        points.append(endpoint)
+        let reach = points.map { hypot($0.x - first.x, $0.y - first.y) }.max() ?? 0
+        let changed: Bool
         if reach * scale <= 10 {
-            if model.engine.rotoAddClick(x: Float(first.x), y: Float(first.y), background: roto.background, effect: roto.effect, forLayer: roto.layer) {
-                model.refreshModel(force: true)
-                roto.refresh(model)
+            changed = model.engine.rotoAddClick(x: Float(first.x), y: Float(first.y), background: roto.background, effect: target.effect, forLayer: target.layer)
+        } else {
+            var xy: [NSNumber] = []
+            xy.reserveCapacity(points.count * 2)
+            for point in points {
+                xy.append(NSNumber(value: Float(point.x)))
+                xy.append(NSNumber(value: Float(point.y)))
             }
-            return
+            changed = model.engine.rotoAddStroke(xy, background: roto.background, radius: Float(roto.radius), effect: target.effect, forLayer: target.layer)
         }
-        var xy: [NSNumber] = []
-        xy.reserveCapacity(pts.count * 2)
-        for p in pts { xy.append(NSNumber(value: Float(p.x))); xy.append(NSNumber(value: Float(p.y))) }
-        if model.engine.rotoAddStroke(xy, background: roto.background, radius: Float(roto.radius), effect: roto.effect, forLayer: roto.layer) {
-            model.refreshModel(force: true)
-            roto.refresh(model)
+        if changed { model.refreshModel(force: true) }
+    }
+}
+
+@MainActor struct CutoutStageStatus: View {
+    @EnvironmentObject private var model: AureaModel
+    @ObservedObject private var monitor = CutoutMonitor.shared
+
+    private var targets: [CutoutTarget] {
+        guard let layer = model.primarySelection else { return [] }
+        let automatic = fxEffectTypeId(bgRemoveEffectKey)
+        let brush = fxEffectTypeId("aurea.key.rotobrush")
+        return model.effects.compactMap { effect in
+            guard effect.enabled, effect.typeId == automatic || effect.typeId == brush else { return nil }
+            return CutoutTarget(layer: layer, effect: effect.effectId, automatic: effect.typeId == automatic)
+        }
+    }
+
+    var body: some View {
+        let observed = targets
+        let states = observed.compactMap { monitor.statuses[$0] }
+        let running = states.first { $0.running }
+        let pending = states.contains { $0.frames > 0 && !$0.frameReady && $0.failure == 0 }
+            || (observed.contains { !$0.automatic } && model.localAiActivity & 2 != 0)
+        Group {
+            if running != nil || pending {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(AureaText.t(running == nil ? "cutout_analyzing_frame" : "cutout_analyzing_scene"))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(AureaColors.text)
+                    if let running, running.total > 0 {
+                        let done = min(max(0, running.done), running.total)
+                        ProgressView(value: Double(done), total: Double(running.total))
+                            .tint(AureaColors.accent)
+                        Text(AureaText.t("bg_remove_progress", Int(done), Int(running.total)))
+                            .font(.system(size: 12))
+                            .foregroundStyle(AureaColors.muted)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: 264, alignment: .leading)
+                .background(AureaColors.editorPanelHigh, in: RoundedRectangle(cornerRadius: 12))
+                .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(AureaColors.accent.opacity(0.35)) }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("stage.cutout.progress")
+            }
+        }
+        .allowsHitTesting(false)
+        .task(id: observed) {
+            let retained = monitor.statuses.filter { observed.contains($0.key) }
+            if retained != monitor.statuses { monitor.statuses = retained }
+            while !Task.isCancelled && !observed.isEmpty {
+                var next = monitor.statuses
+                for target in observed { if let status = monitor.read(target, model) { next[target] = status } }
+                if next != monitor.statuses { monitor.statuses = next }
+                let busy = next.count < observed.count || next.values.contains { $0.running || ($0.frames > 0 && !$0.frameReady && $0.failure == 0) }
+                try? await Task.sleep(nanoseconds: busy ? 250_000_000 : 800_000_000)
+            }
         }
     }
 }
 
-/// Dentro do cartão do Rotobrush: o botão "Pintar recorte" e, no modo, os controles.
 @MainActor struct RotoPaintCardTools: View {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject private var roto = RotoPaintState.shared
+    @ObservedObject private var monitor = CutoutMonitor.shared
     let effectId: UInt32
-    let previousView: UInt32
-    private let timer = Timer.publish(every: 0.3, on: .main, in: .common).autoconnect()
+    var automatic = false
 
-    private func chip(_ key: String, _ id: String, _ on: Bool, _ action: @escaping () -> Void) -> some View {
-        chipText(AureaText.t(key), key, id, on, action)
-    }
-
-    private func chipText(_ text: String, _ key: String, _ id: String, _ on: Bool, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(text)
+    private func chip(_ key: String, _ id: String, _ on: Bool = false, tint: Color? = nil, _ action: @escaping () -> Void) -> some View {
+        let color = tint ?? AureaColors.accent
+        return Button(action: action) {
+            Text(AureaText.t(key))
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(AureaColors.text)
                 .padding(.horizontal, 12)
-                .frame(minHeight: 36)
-                .background(RoundedRectangle(cornerRadius: 8).fill(on ? AureaColors.text.opacity(0.18) : AureaColors.chip))
+                .frame(minHeight: 44)
+                .background(on ? color.opacity(0.16) : AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
+                .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(on ? color.opacity(0.48) : .clear) }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(text)
         .accessibilityAddTraits(on ? .isSelected : [])
         .accessibilityIdentifier(id)
     }
 
+    private func help(_ key: String) -> some View {
+        Text(AureaText.t(key))
+            .font(.system(size: 12))
+            .foregroundStyle(AureaColors.muted)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
     var body: some View {
-        let layer = model.primarySelection ?? 0
-        let mine = roto.active && roto.layer == layer && roto.effect == effectId
-        VStack(alignment: .leading, spacing: 6) {
-            if !mine {
-                chip("roto_paint", "fx.roto.paint", false) {
-                    // Outra sessão aberta: devolve a visualização dela antes.
-                    roto.end(model)
-                    model.pause()
-                    roto.background = false
+        if let layer = model.selectedLayer, !layer.locked,
+           model.effects.first(where: { $0.effectId == effectId })?.enabled == true {
+            let target = CutoutTarget(layer: layer.id, effect: effectId, automatic: automatic)
+            let mine = roto.target == target
+            let status = monitor.statuses[target] ?? CutoutStatus()
+            VStack(alignment: .leading, spacing: 7) {
+                help(!mine && automatic ? "cutout_auto_help" : "cutout_brush_help")
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) { actions(target, mine: mine, video: layer.kind == 1, status: status) }
+                    VStack(alignment: .leading, spacing: 4) { actions(target, mine: mine, video: layer.kind == 1, status: status) }
+                }
+                if mine {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 6) { brushes(target, status: status) }
+                        VStack(alignment: .leading, spacing: 4) { brushes(target, status: status) }
+                    }
+                    Text("\(AureaText.t("roto_brush_size")) · \(Int(roto.radius)) px")
+                        .font(.system(size: 12)).foregroundStyle(AureaColors.muted)
+                    Slider(value: $roto.radius, in: 4...160)
+                        .tint(AureaColors.accent)
+                        .accessibilityLabel(AureaText.t("roto_brush_size"))
+                        .accessibilityIdentifier("fx.roto.size")
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 6) { views(target) }
+                        VStack(alignment: .leading, spacing: 4) { views(target) }
+                    }
+                }
+                if status.frameReady { help("roto_frame_ready") }
+                if layer.kind == 1, status.frames > 1, !status.running, status.framesReady > 0 {
+                    Text(AureaText.t("bg_remove_clip_status", Int(status.framesReady), Int(status.frames)))
+                        .font(.system(size: 12)).foregroundStyle(AureaColors.muted)
+                }
+                if status.failure != 0, !status.running {
+                    Text(AureaText.t(status.hasStrokes ? rotoFailedKey(status.failure) : bgRemoveFailedKey(status.failure)))
+                        .font(.system(size: 12)).foregroundStyle(AureaColors.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if automatic, !status.hasStrokes, status.frames > 0, status.effectiveModel == 0,
+                   Int(model.effectParams.first { $0.index == 10 }?.scalar ?? 0) == 1 {
+                    help("bg_remove_person_unavailable")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, 6)
+            .onDisappear { if roto.target == target { roto.end(model) } }
+        }
+    }
+
+    @ViewBuilder private func actions(_ target: CutoutTarget, mine: Bool, video: Bool, status: CutoutStatus) -> some View {
+        if !mine {
+            chip("cutout_brush", "fx.roto.paint", true) {
+                roto.end(model)
+                model.pause()
+                if model.engine.rotoSetView(2, effect: target.effect, layer: target.layer) {
+                    roto.target = target
                     roto.view = 2
-                    roto.layer = layer
-                    roto.effect = effectId
-                    roto.previousView = previousView
-                    roto.active = true
-                    _ = model.engine.rotoSetView(2, effect: effectId, layer: layer)
-                    roto.refresh(model)
+                    roto.background = false
                     model.refreshModel(force: true)
                 }
-            } else {
-                Text(AureaText.t("roto_hint"))
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(AureaColors.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                // O que está acontecendo, SEMPRE visível: este quadro, o clipe, falha.
-                if roto.status[9] != 0 {
-                    let ready = roto.status[6] != 0
-                    Text(AureaText.t(ready ? "roto_frame_ready" : "roto_frame_pending"))
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(ready ? AureaColors.success : AureaColors.text)
-                        .accessibilityIdentifier("fx.roto.frame")
-                    if roto.status[8] > 1 {
-                        Text(String(format: AureaText.t("roto_clip_status"), Int(roto.status[7]), Int(roto.status[8])))
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(AureaColors.muted)
-                            .accessibilityIdentifier("fx.roto.clip")
-                    }
-                    // Bugs 0.3.4: status[3] traz o motivo (2 rede/4 memória,
-                    // 3 leitura do vídeo); o aviso diz o que fazer para cada um.
-                    if roto.status[3] != 0 && roto.status[2] == 0 {
-                        Text(AureaText.t(rotoFailedKey(roto.status[3])))
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(AureaColors.danger)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("fx.roto.failed")
-                    }
-                }
-                // Ver o resultado sem sair do modo pintar.
-                HStack(spacing: 6) {
-                    Text(AureaText.t("roto_view_label")).font(.system(size: 11.5)).foregroundStyle(AureaColors.muted)
-                    ForEach([(UInt32(0), "roto_view_final", "fx.roto.view.final"),
-                             (UInt32(2), "roto_view_overlay", "fx.roto.view.overlay"),
-                             (UInt32(1), "roto_view_mask", "fx.roto.view.mask")], id: \.2) { mode, key, id in
-                        chip(key, id, roto.view == mode) {
-                            roto.view = mode
-                            _ = model.engine.rotoSetView(mode, effect: effectId, layer: layer)
-                            model.refreshModel(force: true)
-                        }
-                    }
-                }
-                HStack(spacing: 6) {
-                    chip("roto_object", "fx.roto.object", !roto.background) { roto.background = false }
-                    chip("roto_background", "fx.roto.background", roto.background) { roto.background = true }
-                    chip("roto_undo", "fx.roto.undo", false) {
-                        if model.engine.rotoUndoStroke(effect: effectId, layer: layer) {
-                            model.refreshModel(force: true)
-                            roto.refresh(model)
-                        }
-                    }
-                }
-                Text(AureaText.t("roto_brush_size"))
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(AureaColors.muted)
-                Slider(value: $roto.radius, in: 4...160)
-                    .accessibilityLabel(AureaText.t("roto_brush_size"))
-                    .accessibilityIdentifier("fx.roto.size")
-                HStack(spacing: 6) {
-                    let propagateKey = roto.status[8] > 1 ? "roto_propagate_count" : "roto_propagate"
-                    chipText(roto.status[8] > 1 ? String(format: AureaText.t(propagateKey), Int(roto.status[8])) : AureaText.t(propagateKey),
-                             propagateKey, "fx.roto.propagate", roto.status[2] != 0) {
-                        if roto.status[2] != 0 { model.engine.rotoCancel() }
-                        else { _ = model.engine.rotoPropagate(effect: effectId, layer: layer) }
-                        roto.refresh(model)
-                    }
-                    chip("roto_done", "fx.roto.done", false) {
-                        roto.end(model)
-                    }
-                }
-                if roto.status[2] != 0 && roto.status[1] > 0 {
-                    Text(String(format: AureaText.t("roto_progress"), Int(roto.status[0]), Int(roto.status[1])))
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(AureaColors.muted)
-                        .accessibilityIdentifier("fx.roto.progress")
-                }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.bottom, 6)
-        .onReceive(timer) { _ in if mine { roto.refresh(model) } }
-        // Fechar o painel encerra o modo pintar (Stage Android: DisposableEffect):
-        // o palco deixa de comer toques e a sobreposição não fica no preview.
-        .onDisappear {
-            if roto.active && roto.layer == layer && roto.effect == effectId { roto.end(model) }
+        if video, automatic || status.hasStrokes {
+            let tag = status.hasStrokes ? "fx.roto.propagate" : status.running ? "fx.bg.cancel" : "fx.bg.analyze"
+            chip(status.running ? "bg_remove_cancel" : status.hasStrokes ? "cutout_track" : "bg_remove_analyze", tag, status.running) {
+                if status.running {
+                    if status.hasStrokes { model.engine.rotoCancel() } else { model.engine.bgRemoveCancel() }
+                } else {
+                    if model.status.playing != 0 { model.pause() }
+                    let ok = status.hasStrokes ? model.engine.rotoPropagate(effect: target.effect, layer: target.layer)
+                                              : model.engine.bgRemoveAnalyze(effect: target.effect, layer: target.layer)
+                    if !ok { model.toast = AureaText.t("bg_remove_failed") }
+                    else {
+                        var started = status
+                        started.running = true
+                        started.done = 0
+                        started.total = status.frames
+                        monitor.statuses[target] = started
+                    }
+                }
+                if let next = monitor.read(target, model) { monitor.statuses[target] = next }
+            }
+        }
+        if mine { chip("roto_done", "fx.roto.done", true) { roto.end(model) } }
+    }
+
+    @ViewBuilder private func brushes(_ target: CutoutTarget, status: CutoutStatus) -> some View {
+        chip("cutout_brush_add", "fx.roto.object", !roto.background, tint: AureaColors.success) { roto.background = false }
+        chip("cutout_brush_subtract", "fx.roto.background", roto.background, tint: AureaColors.danger) { roto.background = true }
+        if status.strokesHere > 0 {
+            chip("roto_undo", "fx.roto.undo") {
+                if model.engine.rotoUndoStroke(effect: target.effect, layer: target.layer) { model.refreshModel(force: true) }
+            }
+        }
+    }
+
+    @ViewBuilder private func views(_ target: CutoutTarget) -> some View {
+        ForEach([(UInt32(2), "roto_view_overlay", "fx.roto.view.overlay"),
+                 (UInt32(0), "roto_view_final", "fx.roto.view.final"),
+                 (UInt32(1), "roto_view_mask", "fx.roto.view.mask")], id: \.2) { mode, key, id in
+            chip(key, id, roto.view == mode) {
+                if model.engine.rotoSetView(mode, effect: target.effect, layer: target.layer) {
+                    roto.view = mode
+                    model.refreshModel(force: true)
+                }
+            }
         }
     }
 }
 
-// =============================================================================
-//  "Remover fundo" (0.4.5, aurea.key.background_remove). O recorte por quadro é
-//  do motor (EngineBgRemove.cpp: cache salvo com o projeto, estável no tempo);
-//  aqui ficam a análise do clipe (progresso, cancelar), o estado deste quadro e
-//  os avisos. Os controles de refino são as linhas normais do efeito.
-//  Par Android: BgRemoveControls (editor/panels/BgRemovePanel.kt).
-// =============================================================================
-
-let bgRemoveEffectKey = "aurea.key.background_remove"
-
-/// O aviso de falha pelo motivo do motor (DepthMapService::Failure).
-func bgRemoveFailedKey(_ reason: Int64) -> String {
-    switch reason {
-    case 2, 4: return "bg_remove_failed_model"
-    case 3: return "bg_remove_failed_decode"
-    default: return "bg_remove_failed_frames"
-    }
-}
-
-/// No topo do cartão do Remover fundo: análise do clipe, progresso e estado.
-@MainActor struct BgRemoveCardTools: View {
-    @EnvironmentObject private var model: AureaModel
-    let effectId: UInt32
-    /// [analisados, total, analisando, falhou, quadro pronto, prontos no clipe, quadros do clipe, modelo, válido]
-    @State private var status: [Int64] = Array(repeating: 0, count: 9)
-    private let timer = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
-    @State private var ticks = 0
-
-    private func refresh() {
-        guard let layer = model.primarySelection else { return }
-        let next = model.engine.bgRemoveStatus(effect: effectId, layer: layer).map { $0.int64Value }
-        // Render ocupado (válido = 0): fica o último estado, sem piscar.
-        if next.count >= 9 && next[8] != 0 { status = next }
-    }
-
-    private func chip(_ text: String, _ id: String, _ on: Bool, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(text)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(AureaColors.text)
-                .padding(.horizontal, 14)
-                .frame(minHeight: 44)
-                .background(RoundedRectangle(cornerRadius: 8).fill(on ? AureaColors.text.opacity(0.18) : AureaColors.chip))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(text)
-        .accessibilityIdentifier(id)
-    }
-
-    var body: some View {
-        let layer = model.primarySelection ?? 0
-        let video = model.layers.first { $0.id == layer }?.kind == 1
-        let running = status[2] != 0
-        let clipFrames = status[6]
-        let readyFrames = status[5]
-        let requestedPerson = Int(model.effectParams.first { $0.index == 10 }?.scalar ?? 0) == 1
-        VStack(alignment: .leading, spacing: 6) {
-            Text(AureaText.t("bg_remove_note"))
-                .font(.system(size: 11.5))
-                .foregroundStyle(AureaColors.muted)
-                .fixedSize(horizontal: false, vertical: true)
-            if status[8] != 0 {
-                let ready = status[4] != 0
-                Text(AureaText.t(ready ? "bg_remove_frame_ready" : "bg_remove_frame_pending"))
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(ready ? AureaColors.success : AureaColors.text)
-                    .accessibilityIdentifier("fx.bg.frame")
-                if video && clipFrames > 1 {
-                    Text(readyFrames >= clipFrames ? AureaText.t("bg_remove_clip_done")
-                         : String(format: AureaText.t("bg_remove_clip_status"), Int(readyFrames), Int(clipFrames)))
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(AureaColors.muted)
-                        .accessibilityIdentifier("fx.bg.clip")
-                }
-                if requestedPerson && status[7] == 0 {
-                    Text(AureaText.t("bg_remove_person_unavailable"))
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(AureaColors.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("fx.bg.person")
-                }
-                if status[3] != 0 && !running {
-                    Text(AureaText.t(bgRemoveFailedKey(status[3])))
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(AureaColors.danger)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("fx.bg.failed")
-                }
-            }
-            if video {
-                HStack(spacing: 6) {
-                    if running {
-                        chip(AureaText.t("bg_remove_cancel"), "fx.bg.cancel", true) {
-                            model.engine.bgRemoveCancel()
-                            status[2] = 0
-                        }
-                    } else if readyFrames < clipFrames || clipFrames <= 1 {
-                        let label = clipFrames > 1 ? String(format: AureaText.t("bg_remove_analyze_count"), Int(clipFrames))
-                                                   : AureaText.t("bg_remove_analyze")
-                        chip(label, "fx.bg.analyze", false) {
-                            if model.status.playing != 0 { model.pause() }
-                            if model.engine.bgRemoveAnalyze(effect: effectId, layer: layer) {
-                                status[2] = 1; status[0] = 0; status[1] = Swift.max(1, clipFrames)
-                            } else {
-                                model.toast = AureaText.t("bg_remove_failed")
-                            }
-                        }
-                    }
-                }
-                if running && status[1] > 0 {
-                    let done = Swift.min(Swift.max(0, status[0]), status[1])
-                    let label = String(format: AureaText.t("bg_remove_progress"), Int(done), Int(status[1]))
-                    ProgressView(value: Double(done), total: Double(status[1]))
-                        .tint(AureaColors.keyframe)
-                        .accessibilityLabel(label)
-                        .accessibilityIdentifier("fx.bg.progressBar")
-                    Text(label)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(AureaColors.muted)
-                        .accessibilityIdentifier("fx.bg.progress")
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.bottom, 6)
-        .onAppear { refresh() }
-        .onReceive(timer) { _ in
-            // Analisando ou com este quadro pendente: 4×/s; parado, ~1×/s.
-            ticks += 1
-            if status[2] != 0 || status[4] == 0 || ticks % 4 == 0 { refresh() }
-        }
-    }
-}
 
 // MARK: - Headbop (0.5.2)
 

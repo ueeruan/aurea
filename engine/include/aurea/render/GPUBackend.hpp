@@ -794,6 +794,12 @@ public:
     // --- Sincronização e medição ----------------------------------------------
     virtual void wait_idle() noexcept = 0;
 
+    /// 1.0.9: read-only, never waits, no side effects. True while commands
+    /// already submitted to the GPU (frames, uploads, export work) have not
+    /// finished. Engine::detach_surface uses it to keep the UI thread out of a
+    /// device-wide wait. Default false = the previous synchronous behavior.
+    [[nodiscard]] virtual bool has_pending_gpu_work() const noexcept { return false; }
+
     /// Export-only retirement proof, without waiting for the entire device.
     /// Covers normal submissions AND auxiliary uploads, including no-frame
     /// initialization. Caller excludes new GPU work from first poll through

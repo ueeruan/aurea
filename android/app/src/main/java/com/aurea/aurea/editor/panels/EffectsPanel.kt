@@ -81,6 +81,7 @@ import com.aurea.aurea.effects.EffectDetailSheet
 import com.aurea.aurea.effects.EffectTool
 import com.aurea.aurea.effects.HyperEffectGate
 import com.aurea.aurea.effects.effectCardId
+import com.aurea.aurea.effects.effectPresetName
 import com.aurea.aurea.effects.toolGlyph
 import com.aurea.aurea.effects.toolLabelRes
 import com.aurea.aurea.engine.EffectCatalogEntry
@@ -760,7 +761,11 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                                 name = name,
                                 lifted = dragged,
                                 onOpen = {
-                                    if (!e.known) unknownMenu = e else if (openId == null) openEffect(e.effectId)
+                                    when (e.typeId) {
+                                        EffectTool.CameraTrack.typeId -> openEffectTool(env, EffectTool.CameraTrack)
+                                        EffectTool.Tracking.typeId -> openEffectTool(env, EffectTool.Tracking)
+                                        else -> if (!e.known) unknownMenu = e else if (openId == null) openEffect(e.effectId)
+                                    }
                                 },
                                 onToggleEnabled = { store.setEffectEnabled(e.effectId, !e.enabled) },
                                 onMove = { delta ->
@@ -1006,25 +1011,28 @@ private fun resetEffect(store: EditorStore, effectId: Int) {
 
 /**
  * "Preset Turbulência dinâmica" (⋮ do efeito Turbulência; DECISOES: também no
- * Android, paridade com o iOS): quantidade e tamanho 15, complexidade 1, o resto
- * zerado e a evolução por expressão `time*6`. Um passo de desfazer.
+ * Android, paridade com o iOS): quantidade e tamanho 15, complexidade 1 e
+ * evolução por expressão `time*6`. Um passo de desfazer.
  */
-private fun applyTurbulencePreset(store: EditorStore, effectId: Int) {
+private fun applyTurbulencePreset(store: EditorStore, effectId: Int, reference: Boolean) {
     val layer = store.primary ?: return
     if (store.detail?.locked == true) return
+    val evolution = if (reference) 5 else 3
+    val values = if (reference) listOf(0 to 0f, 1 to 15f, 2 to 15f, 4 to 1f, evolution to 0f, 8 to 0f)
+        else listOf(0 to 15f, 1 to 15f, 2 to 1f, evolution to 0f, 4 to 0f, 5 to 0f, 6 to 0f)
     store.beginGesture("Preset Turbulência dinâmica")
     try {
-        listOf(0 to 15f, 1 to 15f, 2 to 1f, 3 to 0f, 4 to 0f, 5 to 0f, 6 to 0f).forEach { (i, v) ->
+        values.forEach { (i, v) ->
             store.paramOf(effectId, i)?.let { store.setEffectParam(effectId, it, v) }
         }
+        val label = store.paramOf(effectId, evolution)?.label.orEmpty()
+        store.applyExpression(
+            EditorStore.ExpressionTarget(layer, label, listOf(TrackKey(TrackProperty.EFFECT_PARAM, effectId, evolution * 4))),
+            "time*6",
+        )?.takeIf { !it.ok }?.let { store.showToast(it.message) }
     } finally {
         store.endGesture()
     }
-    val label = store.paramOf(effectId, 24)?.label.orEmpty()
-    store.applyExpression(
-        EditorStore.ExpressionTarget(layer, label, listOf(TrackKey(TrackProperty.EFFECT_PARAM, effectId, 24 * 4))),
-        "time*6",
-    )?.takeIf { !it.ok }?.let { store.showToast(it.message) }
 }
 
 /**
@@ -1613,17 +1621,31 @@ private fun FxSettingsOverlay(
             state = bodyState,
             contentPadding = PaddingValues(bottom = 6.dp),
         ) {
+            if (effect.typeId == colorStudioLookType) {
+                item(key = "looks.importFfx") {
+                    androidx.compose.material3.TextButton(
+                        onClick = { store.requestAeImport() },
+                        enabled = !locked,
+                        modifier = Modifier.fillMaxWidth().testTag("effects.looks.importFfx"),
+                    ) { Text(stringResource(R.string.fx_studio_look_import_ffx)) }
+                }
+            }
             items(bodyItems, key = { it.key }) { item ->
                 when (item) {
                     is FxBody.Special -> FxSpecialTools(env, effect, item.what, meshSelected, onSelectMesh)
                     is FxBody.Notice -> FxBodyNotice(stringResource(item.text))
                     is FxBody.Variation -> {
                         val explode = effect.typeId == effectTypeId("aurea.3d.explode")
+                        val studioLook = effect.typeId == colorStudioLookType
                         val labels = item.presets.map { (pid, n) ->
-                            (if (explode) com.aurea.aurea.effects.explodePresetLabel(pid) else effectPresetLabel(pid))?.let { stringResource(it) } ?: n
+                            if (studioLook) {
+                                effectPresetName(effect.typeId, pid, n)
+                            } else {
+                                (if (explode) com.aurea.aurea.effects.explodePresetLabel(pid) else effectPresetLabel(pid))?.let { stringResource(it) } ?: n
+                            }
                         }
                         FxChoiceLayout(
-                            label = stringResource(R.string.om_fx_variation),
+                            label = stringResource(if (studioLook) R.string.fx_studio_look_preset else R.string.om_fx_variation),
                             options = labels,
                             selected = -1,
                             segmented = labels.size <= 4 && labels.all { it.length <= 10 },
@@ -1679,11 +1701,7 @@ private fun FxSpecialTools(env: PanelEnv, effect: LayerEffect, what: Int, meshSe
     val id = effect.effectId
     Column(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp)) {
         when (what) {
-            SPECIAL_ROTO -> {
-                FxBodyNotice(stringResource(R.string.roto_note))
-                val previousView = store.effectParams[id]?.firstOrNull { it.index == 10 }?.value?.firstOrNull()?.toInt() ?: 0
-                com.aurea.aurea.editor.RotoPaintControls(store, id, previousView.coerceIn(0, 2))
-            }
+            SPECIAL_ROTO -> com.aurea.aurea.editor.RotoPaintControls(store, id)
             SPECIAL_LOCAL_AI -> {
                 val bit = if (effect.typeId == effectTypeId("aurea.ai.depth_map")) 1 else 2
                 if (effect.enabled) {
@@ -1777,8 +1795,9 @@ private fun fxEffectMenu(
             add(MenuEntry.Item(expression, tag = "effects.menu.expression") { openParamExpression(store, id, exprTarget, exprLabel) })
         }
         add(MenuEntry.Item(save, tag = "effects.menu.save_preset") { onSavePreset() })
-        if (effect.typeId == effectTypeId("aurea.distort.turbulence")) {
-            add(MenuEntry.Item(turbulence, enabled = !locked, tag = "effects.menu.turbulence") { applyTurbulencePreset(store, id) })
+        val reference = effect.typeId == effectTypeId("aurea.distort.turbulent_displace_reference")
+        if (reference || effect.typeId == effectTypeId("aurea.distort.turbulence")) {
+            add(MenuEntry.Item(turbulence, enabled = !locked, tag = "effects.menu.turbulence") { applyTurbulencePreset(store, id, reference) })
         }
     }
 }

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="psyko_color_cycles">Ciclos de cor</string>
+    <string name="psyko_source_detail">Detalhe da imagem</string>
+    <string name="psyko_blobs_desc">Recolore a imagem com manchas orgânicas e cores que mudam ao longo do tempo.</string>
+    <string name="psyko_stripes_desc">Recolore a imagem com faixas direcionais e cores que mudam ao longo do tempo.</string>
+</resources>

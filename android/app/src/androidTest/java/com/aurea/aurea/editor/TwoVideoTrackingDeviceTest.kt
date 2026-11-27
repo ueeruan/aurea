@@ -15,7 +15,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
 import com.aurea.aurea.R
 import com.aurea.aurea.editor.panels.PanelEnv
-import com.aurea.aurea.editor.panels.TrackingPanel
+import com.aurea.aurea.editor.panels.MotionTrackerPanel
 import com.aurea.aurea.engine.CommandBatch
 import com.aurea.aurea.engine.ExportProgress
 import com.aurea.aurea.state.EditorStore
@@ -73,6 +73,7 @@ class TwoVideoTrackingDeviceTest {
     }
     private fun analyzeSelected() {
         compose.onNodeWithText(context.getString(R.string.trk_tool_stabilizer)).performScrollTo().performClick()
+        compose.onNodeWithTag("tracker.motion.start").performScrollTo().performClick()
         compose.waitUntil(90000) { store.motionStatus[0].toInt()==2 || store.motionStatus[0].toInt()==3 }
         compose.runOnIdle {
             assertEquals(store.motionMessage,2,store.motionStatus[0].toInt())
@@ -156,7 +157,7 @@ class TwoVideoTrackingDeviceTest {
             AureaTheme {
                 Column(Modifier.fillMaxSize()) {
                     PreviewStage(store,ui,Modifier.fillMaxWidth().weight(1f))
-                    Box(Modifier.fillMaxWidth().height(360.dp)) { TrackingPanel(env) }
+                    Box(Modifier.fillMaxWidth().height(360.dp)) { MotionTrackerPanel(env) }
                 }
             }
         }
@@ -165,18 +166,16 @@ class TwoVideoTrackingDeviceTest {
         project("Tracking two independent videos",width,height)
         val a=importVideoFixture(aFile,1); val b=importVideoFixture(bFile,2)
         select(a)
-        // The standalone production panel initially opens Camera 3D. The
-        // editor's motion-tools menu selects 2D; exercise that actual mode
-        // control here rather than searching for a hidden Stabilizer action.
-        compose.onNodeWithText(context.getString(R.string.cam_mode_2d)).performClick()
+        compose.onNodeWithTag("tracker.motion.panel").assertExists()
+        compose.onNodeWithTag("tracker.camera.panel").assertDoesNotExist()
         compose.runOnIdle {
-            assertFalse("Motion tracking must use the 2D tools panel",store.cameraTrackerVisible)
             assertNull(store.pointPick)
         }
         compose.onNodeWithText(context.getString(R.string.trk_tool_stabilizer)).assertExists()
         // Start A through the actual panel and switch to B while its worker may
         // still be active. Even after completion, A must never become B's UI result.
         compose.onNodeWithText(context.getString(R.string.trk_tool_stabilizer)).performScrollTo().performClick()
+        compose.onNodeWithTag("tracker.motion.start").performScrollTo().performClick()
         select(b)
         val nativeStatus=FloatArray(12)
         compose.waitUntil(90000) {

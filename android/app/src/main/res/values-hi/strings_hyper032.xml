@@ -22,7 +22,7 @@
     <string name="hyper_adjust_stable_on">स्थिर करें</string>
     <string name="hyper_adjust_strength">तीव्रता</string>
     <string name="hyper_adjust_target_fps">फ़्रेम प्रति सेकंड</string>
-    <string name="hyper_adjust_upscale">रिज़ॉल्यूशन</string>
+    <string name="hyper_adjust_upscale">Aurea Detail</string>
     <string name="hyper_always">हमेशा</string>
     <string name="hyper_audio_muted">स्लो मोशन: वीडियो बिना आवाज़ के बनेगा (ऑडियो खींचा नहीं जाता)।</string>
     <string name="hyper_back_to_preview">प्रीव्यू पर वापस जाएँ</string>
@@ -56,7 +56,7 @@
     <string name="hyper_feature_motion">नए फ़्रेम के साथ 60 fps और 2×, 4× या 8× स्लो मोशन</string>
     <string name="hyper_feature_offline">सब कुछ डिवाइस पर: वीडियो कहीं अपलोड नहीं होता</string>
     <string name="hyper_feature_stable">स्टेबिलाइज़ेशन, कीफ़्रेम के रूप में सहेजने के विकल्प के साथ</string>
-    <string name="hyper_feature_upscale">2× या 4× अपस्केल (असली वीडियो या एनीमे)</string>
+    <string name="hyper_feature_upscale">Aurea Detail मूल आकार रखता है या 2× या 4× बड़ा करता है।</string>
     <string name="hyper_frames">%2$d में से फ़्रेम %1$d</string>
     <string name="hyper_keep">जैसा है</string>
     <string name="hyper_locked_badge">मासिक सदस्यता</string>
@@ -66,7 +66,7 @@
     <string name="hyper_locked_intro">AureaHyper आपके डिवाइस पर ही वीडियो को ठीक और बेहतर करता है: ज़्यादा स्पष्टता, कम नॉइज़, ज़्यादा फ़्रेम और स्थिर तस्वीर।</string>
     <string name="hyper_locked_not_owned">इस खाते में अभी AureaHyper नहीं है।</string>
     <string name="hyper_locked_offline">अभी पहुँच की पुष्टि नहीं हो सकी। इंटरनेट से कनेक्ट करें और फिर से कोशिश करें।</string>
-    <string name="hyper_locked_payment_note">आपके Aurea खाते से जुड़ी मासिक सदस्यता। AureaHyper सभी सशुल्क इफ़ेक्ट और 3D टेक्स्ट भी अनलॉक करता है।</string>
+    <string name="hyper_locked_payment_note">आपके Aurea खाते से जुड़ी मासिक सदस्यता। AureaHyper सभी सशुल्क इफ़ेक्ट भी अनलॉक करता है।</string>
     <string name="hyper_locked_signed_out">यह देखने के लिए अपने Aurea खाते में साइन इन करें कि उसमें AureaHyper है या नहीं।</string>
     <string name="hyper_measure_again">डिवाइस को फिर से मापें</string>
     <string name="hyper_meter_almost">लगभग हो गया…</string>
@@ -91,13 +91,15 @@
     <string name="hyper_path_turbo">Turbo</string>
     <string name="hyper_path_turbo_body">सबसे तेज़, GPU पर। हर डिवाइस पर चलता है।</string>
     <string name="hyper_preset_anime">एनीमे</string>
-    <string name="hyper_preset_anime_body">कार्टून और एनीमे के लिए बने नेटवर्क से रिज़ॉल्यूशन दोगुना करता है।</string>
+    <string name="hyper_preset_anime_body">ऐनिमेशन और ऐनिमे को साफ़ किनारों के साथ बड़ा करता है।</string>
     <string name="hyper_preset_fps60">60 fps</string>
     <string name="hyper_preset_fps60_body">मूल फ़्रेम के बीच नए फ़्रेम बनाकर गति को और स्मूद करता है।</string>
     <string name="hyper_preset_restore">पुराना वीडियो ठीक करें</string>
     <string name="hyper_preset_restore_body">नॉइज़ और ब्लॉक हटाता है, इंटरलेसिंग ठीक करता है, रिज़ॉल्यूशन दोगुना करता है और चेहरों को निखारता है।</string>
-    <string name="hyper_preset_sharper">ज़्यादा साफ़</string>
-    <string name="hyper_preset_sharper_body">नए डिटेल के साथ रिज़ॉल्यूशन बढ़ाता है।</string>
+    <string name="hyper_preset_sharper">Aurea Detail</string>
+    <string name="hyper_preset_sharper_body">एक GPU पास में बारीकियाँ उभारता है और किनारे सुधारता है।</string>
+    <string name="hyper_preset_enchance">AureaEnchance</string>
+    <string name="hyper_preset_enchance_body">GPU पर प्रशिक्षित फ़िल्टर से 2× पर बारीकियाँ पुनर्निर्मित करता है।</string>
     <string name="hyper_preset_slowmo">स्लो मोशन</string>
     <string name="hyper_preset_slowmo_body">नए फ़्रेम बनाकर वीडियो को धीमा करता है, बिना झटकों के।</string>
     <string name="hyper_preset_stabilize">स्थिर करें</string>
@@ -126,7 +128,7 @@
     <string name="hyper_step_of">%2$d में से %1$d</string>
     <string name="hyper_step_prepare">तैयारी</string>
     <string name="hyper_step_stable">स्थिर करना</string>
-    <string name="hyper_step_upscale">रिज़ॉल्यूशन बढ़ाना</string>
+    <string name="hyper_step_upscale">Aurea Detail</string>
     <string name="hyper_time_hours">%1$d घंटे %2$d मिनट</string>
     <string name="hyper_time_left">%1$s बाकी</string>
     <string name="hyper_time_minutes">%1$d मिनट</string>
@@ -146,4 +148,5 @@
     <string name="licenses_oss_intro">Aurea ओपन-सोर्स सॉफ़्टवेयर और मॉडल इस्तेमाल करता है। किसी आइटम पर टैप करके लाइसेंस वैसे ही पढ़ें जैसे वह ऐप में आता है।</string>
     <string name="licenses_oss_title">ओपन-सोर्स लाइसेंस</string>
     <string name="licenses_read_failed">यह फ़ाइल पढ़ी नहीं जा सकी।</string>
+    <string name="hyper_detail_same_size">मूल आकार</string>
 </resources>

@@ -151,6 +151,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/GlowEffect.cpp
     src/effects/builtin/TransformEffect.cpp
     src/effects/builtin/MotionTileEffect.cpp
+    src/effects/builtin/TrackerEffects.cpp
     src/effects/builtin/MotionDetectEffect.cpp
     src/effects/builtin/RetroDisplaceEffects.cpp
     src/effects/builtin/DatamoshEffect.cpp

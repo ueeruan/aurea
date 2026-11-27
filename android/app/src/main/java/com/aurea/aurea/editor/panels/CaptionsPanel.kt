@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -52,59 +53,109 @@ import com.aurea.aurea.ui.ds.AureaToggle
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
+import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
 
-/**
- * LEGENDAS (0.5.3, no jeito do Premiere, com a cara do AUREA): quatro abas de
- * ícone na moldura comum — um assunto por aba (FUNCTIONS_IA.md §3.1).
- *
- *  - **Criar**: transcrever (nuvem e depois o modelo do aparelho) e a janela de
- *    opções de criação (modelo, linhas, caracteres, duração mínima, intervalo…);
- *  - **Transcrição**: a fala em parágrafos, corrigir palavra, buscar/substituir,
- *    criar legendas de um trecho;
- *  - **Legendas**: a lista de blocos (entrada–saída e texto), o centro do
- *    trabalho: editar, ‹ › de quadro, dividir, unir, inserir, apagar, exportar;
- *  - **Estilo**: faixa toda ou só as escolhidas — modelos, aparência, texto e
- *    caixa, posição.
- *
- * As regras de edição moram no motor (`edit_caption_track`); a tela só manda.
- * Desenho e comportamento: build/reference/am-ui-20261113/CAPTIONS_PREMIERE.md.
- */
 @Composable
 internal fun CaptionsPanel(env: PanelEnv) {
     val store = env.store
     val cap = store.captions
     val sourceLayers = store.editingLayers.filter { it.kind == 1 || it.kind == 3 }
-    val selectedCaption = remember(store.primary, store.curveRevision) { cap.isCaption(store.primary) }
+    val selectedCaption = store.captionTracks.any { it.layer == store.primary }
     if (store.primary == null || (store.detail?.kind != 1 && store.detail?.kind != 3 && !selectedCaption)) {
-        LazyColumn(Modifier.fillMaxSize().padding(18.dp)) {
-            item { Text(stringResource(R.string.sh_add_captions_need_speech)) }
-            sourceLayers.forEach { layer -> item { CapAction(layer.name) { store.select(layer.id) } } }
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            item { CapNote(stringResource(R.string.sh_add_captions_need_speech), AureaColors.Muted) }
+            val tracks = store.captionTracks.mapTo(HashSet()) { it.layer }
+            (store.editingLayers.filter { it.id in tracks } + sourceLayers).forEach { layer ->
+                item(key = layer.id) { CapAction(layer.name) { store.select(layer.id) } }
+            }
         }
         return
     }
     val layerId = store.primary ?: return
     LaunchedEffect(layerId, store.curveRevision) { cap.open(layerId) }
-    // Com a faixa pronta, o painel abre na lista (o centro do trabalho); sem ela, em Criar.
     var tab by androidx.compose.runtime.saveable.rememberSaveable(layerId) {
-        androidx.compose.runtime.mutableIntStateOf(if (selectedCaption) 2 else 0)
+        androidx.compose.runtime.mutableIntStateOf(0)
     }
-    Row(Modifier.fillMaxSize()) {
-        Box(Modifier.weight(1f).fillMaxHeight()) {
-            when (tab) {
-                0 -> CaptionCreateTab(cap)
-                1 -> CaptionTranscriptTab(cap, store)
-                2 -> CaptionListTab(cap, store, onOwnStyle = { tab = 3 })
-                else -> CaptionStyleTab(cap, store)
+    var transcript by remember(layerId) { mutableStateOf(false) }
+    var presetsOnBlocks by remember(layerId) { mutableStateOf(false) }
+    val tabs = listOf(
+        PanelIconTab(CupertinoGlyph.CaptionsBubble, stringResource(R.string.fn_cap_tab_list), "captions.tab.list"),
+        PanelIconTab(CupertinoGlyph.Paintbrush, stringResource(R.string.tx_tab_style), "captions.tab.style"),
+        PanelIconTab(CupertinoGlyph.Gear, stringResource(R.string.caption_star_setup), "captions.tab.setup"),
+        PanelIconTab(CupertinoGlyph.Sparkles, stringResource(R.string.home_presets_short), "captions.tab.presets"),
+    )
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            tabs.forEachIndexed { index, item ->
+                val on = tab == index
+                val tint = if (on) AureaColors.Accent else AureaColors.Muted
+                Column(Modifier.weight(1f).height(48.dp).clip(RoundedCornerShape(10.dp))
+                    .background(if (on) AureaColors.AccentDim else AureaColors.Chip)
+                    .testTag(item.tag).tocavel(role = Role.Tab) { tab = index }
+                    .semantics { selected = on; contentDescription = item.label },
+                    verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                    CupertinoIcon(item.glyph, 17.dp, tint)
+                    Text(item.label, style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = tint)), maxLines = 1)
+                }
             }
         }
-        Box(Modifier.width(0.7.dp).fillMaxHeight().background(AureaColors.ContentStrongLine))
-        PanelIconTabs(listOf(
-            PanelIconTab(CupertinoGlyph.Waveform, stringResource(R.string.fn_cap_tab_create), "captions.tab.create"),
-            PanelIconTab(CupertinoGlyph.DocText, stringResource(R.string.fn_cap_tab_transcript), "captions.tab.transcript"),
-            PanelIconTab(CupertinoGlyph.CaptionsBubble, stringResource(R.string.fn_cap_tab_list), "captions.tab.list"),
-            PanelIconTab(CupertinoGlyph.Paintbrush, stringResource(R.string.tx_tab_style), "captions.tab.style"),
-        ), tab, stringResource(R.string.panel_legendas)) { tab = it }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when (tab) {
+                0 -> Column {
+                    if (cap.words.isNotEmpty()) {
+                        Box(Modifier.padding(horizontal = 14.dp)) {
+                            CapChips(listOf(stringResource(R.string.fn_cap_tab_list), stringResource(R.string.fn_cap_tab_transcript)),
+                                if (transcript) 1 else 0) { transcript = it == 1 }
+                        }
+                    }
+                    Box(Modifier.weight(1f)) {
+                        when {
+                            transcript && cap.words.isNotEmpty() -> CaptionTranscriptTab(cap, store)
+                            cap.track != null -> CaptionListTab(cap, store, onOwnStyle = { tab = 1 }, onConverted = env.onClose)
+                            else -> CaptionPrepareTab(cap)
+                        }
+                    }
+                }
+                1 -> CaptionStyleTab(cap, store, onSaved = { tab = 3 })
+                2 -> CaptionCreateTab(cap)
+                else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    item { CaptionJobStatus(cap) }
+                    item {
+                        val chosen = cap.selectedBlocks
+                        if (chosen.isNotEmpty()) {
+                            CapChips(listOf(stringResource(R.string.cap053_scope_track), stringResource(R.string.cap053_scope_selected, chosen.size)),
+                                if (presetsOnBlocks) 1 else 0) { presetsOnBlocks = it == 1 }
+                        }
+                        val target = remember(presetsOnBlocks, chosen, cap.track) {
+                            if (presetsOnBlocks && chosen.isNotEmpty() && cap.track != null) cap.blockLook(chosen) else cap
+                        }
+                        CaptionTemplateRow(target)
+                    }
+                    item { CaptionPresetBrowser(cap) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CaptionPrepareTab(cap: CaptionsState) {
+    val srt = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { cap.importSrt(it) } }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item { CaptionJobStatus(cap) }
+        item { CapNote(stringResource(R.string.cap053_no_captions), AureaColors.Muted) }
+        item {
+            CapAction(stringResource(R.string.panel_gerar_legendas), primary = true, enabled = cap.lookEnabled) {
+                if (cap.words.isNotEmpty()) cap.generate() else cap.transcribe(cap.speechLanguage)
+            }
+        }
+        item {
+            CapAction(stringResource(R.string.cap053_import), enabled = cap.lookEnabled) {
+                srt.launch(arrayOf("application/x-subrip", "text/vtt", "text/*", "application/octet-stream"))
+            }
+        }
     }
 }
 
@@ -122,8 +173,7 @@ internal fun CaptionJobStatus(cap: CaptionsState) {
 }
 
 /**
- * CRIAR: transcrever e a janela "Criar legendas" (as opções valem ao criar ou
- * refazer; estilo e posição mudam na hora pela aba Estilo).
+ * Configuração de transcrição e das opções usadas para criar ou refazer a faixa.
  */
 @Composable
 private fun CaptionCreateTab(cap: CaptionsState) {
@@ -162,17 +212,12 @@ private fun CaptionCreateTab(cap: CaptionsState) {
         item(key = "criar") {
             Column {
                 CapSection(stringResource(R.string.cap053_create_title))
-                CaptionTemplateRow(cap)
-                CapLabel(stringResource(R.string.pn_caption))
-                CapChips(listOf(stringResource(R.string.pn_caption_grouped), stringResource(R.string.pn_caption_one_per_word)), s.mode) { i -> set { it.copy(mode = i) } }
                 if (s.mode == 0) {
                     CapLabel(stringResource(R.string.pn_caption_lines))
                     CapChips(listOf("1", "2"), s.maxLines - 1) { i -> set { it.copy(maxLines = i + 1) } }
                     CapLabel(stringResource(R.string.pn_caption_chars_per_line))
                     val chars = listOf(12, 18, 24, 32, 42)
                     CapChips(chars.map { "$it" }, chars.indexOf(s.maxChars)) { i -> set { it.copy(maxChars = chars[i]) } }
-                    CapLabel(stringResource(R.string.pn_caption_words_per_caption))
-                    CapChips((1..8).map { "$it" }, s.maxWords - 1) { i -> set { it.copy(maxWords = i + 1) } }
                 }
                 CapLabel(stringResource(R.string.cap053_min_duration))
                 val mins = listOf(0.5f, 0.8f, 1.2f, 2f)
@@ -183,7 +228,6 @@ private fun CaptionCreateTab(cap: CaptionsState) {
                 CapChips(gaps.map { "$it" }, gaps.indexOf(s.gapFrames)) { i -> set { it.copy(gapFrames = gaps[i]) } }
                 CapToggle(stringResource(R.string.cap053_break_sentence), s.breakOnSentence) { v -> set { it.copy(breakOnSentence = v) } }
                 CapToggle(stringResource(R.string.pn_caption_break_pauses), s.breakOnPause) { v -> set { it.copy(breakOnPause = v) } }
-                CapToggle(stringResource(R.string.pn_caption_uppercase), s.uppercase) { v -> set { it.copy(uppercase = v) } }
                 CapToggle(stringResource(R.string.pn_caption_remove_fillers), s.removeFillers) { v -> set { it.copy(removeFillers = v) } }
                 CapNote(stringResource(R.string.cap053_create_note), AureaColors.Muted)
                 Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

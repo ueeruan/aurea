@@ -237,8 +237,11 @@ export async function lerSessao(env, req) {
   const now = Date.now();
   // Read even expired/revoked rows: they are authoritative tombstones and must
   // not fall through to an eventually-consistent legacy KV session.
-  let d = await env.AUREA_DB.prepare("SELECT uid, created_at, expires_at FROM sessions WHERE token_hash = ?")
-    .bind(hash).first();
+  // 1.0.9: sessão e conta numa consulta só. O D1 fica longe (WEUR) e cada ida
+  // e volta custava ~160 ms em todo pedido autenticado.
+  const comConta = "SELECT s.uid, s.created_at, s.expires_at, u.id AS account, u.email, u.password_changed_at " +
+    "FROM sessions s LEFT JOIN users u ON u.id = s.uid WHERE s.token_hash = ?";
+  let d = await env.AUREA_DB.prepare(comConta).bind(hash).first();
   if (!d && env.AUREA_KV) {
     const legacy = await env.AUREA_KV.get("sess:" + hash, "json");
     if (!legacy || typeof legacy.uid !== 'string' || !Number.isSafeInteger(legacy.criado) ||
@@ -248,11 +251,10 @@ export async function lerSessao(env, req) {
     await env.AUREA_DB.prepare("INSERT OR IGNORE INTO sessions (token_hash,uid,email,created_at,expires_at) VALUES (?,?,?,?,?)")
       .bind(hash, legacy.uid, account.email, legacy.criado, legacy.criado + SESSAO_TTL_S * 1000).run();
     // A concurrent logout may have written a tombstone while KV was loading.
-    d = await env.AUREA_DB.prepare("SELECT uid, created_at, expires_at FROM sessions WHERE token_hash = ?").bind(hash).first();
+    d = await env.AUREA_DB.prepare(comConta).bind(hash).first();
   }
   if (!d || d.expires_at <= now || d.created_at > now || d.created_at + SESSAO_TTL_S * 1000 <= now) return null;
-  const account = await env.AUREA_DB.prepare("SELECT email, password_changed_at FROM users WHERE id = ?").bind(d.uid).first();
-  return account && d.created_at >= account.password_changed_at ? { uid: d.uid, email: account.email, hash } : null;
+  return d.account && d.created_at >= d.password_changed_at ? { uid: d.uid, email: d.email, hash } : null;
 }
 
 async function contarUsuarios(env) {
@@ -498,6 +500,8 @@ async function excluirConta(req, env) {
     // Os vídeos do Mural vão junto (o registro cai em cascata com o perfil).
     const mural = await q("SELECT id FROM mural_posts WHERE uid = ?", s.uid).all().catch(() => null);
     for (const x of mural?.results ?? []) arquivos.push(`mural/${x.id}/video.mp4`, `mural/${x.id}/thumb.jpg`);
+    const media = await q("SELECT id FROM community_media WHERE uid = ?", s.uid).all().catch(() => null);
+    for (const x of media?.results ?? []) arquivos.push(`community/media/${x.id}`);
   } catch {
     // Banco sem as tabelas da comunidade (migração 0004 não aplicada): nada a apagar lá.
     arquivos = [];

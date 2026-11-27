@@ -42,7 +42,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.aurea.aurea.BuildConfig
 import com.aurea.aurea.R
-import com.aurea.aurea.ui.ds.AureaAlert
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
@@ -71,26 +70,6 @@ internal fun ReleaseNotesEntry(button: Boolean = true) {
         contentAlignment = Alignment.Center,
     ) {
         CupertinoIcon(CupertinoGlyph.Sparkles, 22.dp, AureaColors.LightText)
-    }
-    if (!showing && AureaDonations.launchPromptPending) {
-        AureaAlert(
-            title = stringResource(R.string.donation_title),
-            message = stringResource(R.string.donation_launch_question),
-            confirmLabel = stringResource(R.string.donation_launch_yes),
-            cancelLabel = stringResource(R.string.donation_launch_later),
-            onConfirm = {
-                AureaDonations.launchPromptPending = false
-                try {
-                    context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
-                        android.net.Uri.parse(AureaDonations.MERCADO_PAGO)))
-                } catch (_: android.content.ActivityNotFoundException) {
-                    (context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
-                        .setPrimaryClip(android.content.ClipData.newPlainText("Aurea", AureaDonations.MERCADO_PAGO))
-                    android.widget.Toast.makeText(context, R.string.donation_copied, android.widget.Toast.LENGTH_SHORT).show()
-                }
-            },
-            onDismiss = { AureaDonations.launchPromptPending = false },
-        )
     }
     if (showing) {
         ReleaseNotesScreen(stringResource(R.string.motion_release_body)) {

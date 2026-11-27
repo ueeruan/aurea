@@ -1,13 +1,18 @@
 package com.aurea.aurea.editor
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -15,8 +20,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,7 +35,9 @@ import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -39,9 +46,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.R
+import com.aurea.aurea.editor.panels.BG_REMOVE_TYPE_ID
+import com.aurea.aurea.editor.panels.bgRemoveFailedText
+import com.aurea.aurea.editor.panels.effectTypeId
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
+import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
 import kotlinx.coroutines.delay
 
@@ -52,17 +63,26 @@ import kotlinx.coroutines.delay
 //  composição para a camada, guarda no efeito e refaz os recortes.
 // =============================================================================
 
-data class RotoSession(val layer: Long, val effectId: Int, val previousView: Int)
+internal data class CutoutTarget(val layer: Long, val effectId: Int, val automatic: Boolean)
 
-object RotoPaint {
-    var session by mutableStateOf<RotoSession?>(null)
+private val brushEffectType by lazy { effectTypeId("aurea.key.rotobrush") }
+
+internal data class CutoutStatus(
+    val done: Int = 0, val total: Int = 0, val running: Boolean = false, val failure: Long = 0,
+    val frameReady: Boolean = false, val framesReady: Int = 0, val frames: Int = 0,
+    val strokesHere: Long = 0, val hasStrokes: Boolean = false, val effectiveModel: Long = 0,
+)
+
+internal object RotoPaint {
+    var session by mutableStateOf<CutoutTarget?>(null)
     var background by mutableStateOf(false)
     /** Visualização DENTRO do modo pintar: 0 final, 1 máscara, 2 sobreposição. */
     var view by mutableStateOf(2)
     /** Raio do pincel em px da composição. */
     var radius by mutableFloatStateOf(24f)
     /** Traço em curso, em px da tela (desenho ao vivo). */
-    var live by mutableStateOf<List<Offset>>(emptyList())
+    val live = mutableStateListOf<Offset>()
+    var statuses by mutableStateOf<Map<CutoutTarget, CutoutStatus>>(emptyMap())
 }
 
 /** O aviso de falha pelo motivo do motor (Renderer::roto_status [3]). */
@@ -77,9 +97,9 @@ fun rotoPaintActive(store: EditorStore): Boolean = RotoPaint.session?.let { it.l
 
 private fun rotoEnd(store: EditorStore) {
     val s = RotoPaint.session ?: return
-    store.engineForStress.rotoSetView(s.layer, s.effectId, s.previousView)
+    store.engineForStress.rotoSetView(s.layer, s.effectId, 3)
     RotoPaint.session = null
-    RotoPaint.live = emptyList()
+    RotoPaint.live.clear()
     store.rotoChanged()
 }
 
@@ -91,11 +111,12 @@ internal suspend fun AwaitPointerEventScope.rotoGesture(store: EditorStore, m: S
     val s = RotoPaint.session ?: return
     if (!m.valid) return
     val xy = ArrayList<Float>()
-    val screen = ArrayList<Offset>()
+    val screen = RotoPaint.live
+    screen.clear()
+    val spacing = (RotoPaint.radius * kotlin.math.abs(m.sx(1f) - m.sx(0f)) * .18f).coerceIn(1f, 4f)
     fun add(p: Offset) {
         xy += m.cx(p.x); xy += m.cy(p.y)
         screen += p
-        RotoPaint.live = screen.toList()
     }
     down.consume()
     add(down.position)
@@ -103,14 +124,24 @@ internal suspend fun AwaitPointerEventScope.rotoGesture(store: EditorStore, m: S
     var moved = false
     while (true) {
         val ev = awaitPointerEvent()
+        if (RotoPaint.session != s) return
         val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
-        if (!ch.pressed) break
+        if (ev.changes.any { it.id != down.id && it.pressed }) {
+            screen.clear()
+            return
+        }
+        if (!ch.pressed) {
+            if (moved && ch.position != screen.last()) add(ch.position)
+            break
+        }
         if (ch.positionChanged()) {
-            add(ch.position); ch.consume()
+            if ((ch.position - screen.last()).getDistance() >= spacing) add(ch.position)
+            ch.consume()
             if ((ch.position - down.position).getDistance() > slop) moved = true
         }
     }
-    RotoPaint.live = emptyList()
+    screen.clear()
+    if (RotoPaint.session != s || store.primary != s.layer) return
     val engine = store.engineForStress
     val added = if (moved) engine.rotoAddStroke(s.layer, s.effectId, RotoPaint.background, RotoPaint.radius, xy.toFloatArray())
                 else engine.rotoAddClick(s.layer, s.effectId, RotoPaint.background, xy[0], xy[1])
@@ -127,122 +158,177 @@ internal fun DrawScope.drawRotoOverlay(m: StageMapper) {
     pts.lastOrNull()?.let { drawCircle(color, r, it) }
 }
 
+private fun readCutout(store: EditorStore, target: CutoutTarget): CutoutStatus? {
+    val engine = store.engineForStress
+    val brush = engine.rotoStatus(target.layer, target.effectId)
+    if (brush.getOrElse(10) { 0L } == 0L) return null
+    if (brush[9] != 0L) return CutoutStatus(
+        brush[0].toInt(), brush[1].toInt(), brush[2] != 0L, brush[3],
+        brush[6] != 0L, brush[7].toInt(), brush[8].toInt(), brush[4], hasStrokes = true,
+    )
+    if (!target.automatic) return CutoutStatus()
+    val auto = engine.bgRemoveStatus(target.layer, target.effectId)
+    if (auto[8] == 0L) return null
+    return CutoutStatus(
+        auto[0].toInt(), auto[1].toInt(), auto[2] != 0L, auto[3],
+        auto[4] != 0L, auto[5].toInt(), auto[6].toInt(), effectiveModel = auto[7],
+    )
+}
+
 @Composable
-private fun RotoChip(label: String, tag: String, on: Boolean, onClick: () -> Unit) {
+internal fun CutoutStageStatus(store: EditorStore, modifier: Modifier) {
+    val layer = store.primary
+    val targets = store.effects.mapNotNull { effect ->
+        if (!effect.enabled || layer == null || (effect.typeId != BG_REMOVE_TYPE_ID && effect.typeId != brushEffectType)) null
+        else CutoutTarget(layer, effect.effectId, effect.typeId == BG_REMOVE_TYPE_ID)
+    }
+    LaunchedEffect(store, targets) {
+        RotoPaint.statuses = RotoPaint.statuses.filterKeys { it in targets }
+        while (targets.isNotEmpty()) {
+            val previous = RotoPaint.statuses
+            val next = targets.mapNotNull { target ->
+                (readCutout(store, target) ?: previous[target])?.let { target to it }
+            }.toMap()
+            RotoPaint.statuses = next
+            delay(if (next.size < targets.size || next.values.any { it.running || (it.frames > 0 && !it.frameReady && it.failure == 0L) }) 250 else 800)
+        }
+    }
+    val states = targets.mapNotNull { RotoPaint.statuses[it] }
+    val running = states.firstOrNull { it.running }
+    val pending = states.any { it.frames > 0 && !it.frameReady && it.failure == 0L } ||
+        (targets.any { !it.automatic } && store.localAiActivity and 2 != 0)
+    if (running == null && !pending) return
+    val label = stringResource(if (running != null) R.string.cutout_analyzing_scene else R.string.cutout_analyzing_frame)
+    Column(
+        modifier.widthIn(max = 264.dp).clip(RoundedCornerShape(12.dp)).background(AureaColors.EditorPanelHigh)
+            .border(1.dp, AureaColors.Accent.copy(alpha = .35f), RoundedCornerShape(12.dp))
+            .semantics { liveRegion = LiveRegionMode.Polite }.testTag("stage.cutout.progress")
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = AureaColors.Text)))
+        if (running != null && running.total > 0) {
+            val done = running.done.coerceIn(0, running.total)
+            LinearProgressIndicator(
+                progress = { done.toFloat() / running.total },
+                modifier = Modifier.fillMaxWidth(),
+                color = AureaColors.Accent,
+                trackColor = AureaColors.Chip,
+            )
+            Text(stringResource(R.string.bg_remove_progress, done, running.total), style = cutoutMuted())
+        }
+    }
+}
+
+@Composable
+private fun cutoutMuted() = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted))
+
+@Composable
+private fun RotoChip(label: String, tag: String, on: Boolean = false, tint: Color = AureaColors.Accent, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(10.dp)
     Box(
-        Modifier
-            .heightIn(min = 36.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (on) AureaColors.Text.copy(alpha = 0.18f) else AureaColors.Chip)
+        Modifier.heightIn(min = 44.dp).clip(shape)
+            .background(if (on) tint.copy(alpha = .16f) else AureaColors.Chip)
+            .border(1.dp, if (on) tint.copy(alpha = .48f) else Color.Transparent, shape)
             .testTag(tag)
             .semantics { role = Role.Button; contentDescription = label; selected = on }
             .tocavel(haptic = true, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 12.dp),
     ) {
         Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)))
     }
 }
 
-/** Dentro do cartão do Rotobrush: o botão "Pintar recorte" e, no modo, os controles. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun RotoPaintControls(store: EditorStore, effectId: Int, view: Int) {
+internal fun RotoPaintControls(store: EditorStore, effectId: Int, automatic: Boolean = false) {
     val layer = store.primary ?: return
-    val s = RotoPaint.session
-    if (s == null || s.layer != layer || s.effectId != effectId) {
-        RotoChip(stringResource(R.string.roto_paint), "fx.roto.paint", false) {
-            // Outra sessão aberta (outra layer/instância): encerra antes, senão
-            // a sobreposição dela ficava ligada para sempre.
-            rotoEnd(store)
-            store.pause()
-            RotoPaint.background = false
-            RotoPaint.view = 2
-            RotoPaint.session = RotoSession(layer, effectId, view)
-            store.engineForStress.rotoSetView(layer, effectId, 2)
-            store.rotoChanged()
-        }
-        return
+    val selected = store.editingLayers.firstOrNull { it.id == layer } ?: return
+    if (selected.locked || store.effects.firstOrNull { it.effectId == effectId }?.enabled != true) return
+    val target = CutoutTarget(layer, effectId, automatic)
+    val mine = RotoPaint.session == target
+    DisposableEffect(store, target) {
+        onDispose { if (RotoPaint.session == target) rotoEnd(store) }
     }
-    // Fechar o painel, apagar o efeito ou trocar de projeto encerra o modo
-    // pintar (como Malha/Fantoche): o palco deixa de comer toques e a
-    // sobreposição volta à visualização anterior.
-    DisposableEffect(layer, effectId) {
-        onDispose { if (RotoPaint.session?.let { it.layer == layer && it.effectId == effectId } == true) rotoEnd(store) }
-    }
-    var status by remember { mutableStateOf(LongArray(10)) }
-    LaunchedEffect(s) {
-        while (true) {
-            status = store.engineForStress.rotoStatus(layer, effectId)
-            // Propagando ou com o quadro atual pendente: atualiza rápido.
-            delay(if (status[2] != 0L || (status[9] != 0L && status[6] == 0L)) 250 else 800)
-        }
-    }
-    val muted = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Muted))
-    Column(Modifier.padding(bottom = 6.dp)) {
-        Text(stringResource(R.string.roto_hint), style = muted)
-        // O que está acontecendo, SEMPRE visível: este quadro, o clipe, falha.
-        if (status[9] != 0L) {
-            Text(
-                stringResource(if (status[6] != 0L) R.string.roto_frame_ready else R.string.roto_frame_pending),
-                Modifier.padding(top = 6.dp).testTag("fx.roto.frame"),
-                style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, fontWeight = FontWeight.W600,
-                    color = if (status[6] != 0L) AureaColors.Success else AureaColors.Text)),
-            )
-            if (status[8] > 1) Text(
-                stringResource(R.string.roto_clip_status, status[7].toInt(), status[8].toInt()),
-                Modifier.padding(top = 2.dp).testTag("fx.roto.clip"), style = muted,
-            )
-            // Bugs 0.3.4: status[3] traz o motivo (2 rede/4 memória, 3 leitura do
-            // vídeo); o aviso diz o que fazer para cada um.
-            if (status[3] != 0L && status[2] == 0L) Text(
-                stringResource(rotoFailedText(status[3])), Modifier.padding(top = 2.dp).testTag("fx.roto.failed"),
-                style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Danger)),
-            )
-        }
-        // Ver o resultado sem sair do modo pintar: Final (com as camadas de
-        // baixo), Sobreposição (fundo vermelho translúcido) ou Máscara.
-        Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(stringResource(R.string.roto_view_label), Modifier.padding(top = 10.dp, end = 2.dp), style = muted)
-            for ((mode, res, tag) in listOf(
-                Triple(0, R.string.roto_view_final, "fx.roto.view.final"),
-                Triple(2, R.string.roto_view_overlay, "fx.roto.view.overlay"),
-                Triple(1, R.string.roto_view_mask, "fx.roto.view.mask"),
-            )) RotoChip(stringResource(res), tag, RotoPaint.view == mode) {
-                RotoPaint.view = mode
-                store.engineForStress.rotoSetView(layer, effectId, mode)
-                store.rotoChanged()
-            }
-        }
-        Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            RotoChip(stringResource(R.string.roto_object), "fx.roto.object", !RotoPaint.background) { RotoPaint.background = false }
-            RotoChip(stringResource(R.string.roto_background), "fx.roto.background", RotoPaint.background) { RotoPaint.background = true }
-            RotoChip(stringResource(R.string.roto_undo), "fx.roto.undo", false) {
-                if (store.engineForStress.rotoUndoStroke(layer, effectId)) store.rotoChanged()
-            }
-        }
-        val sizeLabel = stringResource(R.string.roto_brush_size)
-        Text(sizeLabel, Modifier.padding(top = 6.dp), style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Muted)))
-        Slider(
-            value = RotoPaint.radius,
-            onValueChange = { RotoPaint.radius = it },
-            valueRange = 4f..160f,
-            modifier = Modifier.testTag("fx.roto.size").semantics { contentDescription = sizeLabel },
+    val status = RotoPaint.statuses[target] ?: CutoutStatus()
+    val video = selected.kind == LayerType.Video.kind
+    val failed = stringResource(R.string.bg_remove_failed)
+    val model = store.effectParams[effectId]?.firstOrNull { it.index == 10 }?.value?.firstOrNull()?.toInt()
+    Column(Modifier.fillMaxWidth().padding(bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Text(
+            stringResource(if (mine) R.string.cutout_brush_help else if (automatic) R.string.cutout_auto_help else R.string.cutout_brush_help),
+            style = cutoutMuted(),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            val propagateLabel = if (status[8] > 1) stringResource(R.string.roto_propagate_count, status[8].toInt())
-                                 else stringResource(R.string.roto_propagate)
-            RotoChip(propagateLabel, "fx.roto.propagate", status[2] != 0L) {
-                if (status[2] != 0L) store.engineForStress.rotoCancel()
-                else store.engineForStress.rotoPropagate(layer, effectId)
-                status = store.engineForStress.rotoStatus(layer, effectId)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (!mine) RotoChip(stringResource(R.string.cutout_brush), "fx.roto.paint", true) {
+                rotoEnd(store)
+                store.pause()
+                if (store.engineForStress.rotoSetView(layer, effectId, 2)) {
+                    RotoPaint.background = false
+                    RotoPaint.view = 2
+                    RotoPaint.session = target
+                    store.rotoChanged()
+                }
             }
-            RotoChip(stringResource(R.string.roto_done), "fx.roto.done", false) { rotoEnd(store) }
+            if (video && (automatic || status.hasStrokes)) {
+                val tag = if (status.hasStrokes) "fx.roto.propagate" else if (status.running) "fx.bg.cancel" else "fx.bg.analyze"
+                RotoChip(
+                    stringResource(if (status.running) R.string.bg_remove_cancel else if (status.hasStrokes) R.string.cutout_track else R.string.bg_remove_analyze),
+                    tag, status.running,
+                ) {
+                    val engine = store.engineForStress
+                    if (status.running) {
+                        if (status.hasStrokes) engine.rotoCancel() else engine.bgRemoveCancel()
+                    } else {
+                        if (store.playing) store.pause()
+                        val ok = if (status.hasStrokes) engine.rotoPropagate(layer, effectId)
+                        else engine.bgRemoveAnalyze(layer, effectId)
+                        if (!ok) store.showToast(failed)
+                        else RotoPaint.statuses = RotoPaint.statuses + (target to status.copy(running = true, done = 0, total = status.frames))
+                    }
+                    readCutout(store, target)?.let { RotoPaint.statuses = RotoPaint.statuses + (target to it) }
+                }
+            }
+            if (mine) RotoChip(stringResource(R.string.roto_done), "fx.roto.done", true) { rotoEnd(store) }
         }
-        if (status[2] != 0L && status[1] > 0) {
-            Text(
-                stringResource(R.string.roto_progress, status[0].toInt(), status[1].toInt()),
-                Modifier.padding(top = 4.dp).testTag("fx.roto.progress"),
-                style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Muted)),
+        if (mine) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                RotoChip(stringResource(R.string.cutout_brush_add), "fx.roto.object", !RotoPaint.background, AureaColors.Success) { RotoPaint.background = false }
+                RotoChip(stringResource(R.string.cutout_brush_subtract), "fx.roto.background", RotoPaint.background, AureaColors.Danger) { RotoPaint.background = true }
+                if (status.strokesHere > 0) RotoChip(stringResource(R.string.roto_undo), "fx.roto.undo") {
+                    if (store.engineForStress.rotoUndoStroke(layer, effectId)) store.rotoChanged()
+                }
+            }
+            val sizeLabel = stringResource(R.string.roto_brush_size)
+            Text("$sizeLabel · ${RotoPaint.radius.toInt()} px", style = cutoutMuted())
+            Slider(
+                value = RotoPaint.radius, onValueChange = { RotoPaint.radius = it }, valueRange = 4f..160f,
+                modifier = Modifier.testTag("fx.roto.size").semantics { contentDescription = sizeLabel },
             )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                for ((mode, res, tag) in listOf(
+                    Triple(2, R.string.roto_view_overlay, "fx.roto.view.overlay"),
+                    Triple(0, R.string.roto_view_final, "fx.roto.view.final"),
+                    Triple(1, R.string.roto_view_mask, "fx.roto.view.mask"),
+                )) RotoChip(stringResource(res), tag, RotoPaint.view == mode) {
+                    if (store.engineForStress.rotoSetView(layer, effectId, mode)) {
+                        RotoPaint.view = mode
+                        store.rotoChanged()
+                    }
+                }
+            }
+        }
+        if (status.frameReady) Text(stringResource(R.string.roto_frame_ready), style = cutoutMuted())
+        if (video && status.frames > 1 && !status.running && status.framesReady > 0) Text(
+            stringResource(R.string.bg_remove_clip_status, status.framesReady, status.frames),
+            style = cutoutMuted(),
+        )
+        if (status.failure != 0L && !status.running) Text(
+            stringResource(if (status.hasStrokes) rotoFailedText(status.failure) else bgRemoveFailedText(status.failure)),
+            style = cutoutMuted().copy(color = AureaColors.Danger),
+        )
+        if (automatic && !status.hasStrokes && model == 1 && status.frames > 0 && status.effectiveModel == 0L) {
+            Text(stringResource(R.string.bg_remove_person_unavailable), style = cutoutMuted())
         }
     }
 }

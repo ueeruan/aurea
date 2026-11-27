@@ -16,6 +16,7 @@
 #include "aurea/bridge/BridgePods.hpp"
 #include "aurea/project/Presets.hpp"
 #include "aurea/timeline/Composition.hpp"
+#include "aurea/text/TextAnimator.hpp"
 #include "aurea/text/WhisperWords.hpp"
 
 #include <algorithm>
@@ -506,6 +507,47 @@ AUREA_TEST(Captions, StyleSwitchAndCaptionPresetKeepsTheBlocksAndTiming) {
     AUREA_CHECK(!rig.edit("{\"op\":\"preset\",\"ids\":" + rig.one_of(0) + ",\"preset\":\"{\\\"aurea_preset\\\":1,\\\"kind\\\":\\\"text\\\"}\"}"));
 }
 
+AUREA_TEST(Captions, WordLayoutAndPersonalPresetKeepEditedWords) {
+    CaptionRig rig(8);
+    AUREA_CHECK(rig.track() != nullptr);
+    if (!rig.track()) return;
+    AUREA_CHECK(rig.edit("{\"op\":\"text\",\"ids\":" + rig.one_of(0) + ",\"text\":\"Fala corrigida\"}"));
+    auto tokens = [&] {
+        std::vector<std::string> result;
+        for (const auto& block : rig.track()->captions)
+            for (const auto& word : block.words) result.push_back(word.text);
+        return result;
+    };
+    const auto before = tokens();
+    const auto start = rig.track()->captions.front().start;
+    AUREA_CHECK(rig.edit("{\"op\":\"layout\",\"words\":1}"));
+    AUREA_CHECK_EQ(rig.track()->captions.size(), before.size());
+    AUREA_CHECK_EQ(rig.track()->captions.front().start, start);
+    AUREA_CHECK(tokens() == before);
+    auto appearance = rig.track()->captionOptions;
+    appearance.look |= text::kCaptionLookFont;
+    appearance.fontFamily = "Caption Fixture";
+    appearance.fontPath = "docs:Fonts/CaptionFixture.ttf";
+    AUREA_CHECK(rig.engine.set_caption_options(rig.trackId, appearance));
+    auto preset = rig.engine.save_caption_bundle(rig.trackId, "Palavra por palavra");
+    AUREA_CHECK(!preset.empty());
+    if (preset.empty()) return;
+    AUREA_CHECK(rig.edit("{\"op\":\"layout\",\"words\":3}"));
+    AUREA_CHECK(rig.track()->captions.size() < before.size());
+    for (const auto& block : rig.track()->captions) AUREA_CHECK(block.words.size() <= 3);
+    AUREA_CHECK(tokens() == before);
+    const usize groupedCount = rig.track()->captions.size();
+    AUREA_CHECK(rig.engine.apply_caption_bundle(rig.trackId, preset));
+    AUREA_CHECK_EQ(rig.track()->captions.size(), groupedCount); // Legacy presets style existing blocks.
+    AUREA_CHECK(rig.edit("{\"op\":\"layout\",\"words\":2}"));
+    preset.insert(1, "\"reflowWords\":true,");
+    AUREA_CHECK(rig.engine.apply_caption_bundle(rig.trackId, preset));
+    AUREA_CHECK_EQ(rig.track()->captions.size(), before.size());
+    AUREA_CHECK_EQ(rig.track()->text.fontPath, appearance.fontPath);
+    AUREA_CHECK(tokens() == before);
+    AUREA_CHECK(!rig.edit("{\"op\":\"layout\",\"words\":0}"));
+}
+
 AUREA_TEST(Captions, RegroupRebuildsOnlyTheChosenBlocks) {
     CaptionRig rig(8);
     const Layer* before = rig.track();
@@ -650,6 +692,64 @@ bool undo_once(Engine& engine) {
     return engine.apply_command(u).ok();
 }
 } // namespace
+
+AUREA_TEST(Captions, ConvertTrackToEditableTextWithOneUndo) {
+    text::CaptionOptions options;
+    options.maxWords = 2;
+    options.uppercase = true;
+    options.style = 5;
+    CaptionRig rig(8, options);
+    Layer* source = rig.track_mut();
+    AUREA_CHECK(source != nullptr && source->captions.size() > 1);
+    if (!source || source->captions.size() <= 1) return;
+    const LayerId id = LayerId::unpack(rig.trackId);
+    auto& comp = *rig.comp();
+    const auto rejectedLayer = comp.add_layer(LayerKind::Shape, "Needs the caption track");
+    comp.layer(rejectedLayer)->matteSource = id;
+    AUREA_CHECK(!rig.edit(R"({"op":"to_layers"})"));
+    AUREA_CHECK(rig.track() != nullptr);
+    comp.layer(rejectedLayer)->matteSource = {};
+    source = rig.track_mut();
+    const auto originalPlacement = source->transform.position;
+    auto look = options;
+    look.look = text::kCaptionLookFill;
+    look.fill = {0.2f, 0.5f, 0.7f, 1.0f};
+    source->captions[1].look = look;
+    source->offset = FrameIndex{source->captions.front().start + 1};
+    source->start = FrameIndex{17};
+    const auto originalStart = source->start;
+    const auto segments = source->captions;
+    const auto firstIndex = static_cast<u32>(comp.z_index_of(id));
+    const u32 originalLayerCount = comp.order().size();
+    const i64 shift = source->start.value - source->offset.value;
+    AUREA_CHECK(rig.edit(R"({"op":"to_layers","ids":[]})"));
+    AUREA_CHECK(!rig.track());
+    AUREA_CHECK_EQ(comp.order().size(), originalLayerCount + segments.size() - 1);
+    AUREA_CHECK(comp.order().at(firstIndex) == id);
+    AUREA_CHECK(comp.order().at(firstIndex + static_cast<u32>(segments.size())) == rejectedLayer);
+    u32 previousTrack = 0;
+    for (u32 i = 0; i < segments.size(); ++i) {
+        const Layer* layer = comp.layer(comp.order().at(firstIndex + i));
+        AUREA_CHECK(layer != nullptr);
+        if (!layer) return;
+        AUREA_CHECK(layer->kind == LayerKind::Text && layer->captions.empty());
+        AUREA_CHECK(layer->trackId != previousTrack && layer->text.captionSource == 0);
+        previousTrack = layer->trackId;
+        AUREA_CHECK_EQ(layer->text.content, text::upper_text(segments[i].text));
+        AUREA_CHECK_EQ(layer->start.value, std::max(originalStart.value, segments[i].start + shift));
+        AUREA_CHECK_EQ(layer->end.value, segments[i].end + shift);
+        AUREA_CHECK_EQ(layer->timeline_time(FrameIndex{segments[i].start}).value, segments[i].start + shift);
+        AUREA_CHECK_EQ(layer->transform.position.y, originalPlacement.y);
+        AUREA_CHECK_EQ(layer->text.animators.size(), 1u);
+        const auto* timing = layer->tracks.find(TrackProperty::TextAnimParam, 0, text::kSelStart);
+        AUREA_CHECK(timing && timing->keys.front().time.value == segments[i].words.front().start);
+        if (i == 1) AUREA_CHECK(near_color(layer->text.color, look.fill));
+    }
+    AUREA_CHECK(!rig.edit(R"({"op":"to_layers"})"));
+    AUREA_CHECK(undo_once(rig.engine));
+    AUREA_CHECK_EQ(rig.blocks(), segments.size());
+    AUREA_CHECK_EQ(rig.comp()->order().size(), originalLayerCount);
+}
 
 AUREA_TEST(Captions, LookChosenBeforeGeneratingIsOnTheTrack) {
     text::CaptionOptions o;

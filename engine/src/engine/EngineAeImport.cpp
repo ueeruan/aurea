@@ -580,6 +580,24 @@ ae::ImportReport Engine::import_ae_data_impl(const std::string& raw, const std::
             return l->effects.back().id;
         }
 
+        AssetId store_look_lut(std::string_view cube) override {
+            if (e_.config_.documentsDirectory.empty()) return {};
+            const auto root = std::filesystem::u8path(e_.config_.documentsDirectory) / "ae-look-luts";
+            std::error_code ec;
+            std::filesystem::create_directories(root, ec);
+            if (ec) return {};
+            static std::atomic<u64> sequence{0};
+            const std::string name = "look-" + std::to_string(monotonic_ns()) + "-" +
+                std::to_string(sequence.fetch_add(1, std::memory_order_relaxed)) + ".cube";
+            const auto path = utf8_path(root / name);
+            if (!fileio::write_atomic(path, cube.data(), cube.size()).ok()) return {};
+            Asset asset;
+            asset.kind = AssetKind::Lut;
+            asset.name = name;
+            asset.sourcePath = e_.store_asset_path(path);
+            return e_.project_->add_asset(std::move(asset));
+        }
+
         void text_changed(LayerId layer) noexcept override {
             if (Layer* l = comp_->layer(layer)) e_.recenter_text(*l);
         }

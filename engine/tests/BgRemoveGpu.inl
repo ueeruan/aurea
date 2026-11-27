@@ -55,6 +55,19 @@ AUREA_TEST(BgRemoveGpu, PhotoLosesItsBackgroundAndTheControlsActWithoutRecomputi
     const auto person = s.render(FrameIndex{0}, 1, true);
     AUREA_CHECK(depth_max_diff(person, cut) < .002f);
     AUREA_CHECK_EQ(store->frames(), usize{1});
+    // Active brush displays the matte while final rendering keeps the cutout.
+    gpu().renderer.set_cutout_view(s.comp, s.comp->layer(id), &fx, s.project.asset(s.comp->layer(id)->source), 1);
+    const auto maskPreview = s.render(FrameIndex{0}, 1, false);
+    AUREA_CHECK(maskPreview.v(4, 4).w > .9f);
+    AUREA_CHECK(depth_max_diff(s.render(FrameIndex{0}, 1, true), cut) < .002f);
+    gpu().renderer.set_cutout_view(nullptr, nullptr, nullptr, nullptr, 3);
+    ai::RotoStroke erase;
+    erase.background = true;
+    erase.radius = .09f;
+    erase.points = {{.5f, .5f}};
+    ai::roto_encode({erase}, fx.curves[fx.params[ai::kRotoStrokesParam].constant.ref]);
+    const auto corrected = s.render(FrameIndex{0}, 1, true);
+    AUREA_CHECK(corrected.v(160, 160).w < .01f);
     (void)write_png("build/bgremove-photo-cut.png", cut.encoded());
     gpu().renderer.set_bg_matte_store(nullptr);
 }

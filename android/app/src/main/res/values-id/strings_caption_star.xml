@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="caption_star_title">Auto Caption Star</string>
+    <string name="caption_star_setup">Setelan</string>
+    <string name="caption_star_motion">Ritme</string>
+    <string name="caption_star_cut">Potong langsung</string>
+    <string name="caption_star_impact">Gaya Impact</string>
+    <string name="caption_star_save">Simpan sebagai preset</string>
+    <string name="caption_star_empty_presets">Preset yang disimpan muncul di sini.</string>
+    <string name="caption_star_save_failed">Preset ini tidak dapat disimpan.</string>
+    <string name="caption_star_reflow_failed">Teks ini tidak dapat dikelompokkan ulang.</string>
+    <string name="caption_star_to_layers">Ubah menjadi layer</string>
+    <string name="caption_star_to_layers_failed">Track ini tidak dapat diubah. Periksa apakah track terkunci, digunakan oleh layer lain, atau komposisi telah mencapai batas layer.</string>
+</resources>

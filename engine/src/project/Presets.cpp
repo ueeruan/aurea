@@ -887,6 +887,9 @@ bool read_effects(Reader& r, const json::Value& root, const EffectRegistry* reg,
             }
         }
         if (const json::Value* cs = r.arr(ev, "curves", kMaxCurves)) {
+            // Os índices salvos apontam para esta lista, sem as curvas
+            // identidade criadas por initialize_instance.
+            if (!cs->array.empty()) e.curves.clear();
             for (const json::Value& cv : cs->array) {
                 if (!cv.is_array() || cv.array.size() != 4) return r.fail("curva invalida");
                 CurveData c;

@@ -75,7 +75,7 @@ import org.json.JSONObject
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun CaptionListTab(cap: CaptionsState, store: EditorStore, onOwnStyle: () -> Unit) {
+internal fun CaptionListTab(cap: CaptionsState, store: EditorStore, onOwnStyle: () -> Unit, onConverted: () -> Unit) {
     val track = cap.track
     val fps = store.project.fps.takeIf { it > 0f }?.toDouble() ?: 30.0
     val context = LocalContext.current
@@ -106,7 +106,19 @@ internal fun CaptionListTab(cap: CaptionsState, store: EditorStore, onOwnStyle: 
         cap.editBlocks(JSONObject().put("op", op).put("ids", JSONArray(ids.toList())).apply(extra), failure)
 
     LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)) {
-        item(key = "status") { CaptionJobStatus(cap) }
+        stickyHeader(key = "status") {
+            Column(Modifier.fillMaxWidth().background(AureaColors.EditorPanel).padding(bottom = 6.dp)) {
+                CaptionJobStatus(cap)
+                if (track != null) {
+                    CapAction(stringResource(R.string.caption_star_to_layers), primary = true, enabled = cap.lookEnabled) {
+                        if (edit("to_layers", emptyList(), R.string.caption_star_to_layers_failed)) {
+                            store.select(track.layer, openOptions = false)
+                            onConverted()
+                        }
+                    }
+                }
+            }
+        }
         if (track == null) {
             item(key = "vazio") { CapNote(stringResource(R.string.cap053_no_captions), AureaColors.Muted) }
             return@LazyColumn

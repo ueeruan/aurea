@@ -33,4 +33,7 @@
     <string name="fxp_explode_glass">تحطيم الزجاج</string>
     <string name="fxp_explode_assemble">تجميع</string>
     <string name="fxp_explode_side_impact">اصطدام جانبي</string>
+    <string name="fx3d_name_spacing">تباعد ثلاثي الأبعاد</string>
+    <string name="fx3d_desc_spacing">يباعد بين أجزاء النموذج. حرّك التباعد لتجميع المجسم أو تفكيكه.</string>
+    <string name="fx3d_name_money">مطر نقود ثلاثي الأبعاد</string>
 </resources>

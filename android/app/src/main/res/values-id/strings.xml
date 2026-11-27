@@ -1305,6 +1305,8 @@ untuk mengedit kurvanya.</string>
     <string name="fx_name_light_sweep">Sapuan Cahaya</string>
     <string name="fx_name_shake">Guncangan</string>
     <string name="fx_name_turbulence">Pergeseran Turbulen</string>
+    <string name="fx_name_turbulence_legacy">Turbulensi Klasik</string>
+    <string name="fx_name_turbulent_displace">Pergeseran Turbulen</string>
     <string name="fx_name_wave_warp">Distorsi Gelombang</string>
     <string name="fx_name_warp">Distorsi</string>
     <string name="fx_name_ripple_dissolve">Larut Riak</string>
@@ -2918,6 +2920,13 @@ untuk mengedit kurvanya.</string>
     <string name="afx_name_particular">Partikel 3D</string>
     <string name="afx_desc_particular">Sistem partikel 3D: emitor kotak atau bola, kecepatan, gravitasi, angin, hambatan udara, turbulensi, serta warna dan ukuran sepanjang hidup. Layer menjadi emitornya.</string>
     <string name="layer_replace_media">Ganti media</string>
+    <string name="layer_improve_source">Tingkatkan sumber</string>
+    <string name="layer_improve_source_detail">Pilih rekaman lengkap yang sama dengan resolusi lebih tinggi</string>
+    <string name="layer_improve_source_checking">Memeriksa rekaman…</string>
+    <string name="layer_improve_source_done">Sumber diperbarui pada resolusi lebih tinggi</string>
+    <string name="layer_improve_source_resolution">Pilih video dengan lebar dan tinggi yang lebih besar.</string>
+    <string name="layer_improve_source_mismatch">Pilih rekaman yang sama dengan bingkai, waktu, dan audio yang sama.</string>
+    <string name="layer_improve_source_failed">Sumber tidak dapat ditingkatkan. %1$s</string>
     <string name="layer_replace_media_detail">Foto atau video lain; transformasi, keyframe, efek, dan mask tetap</string>
     <string name="layer_replacing_media">Mengganti media…</string>
     <string name="layer_media_replaced">Media diganti dengan %1$s</string>
@@ -4408,7 +4417,7 @@ untuk mengedit kurvanya.</string>
     <string name="fxo_apply_distortion">Terapkan distorsi</string>
     <string name="fxo_2">2×</string>
     <string name="fxo_4">4×</string>
-    <string name="fxt_upscales_the_layer_when_it_appears_large">Memperbesar layer saat tampil lebih besar dari sumbernya (skala layer di komposisi). Tanpa pembesaran di layar, hanya ketajaman yang bekerja.</string>
+    <string name="fxt_upscales_the_layer_when_it_appears_large">Memperjelas detail pada ukuran saat ini dan merekonstruksi tepi saat layer diperbesar.</string>
     <string name="fxl_content">Konten</string>
     <string name="fxo_general">Umum</string>
     <string name="fxo_anime">Anime</string>

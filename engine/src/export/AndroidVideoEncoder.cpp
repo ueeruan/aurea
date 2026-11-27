@@ -570,6 +570,14 @@ struct SurfaceFeeder {
         return texture;
     }
 
+    Status present_frame() noexcept {
+        if (!presentation(display, surface, static_cast<EGLnsecsANDROID>(ptsUs) * 1000))
+            return fail(Errc::EncodeFailed, "EGL recusou o timestamp do encoder (0x%x)", eglGetError());
+        if (!eglSwapBuffers(display, surface))
+            return fail(Errc::EncodeFailed, "Surface do encoder recusou o quadro (0x%x)", eglGetError());
+        return OkStatus;
+    }
+
     Status frame_direct() noexcept {
         auto* buffer = static_cast<AHardwareBuffer*>(directBuffer);
         if (!buffer) return fail(Errc::NotSupported, "quadro sem AHardwareBuffer para a Surface direta");
@@ -586,13 +594,14 @@ struct SurfaceFeeder {
         glDrawArrays(GL_TRIANGLES, 0, 3);
         const GLenum error = glGetError();
         if (error != GL_NO_ERROR) return fail(Errc::EncodeFailed, "GLES falhou ao desenhar o quadro direto (0x%x)", error);
-        presentation(display, surface, static_cast<EGLnsecsANDROID>(ptsUs) * 1000);
-        if (!eglSwapBuffers(display, surface))
-            return fail(Errc::EncodeFailed, "Surface do encoder recusou o quadro direto (0x%x)", eglGetError());
+        const Status submitted = present_frame();
         // O motor reusa o slot (e o AHardwareBuffer) assim que este quadro
         // volta: a leitura do GLES tem de ter terminado (prazo do alimentador).
         glFinish();
-        return OkStatus;
+        const GLenum finishError = glGetError();
+        if (!submitted.ok()) return submitted;
+        return finishError == GL_NO_ERROR ? OkStatus
+            : fail(Errc::EncodeFailed, "GLES falhou ao concluir o quadro direto (0x%x)", finishError);
     }
 
     Status frame() noexcept {
@@ -619,10 +628,7 @@ struct SurfaceFeeder {
         glDrawArrays(GL_TRIANGLES, 0, 3);
         const GLenum error = glGetError();
         if (error != GL_NO_ERROR) return fail(Errc::EncodeFailed, "GLES falhou ao desenhar na Surface (0x%x)", error);
-        presentation(display, surface, static_cast<EGLnsecsANDROID>(ptsUs) * 1000);
-        if (!eglSwapBuffers(display, surface))
-            return fail(Errc::EncodeFailed, "Surface do encoder recusou o quadro (0x%x)", eglGetError());
-        return OkStatus;
+        return present_frame();
     }
 
     void teardown() noexcept {

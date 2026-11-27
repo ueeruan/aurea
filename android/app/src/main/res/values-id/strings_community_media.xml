@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="social_activity">Notifikasi</string>
+    <string name="social_activity_unread">Notifikasi, %1$d belum dibaca</string>
+    <string name="social_activity_empty">Belum ada notifikasi.</string>
+    <string name="social_activity_mark_read">Tandai sudah dibaca</string>
+    <string name="social_activity_reply">%1$s membalas komentar Anda.</string>
+    <string name="social_activity_announcement">%1$s menerbitkan pengumuman.</string>
+    <string name="social_activity_comment">%1$s mengomentari postingan Anda.</string>
+    <string name="social_attach_media">Tambahkan foto atau video</string>
+    <string name="social_media_limits">Foto hingga 8 MB. Video MP4 atau MOV hingga 90 MB.</string>
+    <string name="social_media_error">Media ini tidak dapat dibuka.</string>
+    <string name="social_open_post">Buka postingan</string>
+    <string name="social_play_video">Putar video</string>
+    <string name="social_post_title">Postingan</string>
+    <string name="social_reply">Balas</string>
+    <string name="social_reply_to">Membalas %1$s</string>
+    <string name="social_my_profile">Profil saya</string>
+    <string name="social_feed_options">Opsi feed</string>
+    <string name="social_media_saved_gallery">Media disimpan ke galeri.</string>
+    <string name="social_media_saved_file">File disimpan.</string>
+    <string name="social_media_save_failed">Media ini tidak dapat disimpan.</string>
+</resources>

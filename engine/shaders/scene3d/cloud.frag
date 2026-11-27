@@ -82,24 +82,35 @@ void main() {
         if (i >= int(u.lightCount.x)) break;
         vec4 light = u.lightPos[i];
         vec3 toLight = light.w < 0.5 ? light.xyz : light.xyz - pc.model[3].xyz;
-        float distanceToLight = max(length(toLight), 0.001);
-        vec3 toLightDir = toLight / distanceToLight;
-        float attenuation = light.w < 0.5 ? 1.0 : 1.0 / (1.0 + pow(distanceToLight / 360.0, 2.0));
-        if (light.w >= 0.5 && u.lightColor[i].w > 0.0)
-            attenuation *= 1.0 - smoothstep(0.75, 1.0, distanceToLight / u.lightColor[i].w);
+        float distanceSquared = dot(toLight, toLight);
+        float distanceToLight = sqrt(distanceSquared);
+        vec3 toLightDir = distanceToLight > 0.001 ? toLight / distanceToLight : lightDir;
+        // The engine packs point/spot intensity in pixel space (scaled by
+        // pixels-per-meter squared). Apply inverse-square falloff in the same
+        // units. A finite core avoids a singularity inside the cloud.
+        float attenuation = light.w < 0.5 ? 1.0 : 1.0 / max(1.0, distanceSquared + u.lightSpot2[i].w);
+        if (light.w >= 0.5 && u.lightColor[i].w > 0.0) {
+            float r2 = distanceSquared / (u.lightColor[i].w * u.lightColor[i].w);
+            float window = clamp(1.0 - r2 * r2, 0.0, 1.0);
+            attenuation *= window * window;
+        }
         if (light.w > 1.5)
             attenuation *= smoothstep(u.lightSpot[i].w - 0.001,
                                       max(u.lightSpot[i].w + 0.001, u.lightSpot2[i].x),
                                       dot(normalize(u.lightSpot[i].xyz), -toLightDir));
-        vec3 candidate = u.lightColor[i].rgb * attenuation;
+        vec3 candidate = max(u.lightColor[i].rgb, vec3(0.0)) * attenuation;
         float energy = dot(candidate, vec3(0.2126, 0.7152, 0.0722));
         if (energy > best) {
             best = energy;
             lightDir = toLightDir;
-            lightColor = candidate * 0.48;
+            // Keep dense scattering readable under very bright local lights,
+            // preserving hue and headroom instead of clipping the volume.
+            float peak = max(candidate.r, max(candidate.g, candidate.b));
+            lightColor = candidate * (0.48 / (1.0 + max(0.0, peak - 1.5) / 1.5));
         }
     }
     if (u.lightCount.x > 0.5 && best <= 1e-5) lightColor = vec3(0.0);
+    bool directLight = max(lightColor.r, max(lightColor.g, lightColor.b)) > 1e-5;
     vec3 sun = normalize(worldToLocal * lightDir);
     float phase = 0.55 + 0.55 * pow(clamp(0.5 + 0.5 * dot(normalize(mat3(pc.model) * ray), lightDir), 0.0, 1.0), 4.0);
     vec3 ambient = vec3(0.22, 0.26, 0.35) * max(0.25, u.envParams.x) + u.lightCount.yzw;
@@ -117,12 +128,15 @@ void main() {
         if (sigma < 0.001) continue;
         float alpha = 1.0 - exp(-sigma * stepSize);
         if (!visible && alpha > 0.003) { front = p; visible = true; }
-        float toSun = cloud_exit(p, sun) / 3.0;
-        float opticalDepth = cloud_density(p + sun * (0.5 * toSun), detail, true)
-                           + cloud_density(p + sun * (1.5 * toSun), detail, true)
-                           + cloud_density(p + sun * (2.5 * toSun), detail, true);
-        float sunVisibility = exp(-opticalDepth * toSun * extinction * 0.75);
-        scattered += transmittance * alpha * (ambient + lightColor * (0.12 + phase * sunVisibility));
+        vec3 lighting = ambient;
+        if (directLight) {
+            float toSun = cloud_exit(p, sun) / 3.0;
+            float opticalDepth = cloud_density(p + sun * (0.5 * toSun), detail, true)
+                               + cloud_density(p + sun * (1.5 * toSun), detail, true)
+                               + cloud_density(p + sun * (2.5 * toSun), detail, true);
+            lighting += lightColor * (0.12 + phase * exp(-opticalDepth * toSun * extinction * 0.75));
+        }
+        scattered += transmittance * alpha * lighting;
         transmittance *= 1.0 - alpha;
     }
     float alpha = (1.0 - transmittance) * clamp(u.baseColor.a, 0.0, 1.0);

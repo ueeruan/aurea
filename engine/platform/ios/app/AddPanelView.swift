@@ -979,7 +979,7 @@ private enum AddBarDrawing {
     private func pill(open: Int?, slot: Int?) -> some View {
         GeometryReader { geometry in
             let weights: [CGFloat] = AddBarCatalog.pill.map { slot == $0 ? 2 : 1 }
-            let total = weights.reduce(0, +)
+            let total = weights.reduce(1, +)
             HStack(spacing: 0) {
                 ForEach(Array(AddBarCatalog.pill.enumerated()), id: \.element) { k, index in
                     let on = slot == index
@@ -987,6 +987,18 @@ private enum AddBarDrawing {
                     item(index, shown: on ? (open ?? index) : index, look: look, on: on)
                         .frame(width: geometry.size.width * weights[k] / total, height: geometry.size.height)
                 }
+                Button {
+                    AddBarState.close(reduce: reduceMotion)
+                    model.openPanel(.captions)
+                } label: {
+                    VStack(spacing: 2) {
+                        CupertinoIcon(CupertinoGlyph.CaptionsBubble, size: 19, color: AureaColors.accent)
+                        Text(AureaText.t("panel_legendas")).font(.aurea(size: 10, weight: .medium))
+                            .foregroundStyle(AureaColors.accent).lineLimit(1).minimumScaleFactor(0.75)
+                    }
+                    .frame(width: geometry.size.width / total, height: geometry.size.height)
+                    .contentShape(Rectangle())
+                }.buttonStyle(.plain).accessibilityIdentifier("addBar.Captions")
             }
         }
         .background(AddBarColors.pill, in: Capsule())

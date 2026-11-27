@@ -178,6 +178,10 @@ void update_caption_look(const CaptionOptions& before, const CaptionOptions& aft
 /// Os animadores do usuário ficam (as trilhas deles apontam pelo índice).
 void apply_caption_block_look(const CaptionOptions& track, const CaptionOptions& block, u32 compShortSide, TextData& t);
 
+/// Resolve the editable text and word-timing keyframes on top of the track's base text and animation.
+void resolve_caption_block(const CaptionOptions& track, const CaptionSegment& segment, u32 shortSide,
+                           TextData& t, TrackSet& tracks);
+
 /// Modelos prontos da legenda (escolhidos antes de gerar). `id` é estável:
 /// a interface traduz o nome por ele. As opções só trazem estilo e aparência;
 /// agrupamento, posição e tamanho continuam os do usuário.

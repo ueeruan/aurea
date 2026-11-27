@@ -32,6 +32,8 @@
 //  Leitura DEFENSIVA: tamanho de pedaço fora do pai, contagem absurda ou
 //  profundidade demais param a leitura daquele ramo, nunca o processo.
 // =============================================================================
+#include "AeImportBind.hpp"
+#include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/project/AeProject.hpp"
 #include "aurea/animation/Curve.hpp"
 
@@ -376,6 +378,7 @@ void Reader::group(const u8* p, const u8* end, Node& n) {
 
 void Reader::effect(const u8* p, const u8* end, Node& n) {
     n.kind = Node::Kind::Effect;
+    Chunk groupDefinition;
     each_chunk(p, end, budget, [&](const Chunk& c) {
         if (c.is("fnam")) n.effectName = strip_tab(name_payload(c, budget));
         else if (c.list("parT")) {
@@ -403,6 +406,7 @@ void Reader::effect(const u8* p, const u8* end, Node& n) {
                 return true;
             });
         } else if (c.list("tdgp")) {
+            groupDefinition = c;
             Node g;
             group(c.body + 4, c.body + c.size, g);
             n.flags = g.flags;
@@ -410,6 +414,19 @@ void Reader::effect(const u8* p, const u8* end, Node& n) {
             n.children = std::move(g.children);
         }
         return true;
+    });
+    const detail::ERule* rule = detail::find_effect_rule(n.match);
+    if (!rule && !n.effectName.empty()) rule = detail::find_effect_rule_alias(n.effectName);
+    if (!groupDefinition.body || !rule || !rule->key || std::string_view(rule->key) != effect_keys::kLookStudio) return;
+    each_chunk(groupDefinition.body + 4, groupDefinition.body + groupDefinition.size, budget, [&](const Chunk& property) {
+        if (!property.list("aRbs")) return true;
+        each_chunk(property.body + 4, property.body + property.size, budget, [&](const Chunk& payload) {
+            if (!payload.is("aRbp") || payload.size < 8 || payload.size > (8u << 20)
+                || std::memcmp(payload.body, "MBL2", 4) != 0) return true;
+            if (budget.take(payload.size)) n.lookData.assign(payload.body, payload.body + payload.size);
+            return false;
+        });
+        return n.lookData.empty();
     });
 }
 

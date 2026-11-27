@@ -1,4 +1,5 @@
 #include "aurea/ai/RotoMatte.hpp"
+#include "aurea/effects/EffectRegistry.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -204,9 +205,10 @@ RotoRefineSettings roto_instance_refine(const EffectInstance& instance) noexcept
         const f32 v = instance.params[index].constant.v[0];
         return std::isfinite(v) ? v : fallback;
     };
-    s.radius = std::max(0.0f, value(kRotoEdgeRadiusParam, 0.0f));
-    s.chatter = std::clamp(value(kRotoChatterParam, 0.0f) * 0.01f, 0.0f, 1.0f);
-    s.decontaminate = value(kRotoDecontaminateParam, 0.0f) > 0.0f;
+    const bool automatic = instance.type == effect_type_id(effect_keys::kBackgroundRemove);
+    s.radius = std::max(0.0f, value(automatic ? kBgRotoEdgeRadiusParam : kRotoEdgeRadiusParam, 0.0f));
+    s.chatter = automatic ? 0.5f : std::clamp(value(kRotoChatterParam, 0.0f) * 0.01f, 0.0f, 1.0f);
+    s.decontaminate = value(automatic ? kBgRotoDecontaminateParam : kRotoDecontaminateParam, 0.0f) > 0.0f;
     return s;
 }
 

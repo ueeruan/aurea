@@ -101,7 +101,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.aurea.aurea.R
-import com.aurea.aurea.home.DonationCard
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.state.ExportFormat
 import com.aurea.aurea.state.ExportOptions
@@ -1155,8 +1154,6 @@ private fun ResultPage(store: EditorStore, item: ExportItem, opts: ExportOptions
                     Text(stringResource(R.string.om_exp_save_as), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.OnImage70)))
                 }
             }
-            Spacer(Modifier.height(12.dp))
-            DonationCard(exporting = false)
         }
     }
 }

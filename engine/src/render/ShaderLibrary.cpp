@@ -97,6 +97,10 @@ f32 ShaderLibrary::max_sampler_anisotropy() const noexcept {
     return std::isfinite(supported) ? std::clamp(supported, 1.0f, 16.0f) : 1.0f;
 }
 
+bool ShaderLibrary::supports_rgba16f_storage() const noexcept {
+    return backend_ && backend_->capabilities().rgba16fStorage;
+}
+
 u64 ShaderLibrary::spirv_fingerprint() noexcept {
     static const u64 fp = [] {
         u64 h = 1469598103934665603ull;

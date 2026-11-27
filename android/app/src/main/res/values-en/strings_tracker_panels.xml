@@ -1,0 +1,5 @@
+<resources>
+    <string name="trk_motion_title">Motion Tracker</string>
+    <string name="trk_video_required">Select a video layer.</string>
+    <string name="trk_back_to_result">Back to result</string>
+</resources>

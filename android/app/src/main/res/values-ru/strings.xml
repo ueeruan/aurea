@@ -1368,6 +1368,8 @@
     <string name="fx_name_light_sweep">Световая полоса</string>
     <string name="fx_name_shake">Тряска</string>
     <string name="fx_name_turbulence">Турбулентное смещение</string>
+    <string name="fx_name_turbulence_legacy">Классическая турбулентность</string>
+    <string name="fx_name_turbulent_displace">Турбулентное смещение</string>
     <string name="fx_name_wave_warp">Волновая деформация</string>
     <string name="fx_name_warp">Деформация</string>
     <string name="fx_name_ripple_dissolve">Растворение рябью</string>
@@ -2924,6 +2926,13 @@
     <string name="afx_name_particular">3D-частицы</string>
     <string name="afx_desc_particular">Система 3D-частиц: излучатель-коробка или сфера, скорость, гравитация, ветер, сопротивление воздуха, турбулентность, цвет и размер в течение жизни. Слой становится излучателем.</string>
     <string name="layer_replace_media">Заменить медиа</string>
+    <string name="layer_improve_source">Улучшить источник</string>
+    <string name="layer_improve_source_detail">Выберите ту же полную запись в более высоком разрешении</string>
+    <string name="layer_improve_source_checking">Проверяем запись…</string>
+    <string name="layer_improve_source_done">Источник обновлён в более высоком разрешении</string>
+    <string name="layer_improve_source_resolution">Выберите видео с большей шириной и высотой.</string>
+    <string name="layer_improve_source_mismatch">Выберите ту же запись с тем же кадрированием, временем и звуком.</string>
+    <string name="layer_improve_source_failed">Не удалось улучшить источник. %1$s</string>
     <string name="layer_replace_media_detail">Другое фото или видео; трансформация, ключевые кадры, эффекты и маски сохраняются</string>
     <string name="layer_replacing_media">Замена медиа…</string>
     <string name="layer_media_replaced">Медиа заменено на %1$s</string>
@@ -4426,7 +4435,7 @@
     <string name="fxo_apply_distortion">Применить дисторсию</string>
     <string name="fxo_2">2×</string>
     <string name="fxo_4">4×</string>
-    <string name="fxt_upscales_the_layer_when_it_appears_large">Увеличивает слой, когда он показан крупнее исходника (масштаб слоя в композиции). Без увеличения на экране действует только резкость.</string>
+    <string name="fxt_upscales_the_layer_when_it_appears_large">Улучшает детали в исходном размере и восстанавливает контуры при увеличении слоя.</string>
     <string name="fxl_content">Содержимое</string>
     <string name="fxo_general">Общее</string>
     <string name="fxo_anime">Аниме</string>

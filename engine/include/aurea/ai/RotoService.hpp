@@ -28,6 +28,7 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <unordered_map>
 
@@ -103,6 +104,7 @@ public:
     /// "Propagar clipe": todos os quadros [first, last] no worker, com progresso.
     void propagate(u64 track, const RotoStrokes& strokes, const Source& source, i64 first, i64 last);
     [[nodiscard]] Progress progress() const;
+    [[nodiscard]] u32 preview_failure(u64 track, const RotoStrokes& strokes, i64 frame, u64 refineKey) const;
     /// Para a propagação em curso (o que já foi calculado fica).
     void cancel() noexcept;
     void set_ready_callback(void (*fn)(void*), void* ctx) noexcept;
@@ -119,15 +121,21 @@ public:
 
 private:
     struct Entry { u64 dep = 0; std::vector<u8> rle; u64 stamp = 0; };
+    struct PreviewKey {
+        u64 track, strokes, refine;
+        i64 frame;
+        bool operator==(const PreviewKey&) const = default;
+    };
     struct Job {
         u64 track = 0;
         RotoStrokes strokes;
         Source source;
         i64 first = 0, last = 0;
         bool range = false;
+        std::optional<PreviewKey> preview;
     };
     [[nodiscard]] static u64 key_of(u64 track, i64 frame) noexcept;
-    [[nodiscard]] static u64 refined_dep(const RotoStrokes& strokes, i64 frame, u64 refineKey) noexcept;
+    [[nodiscard]] static u64 refined_dep(u64 dep, u64 refineKey) noexcept;
     void store(u64 track, i64 frame, u64 dep, const std::vector<f32>& matte);
     void store_refined(u64 track, i64 frame, u64 dep, const RotoRefined& refined);
     [[nodiscard]] RefinedPtr cached_refined_dep(u64 track, i64 frame, u64 dep);
@@ -153,6 +161,9 @@ private:
     std::condition_variable wake_;
     std::unique_ptr<Job> pending_;
     std::unique_ptr<Job> focus_;     ///< quadro pedido pela prévia enquanto uma propagação roda
+    std::optional<PreviewKey> activePreview_;
+    std::optional<PreviewKey> failedPreview_;
+    u32 failedPreviewReason_ = 0;
     bool runningSingle_ = false;     ///< o worker está num pedido de um quadro (interrompível)
     bool running_ = false;
     std::thread thread_;

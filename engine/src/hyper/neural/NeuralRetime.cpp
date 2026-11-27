@@ -52,9 +52,16 @@ u64 NeuralRetime::key_of(u64 pairKey, f32 t) noexcept {
 
 bool NeuralRetime::supported(DecodedFrame& a, DecodedFrame& b) noexcept {
     for (DecodedFrame* f : {&a, &b}) {
-        if (f->format != PixelFormat::NV12 || f->rotation != 0) return false;
-        if ((!f->planes[0] || f->planeCount < 2) && !f->prepare_cpu_planes()) return false;
-        if (!f->planes[0] || !f->planes[1]) return false;
+        const bool planar = f->format == PixelFormat::YUV420P;
+        if ((!planar && f->format != PixelFormat::NV12 && f->format != PixelFormat::NV21) || f->rotation != 0) return false;
+        if ((!f->planes[0] || f->planeCount < (planar ? 3u : 2u)) && !f->prepare_cpu_planes()) return false;
+        if (f->cropLeft >= f->width || vis_w(*f) > f->width - f->cropLeft ||
+            f->cropTop >= f->height || vis_h(*f) > f->height - f->cropTop ||
+            !f->planes[0] || !f->planes[1] || f->strides[0] < f->width) return false;
+        const u32 chromaWidth = f->width / 2 + f->width % 2;
+        if (planar) {
+            if (f->planeCount < 3 || !f->planes[2] || f->strides[1] < chromaWidth || f->strides[2] < chromaWidth) return false;
+        } else if (f->planeCount < 2 || f->strides[1] / 2 < chromaWidth) return false;
     }
     return vis_w(a) == vis_w(b) && vis_h(a) == vis_h(b);
 }
@@ -70,6 +77,24 @@ bool NeuralRetime::to_rgb(DecodedFrame& f, std::vector<u8>& rgb, u32& w, u32& h)
     v.height = h;
     v.yStride = f.strides[0];
     v.uvStride = f.strides[1];
+    std::vector<u8> interleaved;
+    if (f.format != PixelFormat::NV12) {
+        interleaved.resize(static_cast<usize>(w) * (h / 2));
+        for (u32 row = 0; row < h / 2; ++row) {
+            const usize sourceRow = static_cast<usize>(f.cropTop / 2 + row);
+            u8* dst = interleaved.data() + static_cast<usize>(row) * w;
+            if (f.format == PixelFormat::YUV420P) {
+                const u8* u = f.planes[1] + sourceRow * f.strides[1] + f.cropLeft / 2;
+                const u8* cr = f.planes[2] + sourceRow * f.strides[2] + f.cropLeft / 2;
+                for (u32 x = 0; x < w / 2; ++x) { dst[2 * x] = u[x]; dst[2 * x + 1] = cr[x]; }
+            } else {
+                const u8* vu = f.planes[1] + sourceRow * f.strides[1] + (f.cropLeft & ~1u);
+                for (u32 x = 0; x < w; x += 2) { dst[x] = vu[x + 1]; dst[x + 1] = vu[x]; }
+            }
+        }
+        v.uv = interleaved.data();
+        v.uvStride = w;
+    }
     rgb.resize(static_cast<usize>(w) * h * 3);
     hyper::nv12_to_rgb24(v, rgb.data(), w * 3);
     return true;

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="caption_star_title">Auto Caption Star</string>
+    <string name="caption_star_setup">Ajustes</string>
+    <string name="caption_star_motion">Ritmo</string>
+    <string name="caption_star_cut">Corte directo</string>
+    <string name="caption_star_impact">Estilo Impacto</string>
+    <string name="caption_star_save">Guardar como preset</string>
+    <string name="caption_star_empty_presets">Tus presets guardados aparecen aquí.</string>
+    <string name="caption_star_save_failed">No se pudo guardar este preset.</string>
+    <string name="caption_star_reflow_failed">No se pudieron reagrupar estos subtítulos.</string>
+    <string name="caption_star_to_layers">Convertir en capas</string>
+    <string name="caption_star_to_layers_failed">No se pudo convertir esta pista. Comprueba si está bloqueada, si otras capas dependen de ella o si la composición alcanzó su límite de capas.</string>
+</resources>

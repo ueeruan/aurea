@@ -27,4 +27,12 @@
     <string name="bg_remove_o_person">Pessoa</string>
     <string name="bg_remove_tip_model">Automático recorta o objeto em destaque e funciona em todos os aparelhos. Pessoa usa o recorte de pessoas do sistema quando o aparelho tem; sem ele, vale o Automático.</string>
     <string name="bg_remove_tip_edge">Refaz a borda na resolução do vídeo (cabelo, contornos finos). 0 usa a borda simples.</string>
+    <string name="cutout_analyzing_scene">Analisando a cena</string>
+    <string name="cutout_analyzing_frame">Analisando este quadro</string>
+    <string name="cutout_brush">Pincel de recorte</string>
+    <string name="cutout_brush_add">Incluir</string>
+    <string name="cutout_brush_subtract">Excluir</string>
+    <string name="cutout_brush_help">Toque no objeto para selecionar. Pinte para incluir ou excluir partes.</string>
+    <string name="cutout_auto_help">Remova o fundo automaticamente ou ajuste o recorte com o pincel.</string>
+    <string name="cutout_track">Seguir o objeto</string>
 </resources>

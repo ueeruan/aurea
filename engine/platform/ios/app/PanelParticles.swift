@@ -141,7 +141,7 @@ struct ParticlesPanel: View {
         }
         if tabbed && shownTab == 3 {
         choice(AureaText.t("particular_shape"), PPP.particleType,
-               ["particular_shape_circle", "particular_shape_square", "particular_shape_streak", "particular_shape_soft", "world_purple_crystals"])
+               ["particular_shape_circle", "particular_shape_square", "particular_shape_streak", "particular_shape_soft", "world_purple_crystals", "fx3d_name_money"])
         dim(AureaText.t("panel_tamanho_inicial"), PPP.startSize, 0.25, 0.1, 120, " px", decimals: 1)
         dim(AureaText.t("panel_tamanho_final"), PPP.endSize, 0.25, 0, 120, " px", decimals: 1)
         percent(AureaText.t("panel_opacidade"), PPP.startOpacity)
@@ -259,7 +259,7 @@ struct ParticlesPanel: View {
                 // the shared, dimmed property-picker appearance.
                 HStack(spacing: 5) {
                     ForEach(Array(options.enumerated()), id: \.offset) { index, key in
-                        let option = param == PPP.particleType && index == 4 ? 6 : index
+                        let option = param == PPP.particleType && index >= 4 ? index + 2 : index
                         let on = option == Int(value(param).rounded())
                         Button { set(param, Float(option)) } label: {
                             Text(AureaText.t(key))

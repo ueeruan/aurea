@@ -102,20 +102,25 @@ internal data class FxLayout(val main: List<ParamSlot>, val advanced: List<Param
  * o de sempre (principais e "Avançado", [splitPrincipal]). Com seção: as linhas
  * soltas na ordem dos índices e cada seção (com pelo menos uma linha além do
  * interruptor) na ordem do ordinal — as seções substituem o "Avançado".
+ * Os estúdios de cor trazem os controles principais para o topo e mantêm os demais nas seções.
  */
 internal fun effectLayout(typeId: Int, visible: List<ParamSlot>): FxLayout {
     if (visible.none { it.section > 0 }) {
         val (main, rest) = splitPrincipal(typeId, visible)
         return FxLayout(main, rest, emptyList())
     }
-    val loose = visible.filter { it.section <= 0 }.sortedBy { it.index }
-    val sections = visible.filter { it.section > 0 }.groupBy { it.section }.toSortedMap().mapNotNull { (ordinal, members) ->
+    val quickControls = colorStudioPrincipal(typeId)
+    val remaining = if (quickControls.isEmpty()) visible else visible.filterNot { it.index in quickControls }
+    val loose = remaining.filter { it.section <= 0 }.sortedBy { it.index }
+    val sections = remaining.filter { it.section > 0 }.groupBy { it.section }.toSortedMap().mapNotNull { (ordinal, members) ->
         val head = members.first()
         val toggle = members.firstOrNull { it.index == head.sectionToggle && it.type == ParamType.BOOL }
         val rows = members.filter { it.index != head.sectionToggle }.sortedBy { it.index }
         if (rows.isEmpty()) null else FxSection(ordinal, head.sectionId, head.sectionLabel, toggle, head.sectionOpen, rows)
     }
-    return FxLayout(loose, emptyList(), sections)
+    if (quickControls.isEmpty()) return FxLayout(loose, emptyList(), sections)
+    val byIndex = visible.associateBy { it.index }
+    return FxLayout(quickControls.mapNotNull { byIndex[it] }, loose, sections)
 }
 
 /** A seção [ordinal] que contém o parâmetro [param] e está recolhida (0 = nenhuma). */

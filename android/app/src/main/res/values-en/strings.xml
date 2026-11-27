@@ -969,6 +969,8 @@ to edit the curve.</string>
     <string name="fx_name_light_sweep">Light Sweep</string>
     <string name="fx_name_shake">Shake</string>
     <string name="fx_name_turbulence">Turbulent Displace</string>
+    <string name="fx_name_turbulence_legacy">Classic Turbulence</string>
+    <string name="fx_name_turbulent_displace">Turbulent Displace</string>
     <string name="fx_name_wave_warp">Wave Warp</string>
     <string name="fx_name_warp">Warp</string>
     <string name="fx_name_ripple_dissolve">Ripple Dissolve</string>
@@ -2964,6 +2966,13 @@ to edit the curve.</string>
     <string name="afx_name_particular">3D Particles</string>
     <string name="afx_desc_particular">3D particle system: box or sphere emitter, velocity, gravity, wind, air drag, turbulence, and color and size over life. The layer becomes the emitter.</string>
     <string name="layer_replace_media">Replace media</string>
+    <string name="layer_improve_source">Improve source</string>
+    <string name="layer_improve_source_detail">Choose the same full recording at a higher resolution</string>
+    <string name="layer_improve_source_checking">Checking the recording…</string>
+    <string name="layer_improve_source_done">Source updated at a higher resolution</string>
+    <string name="layer_improve_source_resolution">Choose a video with a greater width and height.</string>
+    <string name="layer_improve_source_mismatch">Choose the same recording with matching framing, timing and audio.</string>
+    <string name="layer_improve_source_failed">Couldn’t improve the source. %1$s</string>
     <string name="layer_replace_media_detail">Another photo or video; transform, keyframes, effects and masks stay</string>
     <string name="layer_replacing_media">Replacing media…</string>
     <string name="layer_media_replaced">Media replaced with %1$s</string>
@@ -4465,7 +4474,7 @@ to edit the curve.</string>
     <string name="fxo_apply_distortion">Apply distortion</string>
     <string name="fxo_2">2×</string>
     <string name="fxo_4">4×</string>
-    <string name="fxt_upscales_the_layer_when_it_appears_large">Upscales the layer when it appears larger than its source (the layer\'s scale in the composition). With no enlargement on screen, only sharpening applies.</string>
+    <string name="fxt_upscales_the_layer_when_it_appears_large">Enhances detail at the current size and reconstructs edges when the layer is enlarged.</string>
     <string name="fxl_content">Content</string>
     <string name="fxo_general">General</string>
     <string name="fxo_anime">Anime</string>

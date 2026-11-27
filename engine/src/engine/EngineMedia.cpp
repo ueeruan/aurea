@@ -13,13 +13,16 @@
 #include "aurea/core/Log.hpp"
 #include "aurea/effects/Palette.hpp"
 #include "aurea/media/ImageResample.hpp"
+#include "aurea/media/SourceWindow.hpp"
 #include "aurea/scene3d/PartEffects.hpp"
 #include "aurea/scene3d/SceneAsset.hpp"
 #include "stb_image.h"   // a implementação mora no GltfImporter.cpp
+#include "tracking/AnalysisDecode.hpp"
 
 #include <algorithm>
 #include <cstdio>
 #include <cmath>
+#include <numeric>
 
 namespace aurea {
 namespace {
@@ -67,7 +70,6 @@ Status Engine::import_color_lut(u64 layerId, u32 effectId, const char* path) noe
     auto parsed = read_color_table(path);
     if (!parsed.ok()) return parsed.status();
     const u32 type = effect_type_id(palette ? "aurea.color.palettize" : effect_keys::kCubeLut);
-    const u32 gradeType = effect_type_id(effect_keys::kColorGrade);
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
     InlineEditScope inlineScope(*this, layerId, true);
@@ -75,12 +77,12 @@ Status Engine::import_color_lut(u64 layerId, u32 effectId, const char* path) noe
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->locked) return Errc::InvalidState;
     auto effect = std::find_if(layer->effects.begin(), layer->effects.end(), [&](const EffectInstance& e) {
-        return e.id == effectId && (e.type == type || (!palette && e.type == gradeType));
+        return e.id == effectId && (e.type == type || (!palette && effect_keys::is_color_grade(e.type)));
     });
     // Correção de cor (0.3.0): a LUT criativa e os campos escondidos dela
     // (tamanho, dimensões, domínio) moram no fim dos parâmetros.
-    const bool grade = effect != layer->effects.end() && effect->type == gradeType;
-    const u32 base = grade ? 70u : 0u;   // ColorGradeEffect.cpp: kLut
+    const bool grade = effect != layer->effects.end() && effect_keys::is_color_grade(effect->type);
+    const u32 base = grade ? effect_keys::kColorGradeLutParam : 0u;
     if (effect == layer->effects.end() || effect->params.size() < (palette ? 2u : base + 6u)) return Errc::NotFound;
     history_.before_mutation(*comp, project_->timeline().current(), palette ? "importar paleta" : "importar LUT");
     Asset asset; asset.kind = AssetKind::Lut;
@@ -458,8 +460,12 @@ std::string Engine::color_lut_name(u64 layerId, u32 effectId) const noexcept {
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer) return {};
     const u32 palettize = effect_type_id("aurea.color.palettize");
-    for (const auto& e : layer->effects) if (e.id == effectId && (e.type == effect_type_id(effect_keys::kCubeLut) || e.type == palettize) && !e.params.empty()) {
-        const usize file = e.type == palettize ? 1 : 0;
+    for (const auto& e : layer->effects) {
+        if (e.id != effectId) continue;
+        usize file = 0;
+        if (e.type == palettize) file = 1;
+        else if (effect_keys::is_color_grade(e.type)) file = effect_keys::kColorGradeLutParam;
+        else if (e.type != effect_type_id(effect_keys::kCubeLut)) return {};
         if (e.params.size() <= file) return {};
         const Asset* asset = project_->asset(AssetId::unpack(e.params[file].constant.ref));
         return asset ? asset->name : std::string{};
@@ -491,18 +497,20 @@ void scale_points(std::vector<MaskPoint>& pts, f32 rx, f32 ry) {
 /// Espaço da camada de `oldW×oldH` para `newW×newH`: o que é posição na mídia
 /// (âncora, máscaras) anda na proporção; a escala compensa para a mídia nova
 /// caber na caixa da antiga (nem maior, nem esticada).
-void remap_layer_space(Layer& l, f32 oldW, f32 oldH, f32 newW, f32 newH) {
+void remap_layer_space(Layer& l, f32 oldW, f32 oldH, f32 newW, f32 newH, bool sameFraming = false) {
     if (oldW <= 0.0f || oldH <= 0.0f || newW <= 0.0f || newH <= 0.0f) return;
     const f32 rx = newW / oldW, ry = newH / oldH;
     const f32 k = std::min(oldW / newW, oldH / newH);
     l.transform.anchor.x *= rx;
     l.transform.anchor.y *= ry;
-    l.transform.scale.x *= k;
-    l.transform.scale.y *= k;
+    const f32 sx = sameFraming ? 1.0f / rx : k;
+    const f32 sy = sameFraming ? 1.0f / ry : k;
+    l.transform.scale.x *= sx;
+    l.transform.scale.y *= sy;
     scale_track(l.tracks, TrackProperty::AnchorX, rx);
     scale_track(l.tracks, TrackProperty::AnchorY, ry);
-    scale_track(l.tracks, TrackProperty::ScaleX, k);
-    scale_track(l.tracks, TrackProperty::ScaleY, k);
+    scale_track(l.tracks, TrackProperty::ScaleX, sx);
+    scale_track(l.tracks, TrackProperty::ScaleY, sy);
     for (Mask& m : l.masks) {
         scale_points(m.points, rx, ry);
         for (MaskPathKey& key : m.pathKeys) scale_points(key.points, rx, ry);
@@ -541,11 +549,153 @@ bool current_media_size(const Project& project, const std::unordered_map<u64, st
     return false;
 }
 
+constexpr usize kUpgradeSamples = 8;
+constexpr u32 kSignatureSide = 20;
+using FrameSignature = std::array<f32, kSignatureSide * kSignatureSide>;
+using UpgradeTimes = std::array<i64, kUpgradeSamples>;
+using UpgradeFrames = std::array<FrameSignature, kUpgradeSamples>;
+
+Status read_upgrade_frames(VideoSourceFactory& factory, const Asset& asset, const VideoStreamInfo& info,
+                           const UpgradeTimes& times, u64 deadline, UpgradeFrames& out) {
+    auto decoder = factory.open_video(asset, MediaPriority::Thumbnail);
+    if (!decoder) return Errc::DecodeFailed;
+    static const std::atomic<bool> neverCancel{false};
+    tracking::AnalysisFramePicker picker(*decoder, info.fps, neverCancel, deadline);
+    tracking::Gray gray;
+    const i64 tolerance = static_cast<i64>(1.5e6 / info.fps);
+    for (usize i = 0; i < times.size(); ++i) {
+        FrameRef frame;
+        const auto picked = picker.pick(times[i], frame);
+        if (picked == tracking::AnalysisFramePicker::Result::Cancelled) return Errc::Timeout;
+        if (picked != tracking::AnalysisFramePicker::Result::Ok || !frame ||
+            (!frame->covers(times[i]) && std::abs(frame->ptsUs - times[i]) > tolerance) ||
+            !frame->prepare_cpu_planes() || !tracking::frame_to_gray(*frame.get(), 40, gray)) return Errc::DecodeFailed;
+        const bool limited = frame->format != PixelFormat::RGBA8 && !frame->color.fullRange;
+        for (u32 y = 0; y < kSignatureSide; ++y) {
+            for (u32 x = 0; x < kSignatureSide; ++x) {
+                const f32 gx = (x + 0.5f) * gray.width / kSignatureSide - 0.5f;
+                const f32 gy = (y + 0.5f) * gray.height / kSignatureSide - 0.5f;
+                const i32 ix = static_cast<i32>(std::floor(gx)), iy = static_cast<i32>(std::floor(gy));
+                const f32 fx = gx - ix, fy = gy - iy;
+                const f32 value = std::lerp(std::lerp(gray.at(ix, iy), gray.at(ix + 1, iy), fx),
+                                            std::lerp(gray.at(ix, iy + 1), gray.at(ix + 1, iy + 1), fx), fy);
+                out[i][y * kSignatureSide + x] = limited ? std::clamp((value * 255.f - 16.f) / 219.f, 0.f, 1.f) : value;
+            }
+        }
+    }
+    return OkStatus;
+}
+
+Status verify_video_upgrade(VideoSourceFactory& factory, const Asset& original, const Asset& candidate,
+                            const MediaProbe& newer) {
+    const auto& v = newer.video;
+    MediaProbe older;
+    if (!factory.probe(original.sourcePath.c_str(), older) || !older.hasVideo) return Errc::MediaSourceMissing;
+    const auto& old = older.video;
+    const u32 oldW = old.display_width(), oldH = old.display_height();
+    const u32 newW = v.display_width(), newH = v.display_height();
+    if (!oldW || !oldH || !std::isfinite(old.fps) || old.fps < 1.0 || !std::isfinite(v.fps) || v.fps < 1.0)
+        return Errc::UnsupportedFormat;
+    if (newW <= oldW || newH <= oldH) return Errc::OutOfRange;
+    const i64 frameUs = static_cast<i64>(std::ceil(1e6 / std::min(old.fps, v.fps)));
+    const i64 begin = original.windowStartUs;
+    const i64 end = old.durationUs;
+    const i64 span = end - begin;
+    // Rounded dimensions/timestamps can differ slightly between encodes.
+    // A cut exported from Aurea uses the original file's timeline, so the
+    // full recording can also cover the part after the stored source window.
+    const f64 aspect = (static_cast<f64>(newW) * oldH) / (static_cast<f64>(newH) * oldW);
+    if (std::abs(aspect - 1.0) > 0.015 || span < frameUs * 3 || v.durationUs < end - frameUs ||
+        (!begin && v.durationUs - end > frameUs) || old.color.hdr() != v.color.hdr() ||
+        (original.has_audio() && (!older.hasAudio || !newer.hasAudio ||
+            newer.audioDurationUs < older.audioDurationUs - frameUs))) return Errc::ChecksumMismatch;
+
+    constexpr std::array<i64, kUpgradeSamples> positions{3, 13, 26, 39, 55, 70, 84, 96};
+    UpgradeTimes times;
+    for (usize i = 0; i < times.size(); ++i) times[i] = begin + (span / 100) * positions[i];
+    UpgradeFrames low, high;
+    const u64 deadline = monotonic_ns() + 12'000'000'000ull;
+    if (const Status s = read_upgrade_frames(factory, original, old, times, deadline, low); !s.ok()) return s;
+    if (const Status s = read_upgrade_frames(factory, candidate, v, times, deadline, high); !s.ok()) return s;
+    f64 meanError = 0.0;
+    usize detailed = 0;
+    for (usize i = 0; i < times.size(); ++i) {
+        f64 error = 0.0, contrast = 0.0;
+        const f64 mean = std::accumulate(low[i].begin(), low[i].end(), 0.0) / low[i].size();
+        for (usize p = 0; p < low[i].size(); ++p) {
+            error += std::abs(low[i][p] - high[i][p]);
+            contrast += std::abs(low[i][p] - mean);
+        }
+        error /= low[i].size();
+        if (error > 0.065) return Errc::ChecksumMismatch;
+        meanError += error;
+        if (contrast / low[i].size() > 0.033) ++detailed;
+    }
+    if (meanError / times.size() > 0.028 || detailed < 3) return Errc::ChecksumMismatch;
+
+    if (original.has_audio()) {
+        audio::AudioBlockCache audio(&factory, 1u << 20, false);
+        const auto sample = [](i64 us) { return static_cast<i64>(us * (audio::kMixRate / 1e6)); };
+        audio.register_asset(1, {original.sourcePath, sample(older.audioDurationUs)});
+        audio.register_asset(2, {candidate.sourcePath, sample(newer.audioDurationUs)});
+        // Compare aligned PCM spans rather than treating the presence of an
+        // audio track as proof that the soundtrack is the same.
+        const i64 audioEnd = sample(std::min(older.audioDurationUs, newer.audioDurationUs));
+        const i64 audioStart = sample(begin);
+        if (audioEnd <= audioStart) return Errc::ChecksumMismatch;
+        for (const i64 percent : {10, 40, 65, 90}) {
+            if (monotonic_ns() >= deadline) return Errc::Timeout;
+            const i64 start = audioStart + ((audioEnd - audioStart) / 100) * percent;
+            const i64 block = start / audio::kBlockFrames;
+            const auto a = audio.fetch(1, block), b = audio.fetch(2, block);
+            const usize first = static_cast<usize>(start % audio::kBlockFrames) * audio::kMixChannels;
+            if (!a || !b) return Errc::DecodeFailed;
+            const usize last = std::min({first + 4800, a->pcm.size(), b->pcm.size()});
+            if (last <= first) return Errc::DecodeFailed;
+            f64 error = 0.0, energy = 0.0;
+            for (usize i = first; i < last; ++i) {
+                const f64 delta = a->pcm[i] - b->pcm[i];
+                error += delta * delta;
+                energy += static_cast<f64>(a->pcm[i]) * a->pcm[i];
+            }
+            if (!std::isfinite(error) || error > 0.16 * energy + 0.000064 * (last - first))
+                return Errc::ChecksumMismatch;
+        }
+    }
+    return OkStatus;
+}
+
 } // namespace
 
-Result<u64> Engine::replace_layer_video(u64 layerId, const VideoImport& request) noexcept {
+Result<u64> Engine::replace_layer_video(u64 layerId, const VideoImport& request, bool verifyUpgrade) noexcept try {
     VideoSourceFactory* factory = config_.mediaFactory;
     if (!factory) return Status{Errc::NotSupported, "sem decodificador de video nesta plataforma"};
+    const LayerId id = LayerId::unpack(layerId);
+    Asset original;
+    AssetId originalId;
+    CompositionId compositionId;
+    u64 session = 0;
+    u32 revision = 0;
+    if (verifyUpgrade) {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        InlineEditScope inlineScope(*this, layerId);
+        const Composition* comp = project_ ? current_composition() : nullptr;
+        const Layer* layer = comp ? comp->layer(id) : nullptr;
+        if (!layer || layer->kind != LayerKind::Video || layer->locked) return Status{Errc::InvalidState};
+        const Asset* source = project_->asset(layer->source);
+        if (!source || source->sourcePath.empty()) return Status{Errc::MediaSourceMissing};
+        if (is_image_sequence(source->sourcePath)) return Status{Errc::UnsupportedFormat};
+        original.kind = AssetKind::Video;
+        original.sourcePath = resolve_asset_path(source->sourcePath);
+        original.video.width = source->video.width;
+        original.video.height = source->video.height;
+        original.windowStartUs = source->windowStartUs;
+        original.audio = source->audio;
+        originalId = layer->source;
+        compositionId = comp->id();
+        session = projectSession_;
+        revision = modelRevision_.load(std::memory_order_relaxed);
+    }
     MediaProbe probe;
     if (!factory->probe(request.sourcePath.c_str(), probe) || !probe.hasVideo) {
         return Status{Errc::UnsupportedFormat, "arquivo sem trilha de video decodificavel"};
@@ -554,21 +704,6 @@ Result<u64> Engine::replace_layer_video(u64 layerId, const VideoImport& request)
     const u32 dispW = v.display_width();
     const u32 dispH = v.display_height();
     if (dispW == 0 || dispH == 0) return Status{Errc::AssetCorrupted, "video sem dimensoes"};
-
-    std::lock_guard<std::mutex> lock(modelMutex_);
-    InlineEditScope inlineScope(*this, layerId, true);
-    if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
-    Composition* comp = current_composition();
-    if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
-    const LayerId id = LayerId::unpack(layerId);
-    {
-        const Layer* l = comp->layer(id);
-        if (!l || (l->kind != LayerKind::Video && l->kind != LayerKind::Image)) {
-            return Status{Errc::NotFound, "camada de video ou imagem nao encontrada"};
-        }
-    }
-    history_.before_mutation(*comp, project_->timeline().current(), "substituir midia");
-    bump_model_revision_locked();
 
     Asset asset;
     asset.kind = AssetKind::Video;
@@ -590,7 +725,7 @@ Result<u64> Engine::replace_layer_video(u64 layerId, const VideoImport& request)
                            : v.color.transfer == TransferFunction::HLG ? ColorSpace::HLG : ColorSpace::Rec709;
     asset.profile.primaries = v.color.primaries == ColorPrimaries::BT2020 ? ColorSpace::Rec2020
                             : v.color.primaries == ColorPrimaries::P3 ? ColorSpace::DisplayP3 : ColorSpace::Rec709;
-    if (probe.hasAudio) {
+    if (probe.hasAudio && (!verifyUpgrade || original.has_audio())) {
         asset.audio.sampleRate = probe.audioSampleRate;
         asset.audio.channels = probe.audioChannels;
         asset.audio.sampleCount = FrameIndex{probe.audioDurationUs * static_cast<i64>(probe.audioSampleRate) / 1'000'000};
@@ -599,7 +734,25 @@ Result<u64> Engine::replace_layer_video(u64 layerId, const VideoImport& request)
         asset.audio.channels = 0;
     }
 
+    if (verifyUpgrade) {
+        if (source_window_us(request.sourcePath) > 0) return Status{Errc::ChecksumMismatch};
+        if (const Status verified = verify_video_upgrade(*factory, original, asset, probe); !verified.ok())
+            return verified;
+    }
+
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
+    if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    Composition* comp = current_composition();
+    if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
     Layer* l = comp->layer(id);
+    if (verifyUpgrade && (!l || l->source != originalId || l->kind != LayerKind::Video || l->locked ||
+        comp->id() != compositionId || projectSession_ != session ||
+        modelRevision_.load(std::memory_order_relaxed) != revision)) return Status{Errc::Cancelled};
+    if (!l || (l->kind != LayerKind::Video && l->kind != LayerKind::Image))
+        return Status{Errc::NotFound, "camada de video ou imagem nao encontrada"};
+    history_.before_mutation(*comp, project_->timeline().current(), verifyUpgrade ? "melhorar fonte" : "substituir midia");
+    bump_model_revision_locked();
     f32 oldW = 0.0f, oldH = 0.0f;
     const bool hadSize = current_media_size(*project_, images_, *l, oldW, oldH);
     const AssetId assetId = project_->add_asset(std::move(asset));
@@ -607,9 +760,11 @@ Result<u64> Engine::replace_layer_video(u64 layerId, const VideoImport& request)
     if (!l) return Status{Errc::InvalidState, "camada sumiu"};
     l->kind = LayerKind::Video;
     l->source = assetId;
-    if (hadSize) remap_layer_space(*l, oldW, oldH, static_cast<f32>(dispW), static_cast<f32>(dispH));
-    const i64 sourceFrames = static_cast<i64>(std::ceil(static_cast<f64>(v.durationUs) * comp->fps() / 1e6 - 1e-6));
-    clamp_to_source(*l, sourceFrames);
+    if (hadSize) remap_layer_space(*l, oldW, oldH, static_cast<f32>(dispW), static_cast<f32>(dispH), verifyUpgrade);
+    if (!verifyUpgrade) {
+        const i64 sourceFrames = static_cast<i64>(std::ceil(static_cast<f64>(v.durationUs) * comp->fps() / 1e6 - 1e-6));
+        clamp_to_source(*l, sourceFrames);
+    }
     l->cacheKey = 0;
     // Vídeo pesado: o proxy começa já, em segundo plano.
     if (const Asset* added = project_->asset(assetId)) (void)media_.proxies().request(*added);
@@ -618,6 +773,8 @@ Result<u64> Engine::replace_layer_video(u64 layerId, const VideoImport& request)
     request_render();
     AUREA_LOG_INFO("midia substituida: video %ux%u %.3f fps", dispW, dispH, v.fps);
     return id.pack();
+} catch (const std::bad_alloc&) {
+    return Status{Errc::OutOfMemory};
 }
 
 Result<u64> Engine::replace_layer_image(u64 layerId, const u8* rgba, u32 width, u32 height,

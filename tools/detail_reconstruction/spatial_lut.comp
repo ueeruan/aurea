@@ -1,0 +1,56 @@
+#version 450
+#include "common/bindings.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = AUREA_TEX0) uniform sampler2D source;
+layout(set = 0, binding = AUREA_IMG0, rgba8) writeonly uniform image2D target;
+layout(set = 0, binding = AUREA_DATA, std430) readonly buffer Filters { vec4 coefficients[]; } lut;
+
+const vec3 luma = vec3(0.2126, 0.7152, 0.0722);
+const vec4 cubic = vec4(-0.10546875, 0.87890625, 0.26171875, -0.03515625);
+
+int filter_index(float gx, float gy) {
+    const float diagonal = 0.41421356;
+    vec2 a = abs(vec2(gx, gy));
+    int direction = a.y < a.x * diagonal ? 0 : a.x < a.y * diagonal ? 1 : gx * gy >= 0.0 ? 2 : 3;
+    float gradient = max(a.x, a.y);
+    int strength = gradient < 6.0 / 255.0 ? 0 : gradient < 27.0 / 255.0 ? 1 : 2;
+    return direction * 3 + strength;
+}
+
+void main() {
+    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 last = textureSize(source, 0) - 1;
+    if (any(greaterThan(pos, last))) return;
+
+    float y[25];
+    vec3 left[5], right[5];
+    for (int row = 0; row < 5; ++row) {
+        vec3 rgb[5];
+        for (int col = 0; col < 5; ++col) {
+            rgb[col] = texelFetch(source, clamp(pos + ivec2(col - 2, row - 2), ivec2(0), last), 0).rgb;
+            y[row * 5 + col] = dot(rgb[col], luma);
+        }
+        left[row] = rgb[0] * cubic.w + rgb[1] * cubic.z + rgb[2] * cubic.y + rgb[3] * cubic.x;
+        right[row] = rgb[1] * cubic.x + rgb[2] * cubic.y + rgb[3] * cubic.z + rgb[4] * cubic.w;
+    }
+    float gx = (y[8] - y[6] + y[13] - y[11] + y[18] - y[16]) / 3.0;
+    float gy = (y[16] - y[6] + y[17] - y[7] + y[18] - y[8]) / 3.0;
+    int index = filter_index(gx, gy) * 24;
+    vec4 correction = vec4(0);
+    for (int i = 0; i < 24; ++i) {
+        int sampleIndex = i < 12 ? i : i + 1;
+        correction += (y[sampleIndex] - y[12]) * lut.coefficients[index + i];
+    }
+    correction = clamp(correction, -0.08, 0.08);
+    vec3 rgb[4] = vec3[4](
+        left[0] * cubic.w + left[1] * cubic.z + left[2] * cubic.y + left[3] * cubic.x,
+        right[0] * cubic.w + right[1] * cubic.z + right[2] * cubic.y + right[3] * cubic.x,
+        left[1] * cubic.x + left[2] * cubic.y + left[3] * cubic.z + left[4] * cubic.w,
+        right[1] * cubic.x + right[2] * cubic.y + right[3] * cubic.z + right[4] * cubic.w);
+    for (int i = 0; i < 4; ++i) {
+        float base = dot(rgb[i], luma);
+        float gain = clamp(base + correction[i], 0.0, 1.0) - base;
+        imageStore(target, pos * 2 + ivec2(i % 2, i / 2), vec4(clamp(rgb[i] + gain, 0.0, 1.0), 1.0));
+    }
+}

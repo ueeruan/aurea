@@ -38,7 +38,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 
-private data class LibraryModel(val id: String, val name: String, val provider: String, val category: String)
+private data class LibraryModel(val id: String, val name: String, val provider: String, val category: String, val license: String)
 
 private fun readModels(assets: AssetManager, language: String): List<LibraryModel> {
     val entries = assets.open("ModelLibrary/catalog.json").bufferedReader().use { JSONArray(it.readText()) }
@@ -46,7 +46,7 @@ private fun readModels(assets: AssetManager, language: String): List<LibraryMode
         val entry = entries.getJSONObject(index)
         val names = entry.getJSONObject("names")
         LibraryModel(entry.getString("id"), names.optString(language, names.getString("en")),
-            entry.getString("provider"), entry.getString("category"))
+            entry.getString("provider"), entry.getString("category"), entry.optString("license", "CC0"))
     }
 }
 
@@ -109,7 +109,8 @@ internal fun ModelLibrary(
                         }
                         Column(Modifier.padding(start = 10.dp, end = 10.dp, top = 8.dp)) {
                             Text(model.name, color = AureaColors.LightText, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                            Text("${model.provider} · CC0", color = AureaColors.LightTextMuted, fontSize = 12.sp)
+                            val credit = if (model.license.isEmpty()) model.provider else "${model.provider} · ${model.license}"
+                            Text(credit, color = AureaColors.LightTextMuted, fontSize = 12.sp)
                         }
                         TextButton(onClick = { onUse(model.id, model.name) }) { Text(actionLabel, color = AureaColors.Accent) }
                     }

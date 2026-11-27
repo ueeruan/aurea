@@ -420,7 +420,8 @@ private fun padNudge(store: EditorStore, mode: PadMode, at: Offset, width: Float
         PadMode.Pivot -> {
             val p = FloatArray(2)
             d.parentToComp(d.position[0], d.position[1], p)
-            PivotDragSession(store, d, p[0], p[1]).moveTo(p[0] + dx, p[1] + dy)
+            val pivot = PivotDragSession(store, d, p[0], p[1])
+            pivot.moveTo(pivot.startX + dx, pivot.startY + dy)
         }
     }
     store.endGesture()

@@ -81,6 +81,12 @@
     <string name="grade_scope_parade">Parade RGB</string>
     <string name="grade_scope_vectorscope">Vetorscópio</string>
     <string name="fx030_name_color_grade">Correção de cor</string>
+    <string name="fx_studio_grade_name">Estúdio de cor</string>
+    <string name="fx_studio_grade_desc">Corrija exposição e balanço de branco. Refine a cor com rodas, curvas e ajustes seletivos.</string>
+    <string name="fx_studio_look_name">Estúdio de looks</string>
+    <string name="fx_studio_look_desc">Escolha um look, ajuste a intensidade ou importe uma LUT .cube para finalizar a imagem.</string>
+    <string name="fx_studio_look_preset">Look pronto</string>
+    <string name="fx_studio_look_import_ffx">Importar CC do After Effects (.ffx)</string>
     <string name="fx030_desc_color_grade">Corretor de cor completo: entrada log, balanço de branco, rodas, curvas, HSL, correção secundária, LUT e looks prontos.</string>
     <string name="grade_log_slog3">S-Log3 (Sony)</string>
     <string name="grade_log_logc3">LogC3 (ARRI)</string>

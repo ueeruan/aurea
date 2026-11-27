@@ -27,4 +27,12 @@
     <string name="bg_remove_o_person">व्यक्ति</string>
     <string name="bg_remove_tip_model">ऑटोमैटिक मुख्य वस्तु को काटता है और हर डिवाइस पर चलता है। व्यक्ति, डिवाइस में होने पर सिस्टम का लोगों वाला कटआउट इस्तेमाल करता है; न होने पर ऑटोमैटिक चलता है।</string>
     <string name="bg_remove_tip_edge">वीडियो के रिज़ॉल्यूशन पर किनारा फिर से बनाता है (बाल, पतली रेखाएँ)। 0 साधारण किनारा इस्तेमाल करता है।</string>
+    <string name="cutout_analyzing_scene">दृश्य का विश्लेषण हो रहा है</string>
+    <string name="cutout_analyzing_frame">इस फ़्रेम का विश्लेषण हो रहा है</string>
+    <string name="cutout_brush">कटआउट ब्रश</string>
+    <string name="cutout_brush_add">जोड़ें</string>
+    <string name="cutout_brush_subtract">हटाएँ</string>
+    <string name="cutout_brush_help">ऑब्जेक्ट चुनने के लिए टैप करें। हिस्से जोड़ने या हटाने के लिए ब्रश चलाएँ।</string>
+    <string name="cutout_auto_help">बैकग्राउंड अपने आप हटाएँ या ब्रश से कटआउट ठीक करें।</string>
+    <string name="cutout_track">ऑब्जेक्ट ट्रैक करें</string>
 </resources>

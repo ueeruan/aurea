@@ -134,8 +134,10 @@ void Backend::Impl::retire(Frame& f) {
     f.timerCount = 0; f.timerStack.clear(); f.page = f.offset = 0;
 }
 Status Backend::Impl::begin(FrameBegin& out, bool present) {
+    out = {};
     Scope scope(*this);
-    if (!scope.valid || frameOpen || deviceLost || (present && presentableLease)) return Errc::InvalidState;
+    if (deviceLost) return Errc::DeviceLost;
+    if (!scope.valid || frameOpen || (present && presentableLease)) return Errc::InvalidState;
     Frame& f = frames[sequence % frameCount];
     if (const auto status = wait(f, 5'000'000'000ull); !status.ok()) return status;
     retire(f); current = &f; f.number = ++sequence;
@@ -152,9 +154,13 @@ Status Backend::Impl::begin(FrameBegin& out, bool present) {
         glActiveTexture(GL_TEXTURE0 + i); glBindTexture(GL_TEXTURE_2D, dummy2D); glBindTexture(GL_TEXTURE_CUBE_MAP, dummyCube); glBindSampler(i, dummySampler);
     }
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, dummyBuffer); glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, dummyBuffer);
-    out = {}; out.commands = this; out.frameNumber = sequence;
+    if (const Status initialized = check("begin_frame"); !initialized.ok()) {
+        current = nullptr;
+        return initialized;
+    }
+    out.commands = this; out.frameNumber = sequence;
     if (presenting) { out.backbuffer = backbuffer; out.backbufferWidth = surfaceWidth; out.backbufferHeight = surfaceHeight; out.backbufferFormat = SurfaceFormat::RGBA8; }
-    frameOpen = true; return check("begin_frame");
+    frameOpen = true; return OkStatus;
 }
 Status Backend::begin_frame(FrameBegin& out) noexcept {
     if (impl_->presentableLease) return Status{Errc::Busy, "presentable frame lease active"};
@@ -170,21 +176,27 @@ Status Backend::Impl::finish_frame(bool present) {
     (void)d.check("frame-recording");
     if (present && d.presenting && d.frameStatus.ok()) {
         auto* t = find(d.textures, d.backbuffer.id);
-        if (!eglMakeCurrent(d.display, d.window, d.window, d.context)) d.fail(Errc::SurfaceLost, "EGL window make-current failed");
+        if (!eglMakeCurrent(d.display, d.window, d.window, d.context))
+            d.fail(eglGetError() == EGL_CONTEXT_LOST ? Errc::DeviceLost : Errc::SurfaceLost,
+                   "EGL window make-current failed");
         else {
             glBindFramebuffer(GL_READ_FRAMEBUFFER, d.readFramebuffer); d.attach(GL_READ_FRAMEBUFFER, t, nullptr);
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0); glDisable(GL_SCISSOR_TEST);
             glBlitFramebuffer(0, 0, d.surfaceWidth, d.surfaceHeight, 0, d.surfaceHeight, d.surfaceWidth, 0, GL_COLOR_BUFFER_BIT, GL_NEAREST);
             if (d.check("frame-present-blit").ok() && !eglSwapBuffers(d.display, d.window))
-                d.fail(Errc::SurfaceLost, "EGL swap failed");
+                d.fail(eglGetError() == EGL_CONTEXT_LOST ? Errc::DeviceLost : Errc::SurfaceLost,
+                       "EGL swap failed");
         }
     }
     (void)d.check("end_frame");
-    d.current->fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0); glFlush();
-    if (!d.current->fence) d.fail(Errc::DeviceLost, "GLES frame fence failed");
+    if (!d.deviceLost) {
+        d.current->fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        if (!d.current->fence) d.fail(Errc::DeviceLost, "GLES frame fence failed");
+        else glFlush();
+    }
     d.last = d.current; d.current = nullptr; d.frameOpen = false;
     eglMakeCurrent(d.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-    return d.frameStatus;
+    return d.deviceLost ? Status{Errc::DeviceLost, "GLES frame context lost or unfenced"} : d.frameStatus;
 }
 Status Backend::end_frame() noexcept { return impl_->finish_frame(true); }
 Status Backend::discard_frame() noexcept { return impl_->finish_frame(false); }
@@ -261,7 +273,7 @@ bool Backend::has_surface() const noexcept { return impl_->window != EGL_NO_SURF
 void Backend::defer_until_gpu_done(void (*fn)(void*), void* context) noexcept {
     if (!fn) return;
     auto& d = *impl_; Frame* f = d.current ? d.current : d.last;
-    if (f && (d.frameOpen || f->fence)) f->deferred.push_back({fn, context}); else fn(context);
+    if (f && (d.frameOpen || f->fence || d.deviceLost)) f->deferred.push_back({fn, context}); else fn(context);
 }
 void Backend::wait_idle() noexcept {
     auto& d = *impl_; Impl::Scope scope(d); if (!scope.valid) return;
@@ -293,7 +305,9 @@ Status Backend::poll_export_work(Status* completedFailure) noexcept {
 }
 u64 Backend::last_submitted_frame() const noexcept { return impl_->last ? impl_->last->number : 0; }
 Status Backend::wait_frame(u64 number, u64 timeout) noexcept {
-    auto& d = *impl_; Impl::Scope scope(d); if (!scope.valid) return Errc::InvalidState;
+    auto& d = *impl_; Impl::Scope scope(d);
+    if (d.deviceLost) return Errc::DeviceLost;
+    if (!scope.valid) return Errc::InvalidState;
     for (auto& f : d.frames) if (&f != d.current && f.number == number) {
         const Status status = d.wait(f, timeout);
         if (!status.ok()) return status;
@@ -316,8 +330,8 @@ GpuMemoryStats Backend::memory_stats() const noexcept {
     out.usedBytes = d.bytesTextures + d.bytesBuffers;
     // ES readback/upload buffers have an owned CPU mirror. These bytes consume
     // the same Android RAM budget as the unified GPU allocations.
-    for (const auto& [id, buffer] : d.buffers) out.usedBytes += buffer.cpu.capacity();
-    out.usedBytes += d.uploadScratch.capacity();
+    for (const auto& [id, buffer] : d.buffers) if (buffer.cpu) out.usedBytes += buffer.desc.bytes;
+    out.usedBytes += d.uploadScratchBytes;
     out.reservedBytes = out.usedBytes;
     out.textureCount = d.textures.size(); out.bufferCount = d.buffers.size();
     out.allocationCount = out.textureCount + out.bufferCount; out.uploadBytesThisFrame = d.uploadBytes;
@@ -328,8 +342,9 @@ void Backend::shutdown() noexcept {
     auto& d = *impl_;
     ++d.surfaceGeneration;
     end_presentable_frame_lease();
-    if (d.context != EGL_NO_CONTEXT && d.make_current()) {
-        d.frameOpen = false; d.current = nullptr; wait_idle(); save_pipeline_cache();
+    d.frameOpen = false; d.current = nullptr;
+    if (!d.deviceLost && d.context != EGL_NO_CONTEXT && d.make_current()) {
+        wait_idle(); save_pipeline_cache();
         if (d.exportRetirementFence) glDeleteSync(d.exportRetirementFence);
         d.exportRetirementFence = nullptr;
         for (auto& [id, p] : d.pipelines) glDeleteProgram(p.id);
@@ -346,7 +361,8 @@ void Backend::shutdown() noexcept {
         glDeleteVertexArrays(1, &d.vao); glDeleteFramebuffers(1, &d.framebuffer); glDeleteFramebuffers(1, &d.readFramebuffer);
     }
     d.textures.clear(); d.buffers.clear(); d.pipelines.clear(); d.shaders.clear(); d.samplers.clear();
-    std::vector<u8>().swap(d.uploadScratch);
+    d.uploadScratch.reset();
+    d.uploadScratchBytes = 0;
     if (d.display != EGL_NO_DISPLAY) {
         eglMakeCurrent(d.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         if (d.window != EGL_NO_SURFACE) eglDestroySurface(d.display, d.window);

@@ -332,6 +332,21 @@ NSString* slice(const std::vector<char>& blob, u32 offset, u32 length) {
     return [[NSString alloc] initWithBytes:blob.data() + offset length:len encoding:NSUTF8StringEncoding] ?: @"";
 }
 
+template <typename Query>
+u32 read_layer_rows(std::vector<aurea::bridge::LayerRow>& rows, std::vector<char>& names, const Query& query) {
+    constexpr usize kMaxNameBytes = 8 * 1024 * 1024;
+    for (;;) {
+        const u32 written = query(rows.data(), static_cast<u32>(rows.size()), names.data(), static_cast<u32>(names.size()));
+        const bool growRows = written == rows.size() && rows.size() < 65536;
+        const bool growNames = names.size() < kMaxNameBytes && std::any_of(rows.begin(), rows.begin() + written, [](const auto& row) {
+            return (row.reserved0 & aurea::bridge::kLayerRowNameBufferFull) != 0;
+        });
+        if (!growRows && !growNames) return written;
+        if (growRows) rows.resize(rows.size() * 2);
+        if (growNames) names.resize(names.size() * 2);
+    }
+}
+
 NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow& p, const std::vector<char>& blob) {
     NSMutableArray<NSString*>* enums = [NSMutableArray array];
     if (p.enumLength > 0) {
@@ -399,8 +414,8 @@ bool hyper_recipe_from(NSArray<NSNumber*>* packed, aurea::hyper::Recipe& r) {
     }
     auto on = [](double x) { return x >= 0.5; };
     r = aurea::hyper::Recipe{};
-    r.upscale = static_cast<uint32_t>(std::clamp(v[0], 1.0, 8.0));
-    r.upscaleMode = on(v[1]) ? aurea::hyper::UpscaleMode::Anime : aurea::hyper::UpscaleMode::General;
+    r.upscale = static_cast<uint32_t>(std::clamp(v[0], 0.0, 8.0));
+    r.upscaleMode = static_cast<aurea::hyper::UpscaleMode>(std::lround(std::clamp(v[1], 0.0, 2.0)));
     r.denoise = static_cast<float>(std::clamp(v[2], 0.0, 1.0));
     r.deblock = on(v[3]);
     r.deinterlace = static_cast<uint8_t>(std::clamp(v[4], 0.0, 2.0));
@@ -3370,13 +3385,9 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 
     std::vector<aurea::bridge::LayerRow> rows(capacity);
     std::vector<char> blob(blobCapacity);
-    u32 written = e->query_layers(rows.data(), capacity, blob.data(), blobCapacity);
-    if (written == capacity) {
-        // Encheu: o projeto cresceu entre o status e a consulta. Cresce e relê.
-        capacity *= 2;
-        rows.assign(capacity, {});
-        written = e->query_layers(rows.data(), capacity, blob.data(), blobCapacity);
-    }
+    const u32 written = read_layer_rows(rows, blob, [e](auto* rows, u32 capacity, char* names, u32 nameBytes) {
+        return e->query_layers(rows, capacity, names, nameBytes);
+    });
     NSMutableArray<NSDictionary<NSString*, id>*>* out = [NSMutableArray arrayWithCapacity:written];
     for (u32 i = 0; i < written; ++i) {
         [out addObject:layer_row_dict(rows[i], slice(blob, rows[i].nameOffset, rows[i].nameLength))];
@@ -3392,12 +3403,9 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     const u32 blobCapacity = 32 * 1024;
     std::vector<aurea::bridge::LayerRow> rows(capacity);
     std::vector<char> blob(blobCapacity);
-    u32 written = e->query_group_layers(static_cast<aurea::u64>(groupId), rows.data(), capacity, blob.data(), blobCapacity);
-    while (written == capacity && capacity < 65536) {
-        capacity *= 4;
-        rows.assign(capacity, {});
-        written = e->query_group_layers(static_cast<aurea::u64>(groupId), rows.data(), capacity, blob.data(), blobCapacity);
-    }
+    const u32 written = read_layer_rows(rows, blob, [e, groupId](auto* rows, u32 capacity, char* names, u32 nameBytes) {
+        return e->query_group_layers(static_cast<aurea::u64>(groupId), rows, capacity, names, nameBytes);
+    });
     NSMutableArray<NSDictionary<NSString*, id>*>* out = [NSMutableArray arrayWithCapacity:written];
     for (u32 i = 0; i < written; ++i) {
         NSMutableDictionary<NSString*, id>* row = [layer_row_dict(rows[i], slice(blob, rows[i].nameOffset, rows[i].nameLength)) mutableCopy];
@@ -4347,6 +4355,12 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     float points[8]{}; auto* e = self.engine;
     return e && e->query_gizmo(layerId, length, points) ? floats_to_array(points, 8) : @[];
 }
+- (NSArray<NSNumber*>*)pivotDragBasis:(long long)layer {
+    f32 values[aurea::Engine::kPivotDragFloats]{};
+    if (!self.engine || !self.engine->query_pivot_drag_basis(static_cast<u64>(layer), values)) return @[];
+    return floats_to_array(values, aurea::Engine::kPivotDragFloats);
+}
+
 - (NSArray<NSNumber*>*)previewGestureBasis:(long long)layer {
     float values[13]{};
     if (!self.engine || !self.engine->query_preview_gesture_basis(static_cast<u64>(layer), values)) return @[];
@@ -4457,12 +4471,15 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     const auto p = e->layer_media_path(layerId); return [NSString stringWithUTF8String:p.c_str()] ?: @"";
 }
 - (long long)replaceLayer:(long long)layerId withVideo:(NSString*)path name:(NSString*)name {
+    return [self replaceLayer:layerId withVideo:path name:name verifyUpgrade:NO];
+}
+- (long long)replaceLayer:(long long)layerId withVideo:(NSString*)path name:(NSString*)name verifyUpgrade:(BOOL)verifyUpgrade {
     auto* e = self.engine;
     if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);
     aurea::VideoImport request;
     request.sourcePath = to_std(path);
     request.displayName = to_std(name);
-    const aurea::Result<aurea::u64> r = e->replace_layer_video(static_cast<aurea::u64>(layerId), request);
+    const aurea::Result<aurea::u64> r = e->replace_layer_video(static_cast<aurea::u64>(layerId), request, verifyUpgrade);
     if (!r.ok()) {
         _lastImportError = to_ns(std::string(r.status().message()));
         return -static_cast<long long>(r.status().code());
@@ -5717,17 +5734,16 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
 
 - (NSArray<NSNumber *> *)rotoStatusForEffect:(uint32_t)effectId layer:(long long)layerId {
     // [propagados, total, propagando, falhou, traços aqui, traços total,
-    //  quadro atual pronto, quadros do clipe prontos, quadros do clipe, há traços]
-    long long v[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    //  quadro atual pronto, quadros do clipe prontos, quadros do clipe, há traços, válido]
+    long long v[11]{};
     if (auto* e = self.engine) {
         aurea::i64 st[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-        aurea::u32 info[3] = {0, 0, 0};
-        (void)e->roto_status(static_cast<aurea::u64>(layerId), effectId, st);
-        (void)e->roto_stroke_info(static_cast<aurea::u64>(layerId), effectId, info);
+        aurea::u32 info[2]{};
+        v[10] = e->roto_status(static_cast<aurea::u64>(layerId), effectId, st, info);
         v[0] = st[0]; v[1] = st[1]; v[2] = st[2]; v[3] = st[3]; v[4] = info[0]; v[5] = info[1];
         v[6] = st[4]; v[7] = st[5]; v[8] = st[6]; v[9] = st[7];
     }
-    return @[@(v[0]), @(v[1]), @(v[2]), @(v[3]), @(v[4]), @(v[5]), @(v[6]), @(v[7]), @(v[8]), @(v[9])];
+    return @[@(v[0]), @(v[1]), @(v[2]), @(v[3]), @(v[4]), @(v[5]), @(v[6]), @(v[7]), @(v[8]), @(v[9]), @(v[10])];
 }
 
 - (int32_t)bgRemoveApplyForLayer:(long long)layerId {

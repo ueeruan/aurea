@@ -18,6 +18,7 @@
 #include "BuiltinEffects.hpp"
 
 #include "aurea/timeline/Layer.hpp"
+#include "aurea/tracking/TrackerEffects.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -667,6 +668,7 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_hyper_effects(registry);
     // Remover fundo (Keying) — 0.4.5. No fim.
     builtin::register_background_remove_effect(registry);
+    tracking::register_tracker_effects(registry);
     // Pedidos de usuários da 0.4.5: Reflexo na água, Envolver com luz, Caneta
     // esferográfica, Poeira e Looks de cinema. No fim.
     builtin::register_water_wrap_ballpoint_effects(registry);

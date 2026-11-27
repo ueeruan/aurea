@@ -74,6 +74,7 @@ enum class EditorPanel {
     Animation,     // F3: Animação (camada · texto · prontas · explodir)
     VectorFill,    // Vetor redesenhado: Cor e preenchimento do vetor (VectorPanel, face Fill)
     VectorPaths,   // Vetor redesenhado: Caminhos e operadores (Forma · Caminho · Operadores · Grupo)
+    CameraTracking,
 }
 
 /**
@@ -195,7 +196,8 @@ fun PanelContent(
                     EditorPanel.Text -> TextPanel(env)
                     EditorPanel.Font -> FontPanel(env)
                     EditorPanel.Particles -> ParticlesPanel(env)
-                    EditorPanel.Tracking -> TrackingPanel(env)
+                    EditorPanel.Tracking -> MotionTrackerPanel(env)
+                    EditorPanel.CameraTracking -> CameraTrackerPanel(env)
                     EditorPanel.Element3D -> com.aurea.aurea.effects.PluginPanelOr("material") { Element3DPanel(env) }
                     EditorPanel.Captions -> CaptionsPanel(env)
                     EditorPanel.Presets -> com.aurea.aurea.effects.PluginPanelOr("presets") { PresetsPanel(env) }
@@ -293,7 +295,8 @@ internal fun panelSectionTitle(store: EditorStore, panel: EditorPanel): String =
     EditorPanel.Text -> stringResource(R.string.sh_dock_edit_text)
     EditorPanel.Font -> stringResource(R.string.panel_fonte)
     EditorPanel.Particles -> stringResource(R.string.panel_particulas)
-    EditorPanel.Tracking -> stringResource(R.string.panel_rastreio)
+    EditorPanel.Tracking -> stringResource(R.string.trk_motion_title)
+    EditorPanel.CameraTracking -> stringResource(R.string.cam_tracker_title)
     EditorPanel.Element3D -> when (Element3DRequest.face) {
         // 13/11/2026: o modelo importado abre o painel do modelo (Material · Textura · Animação · Sombra).
         Face3D.Material, Face3D.Object -> if (store.detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind &&
@@ -304,7 +307,7 @@ internal fun panelSectionTitle(store: EditorStore, panel: EditorPanel): String =
         Face3D.Scene -> stringResource(R.string.fn_3d_scene)
         Face3D.All -> stringResource(if (store.text3d != null) R.string.text_options else R.string.panel_material_ambiente)
     }
-    EditorPanel.Captions -> stringResource(R.string.panel_legendas)
+    EditorPanel.Captions -> stringResource(R.string.caption_star_title)
     EditorPanel.Presets -> stringResource(R.string.panel_presets)
     EditorPanel.Mask -> stringResource(R.string.panel_mascara_recorte)
     EditorPanel.Vector, EditorPanel.VectorPaths -> stringResource(R.string.fn_vec_paths_title)

@@ -54,6 +54,45 @@ private:
     SyntheticFactory longo_, curto_;
 };
 
+class UpgradeClips final : public VideoSourceFactory {
+public:
+    static SyntheticConfig config(u32 width, u32 height, u32 frames, f64 tone = 440.0) {
+        SyntheticConfig c;
+        c.width = width;
+        c.height = height;
+        c.frameCount = frames;
+        c.audioRate = 48000;
+        c.audioSeconds = frames / c.fps;
+        c.audioFreq = tone;
+        return c;
+    }
+
+    bool probe(const char* path, MediaProbe& out) override { return pick(path).probe(path, out); }
+    std::unique_ptr<VideoDecoderBackend> open_video(const Asset& a, MediaPriority p) override {
+        return pick(a.sourcePath.c_str()).open_video(a, p);
+    }
+    std::unique_ptr<audio::AudioDecoderBackend> open_audio(const char* path) override {
+        return pick(path).open_audio(path);
+    }
+
+private:
+    SyntheticFactory& pick(std::string_view path) {
+        if (path.ends_with("upgrade-wrong-audio.mp4")) return wrongAudio_;
+        if (path.ends_with("upgrade-unrelated.mp4")) return unrelated_;
+        if (path.ends_with("upgrade-high.mp4")) return high_;
+        return low_;
+    }
+
+    SyntheticFactory low_{config(64, 36, 90)};
+    SyntheticFactory high_{config(128, 72, 150)};
+    SyntheticFactory wrongAudio_{config(128, 72, 150, 880.0)};
+    SyntheticFactory unrelated_{[] {
+        auto c = config(128, 72, 150);
+        c.pattern = SyntheticPattern::FrameGray;
+        return c;
+    }()};
+};
+
 struct Rig {
     TwoClips factory;
     Engine e;
@@ -162,6 +201,59 @@ AUREA_TEST(ReplaceMedia, KeepsLayerStateClampsShortClipAndUndoes) {
     AUREA_CHECK(img.ok());
     AUREA_CHECK(r.L()->kind == LayerKind::Image && r.L()->end.value == 200);
     AUREA_CHECK(!r.e.replace_layer_image(0xDEAD, px.data(), 8, 4, "x", "x").ok());
+}
+
+AUREA_TEST(ImproveVideoSource, MatchesWindowAndPreservesEditsOrRejectsCandidate) {
+    UpgradeClips factory;
+    Engine e;
+    EngineConfig ec;
+    ec.workerCount = 2;
+    ec.memoryBudgetBytes = 64ull << 20;
+    ec.disableAutosave = true;
+    ec.mediaFactory = &factory;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(64, 36, 30.0, nullptr).ok());
+    const auto imported = e.import_video(VideoImport{"upgrade-low.mp4", "Gravação", 1'000'000});
+    AUREA_CHECK(imported.ok());
+    if (!imported.ok()) return;
+    const LayerId id = LayerId::unpack(*imported);
+    auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    Layer* layer = comp->layer(id);
+    layer->start = FrameIndex{15};
+    layer->end = FrameIndex{45};
+    layer->offset = FrameIndex{42};
+    layer->speed = 1.25f;
+    layer->reversed = true;
+    Command fx;
+    fx.type = CommandType::EffectAdd;
+    fx.effect_add.layer = id;
+    fx.effect_add.effectType = effect_type_id(effect_keys::kGaussianBlur);
+    fx.effect_add.index = kInvalidIndex;
+    AUREA_CHECK(e.apply_command(fx).ok());
+    const Layer before = *comp->layer(id);
+
+    const auto upgrade = [&](const char* path) { return e.replace_layer_video(id.pack(), VideoImport{path, "Alternativa"}, true); };
+    AUREA_CHECK(upgrade("upgrade-same-res.mp4").status().code() == Errc::OutOfRange);
+    AUREA_CHECK(upgrade("upgrade-unrelated.mp4").status().code() == Errc::ChecksumMismatch);
+    AUREA_CHECK(upgrade("upgrade-wrong-audio.mp4").status().code() == Errc::ChecksumMismatch);
+    AUREA_CHECK(comp->layer(id)->source == before.source);
+
+    const auto replaced = upgrade("upgrade-high.mp4");
+    AUREA_CHECK(replaced.ok());
+    if (!replaced.ok()) return;
+    AUREA_CHECK_EQ(*replaced, id.pack());
+    layer = comp->layer(id);
+    const Asset* source = e.project()->asset(layer->source);
+    AUREA_CHECK(source && source->video.width == 128 && source->has_audio() && source->windowStartUs == 0);
+    AUREA_CHECK(layer->source != before.source && layer->name == before.name);
+    AUREA_CHECK(layer->start == before.start && layer->end == before.end && layer->offset == before.offset);
+    AUREA_CHECK(layer->speed == before.speed && layer->reversed == before.reversed);
+    AUREA_CHECK_EQ(layer->effects.size(), before.effects.size());
+    AUREA_CHECK_NEAR(layer->transform.scale.x * 2, before.transform.scale.x, 1e-5f);
+    Command undo;
+    undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK(e.project()->timeline().composition(e.project()->timeline().current())->layer(id)->source == before.source);
 }
 
 AUREA_TEST(ProjectPackage, ExportImportRelinksMediaAndNeverOverwrites) {

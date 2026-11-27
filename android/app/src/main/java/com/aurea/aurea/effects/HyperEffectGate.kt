@@ -66,17 +66,13 @@ internal object PaidGate {
 }
 
 /**
- * 0.5.4 (pedido do dono, 15/11/2026): o TEXTO 3D é pago (16/11/2026: assinatura própria ou AureaHyper). Todas
- * as entradas que CRIAM texto 3D (+ › Texto 3D, o dock da cena 3D, os presets de
- * texto 3D) passam por [EditorStore.addText3D], que confere [locked]; bloqueado,
- * o editor abre o paywall (PaywallDialog, hyper/Paywall.kt) e as células levam
- * o [HyperLockBadge]. Texto 3D que já está no projeto segue como um efeito pago
- * já aplicado (ver [PaidGate]). O par do iOS: Text3DGate (HyperModel.swift).
+ * Consulta a política compartilhada do Texto 3D. As entradas de criação e os
+ * presets usam a mesma regra de [EditorStore.addText3D].
  */
 internal object Text3DGate {
     fun isPaid(): Boolean = AureaEngine.nativeText3dRequiresHyper()
 
-    /** Lê o estado do portão (Compose recompõe quando muda): assinatura do Texto 3D ou AureaHyper. */
+    /** Só consulta a assinatura quando o motor exige acesso pago. */
     fun locked(): Boolean {
         if (!isPaid()) return false
         return PaidGate.locked(true, HyperEntitlements.accessFor(AureaEngine.nativeText3dProductId()))

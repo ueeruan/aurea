@@ -1,5 +1,8 @@
 #include "aurea/Engine.hpp"
 #include "aurea/project/Presets.hpp"
+#include "aurea/text/FontManager.hpp"
+#include "aurea/text/Text.hpp"
+#include "../text/CaptionReflow.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -70,6 +73,88 @@ Layer* caption_track_of(Composition& comp, u64 id) {
         if (l && !l->captions.empty() && l->text.captionSource == id) return l;
     }
     return nullptr;
+}
+
+bool can_separate_caption_track(const Composition& comp, LayerId id, const EffectRegistry& registry) {
+    const Layer* track = comp.layer(id);
+    const i32 index = comp.z_index_of(id);
+    if (!track || index < 0 || track->adjustment || track->precompExposed) return false;
+    if (static_cast<u32>(index + 1) < comp.order().size()) {
+        const Layer* above = comp.layer(comp.order().at(static_cast<u32>(index + 1)));
+        if (above && ((!track->clipToBelow && above->clipToBelow) ||
+                      (above->adjustment && above->adjustmentScope == 1))) return false;
+    }
+    for (const LayerId otherId : comp.order().raw()) {
+        const Layer* other = comp.layer(otherId);
+        if (!other || otherId == id) continue;
+        if (other->parent == id || other->matteSource == id || other->cameraTrackSource == id ||
+            std::find(other->adjustmentTargets.begin(), other->adjustmentTargets.end(), id) != other->adjustmentTargets.end())
+            return false;
+        for (const auto& effect : other->effects) {
+            const auto* params = registry.params(effect.type);
+            if (!params) continue;
+            for (u32 p = 0; p < std::min<usize>(effect.params.size(), params->count()); ++p)
+                if (params->at(p).type == ParamType::LayerReference && effect.params[p].constant.ref == id.pack())
+                    return false;
+        }
+    }
+    return true;
+}
+
+void center_caption_layer(Layer& layer) {
+    const auto font = text::FontManager::instance().font_for(layer.text);
+    if (!font) return;
+    const auto extent = text::measure(*font, layer.text);
+    const f32 pad = layer.text.strokeWidth > 0 ? layer.text.strokeWidth + 2.0f : 2.0f;
+    const Vec2 anchor{extent.width * 0.5f + pad, extent.height * 0.5f + pad};
+    const Vec2 delta = anchor - Vec2{layer.transform.anchor.x, layer.transform.anchor.y};
+    layer.transform.anchor.x = anchor.x;
+    layer.transform.anchor.y = anchor.y;
+    auto shift_track = [&](TrackProperty property, f32 amount) {
+        if (auto* track = layer.tracks.find(property)) {
+            track->staticValue += amount;
+            for (auto& key : track->keys) key.value += amount;
+        }
+    };
+    shift_track(TrackProperty::AnchorX, delta.x);
+    shift_track(TrackProperty::AnchorY, delta.y);
+    if (layer.maskOnComposition) return;
+    for (auto& mask : layer.masks) {
+        for (auto& point : mask.points) point.position = point.position + delta;
+        for (auto& key : mask.pathKeys)
+            for (auto& point : key.points) point.position = point.position + delta;
+    }
+}
+
+std::vector<Layer> caption_layers(const Layer& track, u32 shortSide) {
+    Layer base = track;
+    base.captions = {};
+    base.captionOptions = {};
+    base.text.captionSource = 0;
+    base.text.sourceKeys.clear();
+    base.text.sourceExpression.reset();
+    base.magneticTrack = false;
+
+    std::vector<Layer> layers;
+    layers.reserve(std::min<usize>(track.captions.size(), kMaxLayerCount));
+    for (const auto& block : track.captions) {
+        const FrameIndex start = std::max(track.start, track.timeline_time(FrameIndex{block.start}));
+        const FrameIndex end = std::min(track.end, track.timeline_time(FrameIndex{block.end}));
+        if (start >= end) continue;
+        Layer& layer = layers.emplace_back(base);
+        layer.offset = track.local_time(start);
+        layer.start = start;
+        layer.end = end;
+        text::resolve_caption_block(track.captionOptions, block, shortSide, layer.text, layer.tracks);
+        constexpr usize nameLimit = 72;
+        usize length = std::min(block.text.size(), nameLimit);
+        while (length < block.text.size() && (static_cast<u8>(block.text[length]) & 0xC0) == 0x80) --length;
+        layer.name = block.text.substr(0, length);
+        for (char& ch : layer.name) if (ch == '\n' || ch == '\r') ch = ' ';
+        if (length < block.text.size()) layer.name += "…";
+        center_caption_layer(layer);
+    }
+    return layers;
 }
 } // namespace
 
@@ -184,7 +269,9 @@ bool Engine::edit_caption_track(u64 layerId, const std::string& command) noexcep
     const auto* operation = value.get("op"); const auto* ids = value.get("ids");
     if (!operation || !operation->is_string()) return false;
     // 0.5.3: inserir, buscar/substituir (vazio = todos) e criar da transcrição não precisam de bloco escolhido.
-    const bool idsOptional = operation->string == "insert" || operation->string == "replace" || operation->string == "from_words";
+    const bool idsOptional = operation->string == "insert" || operation->string == "replace" ||
+                             operation->string == "from_words" || operation->string == "layout" ||
+                             operation->string == "to_layers";
     if (ids && !ids->is_array()) return false;
     if (!idsOptional && (!ids || ids->array.empty())) return false;
     std::set<u64> selected;
@@ -198,16 +285,55 @@ bool Engine::edit_caption_track(u64 layerId, const std::string& command) noexcep
         out = static_cast<i64>(n->number); return true;
     };
     std::lock_guard lock(modelMutex_);
+    const auto& op = operation->string;
+    if (op == "to_layers") drain_commands_locked();
     auto* comp = project_ ? current_composition() : nullptr;
-    auto* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    const LayerId id = LayerId::unpack(layerId);
+    auto* layer = comp ? comp->layer(id) : nullptr;
     if (!layer || layer->locked || layer->captions.empty()) return false;
+    if (op == "to_layers") {
+        if (!selected.empty() || !can_separate_caption_track(*comp, id, effectRegistry_)) return false;
+        const auto visible = [&](const text::CaptionSegment& block) {
+            return std::max(layer->start, layer->timeline_time(FrameIndex{block.start})) <
+                   std::min(layer->end, layer->timeline_time(FrameIndex{block.end}));
+        };
+        const usize count = static_cast<usize>(std::count_if(layer->captions.begin(), layer->captions.end(), visible));
+        if (!count || count > kMaxLayerCount - comp->layers().count() + 1) return false;
+        auto layers = caption_layers(*layer, std::min(comp->width(), comp->height()));
+
+        u32 lastTrack = 0;
+        for (const LayerId current : comp->order().raw())
+            lastTrack = std::max(lastTrack, comp->layer(current)->trackId);
+        if (lastTrack >= kInvalidIndex - (count - 1)) return false;
+
+        // Keep the first layer's handle and reuse its timeline row. The rest
+        // receive independent rows at the same depth in the composition.
+        history_.before_mutation(*comp, project_->timeline().current(), "transformar legendas em camadas");
+        *layer = std::move(layers.front());
+        comp->layers().reserve(static_cast<u32>(comp->layers().count() + count - 1));
+        OrderedIds<LayerId> order;
+        for (const LayerId current : comp->order().raw()) {
+            order.push_back(current);
+            if (current != id) continue;
+            for (usize i = 1; i < layers.size(); ++i) {
+                layers[i].trackId = ++lastTrack;
+                order.push_back(comp->layers().create(std::move(layers[i])));
+            }
+        }
+        comp->order() = std::move(order);
+        comp->rebuild_draw_order();
+        comp->touch();
+        bump_model_revision_locked();
+        project_->mark_dirty();
+        request_render();
+        return true;
+    }
     // Quadro da timeline - shift = quadro local dos blocos (a faixa pode ter sido movida).
     const i64 shift = layer->start.value - layer->offset.value;
     auto next = layer->captions;
     auto nextOptions = layer->captionOptions;
     auto nextTransform = layer->transform;
     if (std::count_if(next.begin(), next.end(), [&](const auto& s) { return selected.contains(s.id); }) != static_cast<i64>(selected.size())) return false;
-    const auto& op = operation->string;
     if (op == "delete") {
         std::erase_if(next, [&](const auto& s) { return selected.contains(s.id); });
     } else if (op == "move") {
@@ -399,6 +525,13 @@ bool Engine::edit_caption_track(u64 layerId, const std::string& command) noexcep
     } else if (op == "clear_look") {
         // Volta ao estilo da faixa.
         for (auto& s : next) if (selected.contains(s.id)) s.look.reset();
+    } else if (op == "layout") {
+        i64 count;
+        if (!number("words", count) || count < 1 || count > 12) return false;
+        nextOptions.mode = count == 1 ? 1u : 0u;
+        nextOptions.maxWords = static_cast<u32>(count);
+        if (nextOptions.mode == layer->captionOptions.mode && nextOptions.maxWords == layer->captionOptions.maxWords) return true;
+        if (!text::reflow_caption_track(next, nextOptions, comp->fps())) return false;
     } else if (op == "regroup") {
         // Reagrupa SÓ os blocos escolhidos com as opções atuais — é o
         // "regenerar este trecho" sem tocar no resto da fala.

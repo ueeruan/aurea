@@ -1420,6 +1420,8 @@
     <string name="fx_name_light_sweep">Light Sweep</string>
     <string name="fx_name_shake">Shake</string>
     <string name="fx_name_turbulence">Turbulent Displace</string>
+    <string name="fx_name_turbulence_legacy">क्लासिक टर्बुलेंस</string>
+    <string name="fx_name_turbulent_displace">टर्बुलेंट डिस्प्लेस</string>
     <string name="fx_name_wave_warp">Wave Warp</string>
     <string name="fx_name_warp">Warp</string>
     <string name="fx_name_ripple_dissolve">Ripple Dissolve</string>
@@ -2920,6 +2922,13 @@
     <string name="afx_name_particular">3D पार्टिकल</string>
     <string name="afx_desc_particular">3D पार्टिकल सिस्टम: बॉक्स या गोला एमिटर, वेग, गुरुत्व, हवा, वायु प्रतिरोध, टर्बुलेंस, और जीवनकाल में रंग व आकार। लेयर एमिटर बन जाती है।</string>
     <string name="layer_replace_media">मीडिया बदलें</string>
+    <string name="layer_improve_source">स्रोत की गुणवत्ता बढ़ाएँ</string>
+    <string name="layer_improve_source_detail">उसी पूरी रिकॉर्डिंग का ज़्यादा रिज़ॉल्यूशन वाला वीडियो चुनें</string>
+    <string name="layer_improve_source_checking">रिकॉर्डिंग की जाँच हो रही है…</string>
+    <string name="layer_improve_source_done">स्रोत ज़्यादा रिज़ॉल्यूशन में अपडेट हुआ</string>
+    <string name="layer_improve_source_resolution">ज़्यादा चौड़ाई और ऊँचाई वाला वीडियो चुनें।</string>
+    <string name="layer_improve_source_mismatch">उसी फ़्रेमिंग, समय और ऑडियो वाली रिकॉर्डिंग चुनें।</string>
+    <string name="layer_improve_source_failed">स्रोत की गुणवत्ता नहीं बढ़ाई जा सकी। %1$s</string>
     <string name="layer_replace_media_detail">दूसरी फ़ोटो या वीडियो; ट्रांसफ़ॉर्म, कीफ़्रेम, इफ़ेक्ट और मास्क बने रहते हैं</string>
     <string name="layer_replacing_media">मीडिया बदला जा रहा है…</string>
     <string name="layer_media_replaced">मीडिया को %1$s से बदला गया</string>
@@ -4414,7 +4423,7 @@
     <string name="fxo_apply_distortion">डिस्टॉर्शन लगाएँ</string>
     <string name="fxo_2">2×</string>
     <string name="fxo_4">4×</string>
-    <string name="fxt_upscales_the_layer_when_it_appears_large">लेयर जब सोर्स से बड़ी दिखती है (कम्पोज़िशन में लेयर का स्केल), तब उसे बड़ा करता है। स्क्रीन पर बड़ा न हो तो सिर्फ़ शार्पनेस काम करती है।</string>
+    <string name="fxt_upscales_the_layer_when_it_appears_large">मौजूदा आकार पर बारीकियाँ उभारता है और लेयर बड़ी करने पर किनारों को सुधारता है।</string>
     <string name="fxl_content">कंटेंट</string>
     <string name="fxo_general">सामान्य</string>
     <string name="fxo_anime">एनिमे</string>

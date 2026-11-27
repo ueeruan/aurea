@@ -1,6 +1,7 @@
 #include <unordered_map>
 #include "aurea/timeline/Composition.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
+#include "aurea/text/TextLayerName.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -187,7 +188,8 @@ LayerId Composition::duplicate_layer(LayerId source, FrameIndex atTime) {
     if (layers_.count() >= kMaxLayerCount) return LayerId{};
 
     Layer copy = *src;   // cópia profunda: tracks, efeitos, máscaras, texto
-    copy.name = src->name + " copia";
+    if (text::follows_source_name(*src)) copy.name = text::text_name_at(*src, atTime);
+    else if (src->kind != LayerKind::Text) copy.name += " copia";
     // A duplicate/split is an independent layer, including its timeline row.
     // Reusing the source track made adjacent split clips collapse into one row.
     layers_.for_each([&](LayerId, const Layer& other) {

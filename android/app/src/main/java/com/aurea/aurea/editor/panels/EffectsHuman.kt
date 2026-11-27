@@ -33,6 +33,20 @@ internal fun effectTypeId(key: String): Int {
 private val copyEffectTypes = setOf(effectTypeId("aurea.3d.replicator"), effectTypeId("aurea.repeat.arrange"))
 internal fun isCopyLayoutEffect(type: Int?): Boolean = type != null && type in copyEffectTypes
 
+internal val colorStudioGradeType = effectTypeId("aurea.color.studio_grade")
+internal val colorStudioLookType = effectTypeId("aurea.color.studio_look")
+private val colorGradeType = effectTypeId("aurea.color.grade")
+
+internal fun colorParamSpecType(typeId: Int): Int = when (typeId) {
+    colorStudioGradeType, colorStudioLookType -> colorGradeType
+    else -> typeId
+}
+
+internal fun colorStudioPrincipal(typeId: Int): List<Int> = when (typeId) {
+    colorStudioGradeType, colorStudioLookType -> Table[typeId]?.principal.orEmpty()
+    else -> emptyList()
+}
+
 /**
  * Como UM parâmetro aparece: rótulo simples, fator de exibição (motor × [scale]
  * = o que a pessoa vê), sufixo ("%", "°", "px", "x") e casas FIXAS. Campos nulos
@@ -82,6 +96,22 @@ private val MatrixLabels = listOf(
 
 private val Table: Map<Int, EffectHuman> = buildMap {
     fun put(key: String, e: EffectHuman) = put(effectTypeId(key), e)
+    val psykoParams = listOf(
+        R.string.fx_intensidade, R.string.fx_frequencia, R.string.psyko_color_cycles,
+        R.string.fxl_phase, R.string.fxl_phase_speed, R.string.psyko_source_detail,
+        R.string.fx_saturacao, R.string.fx_brilho,
+    ).mapIndexed { index, label -> index to ParamHuman(label = label) }.toMap()
+    put("aurea.stylize.psyko_blobs", EffectHuman(
+        keywords = "psyko blobs s_psykoblobs psychedelic color cycles manchas cores psicodelico",
+        principal = listOf(0, 1, 2, 3, 4),
+        params = psykoParams + (8 to ParamHuman(label = R.string.fxl_seed)) +
+            (9 to ParamHuman(label = R.string.fxl_pattern_detail)),
+    ))
+    put("aurea.stylize.psyko_stripes", EffectHuman(
+        keywords = "psyko stripes strips psykostrips s_psykostripes psychedelic color cycles listras faixas cores psicodelico",
+        principal = listOf(0, 1, 8, 2, 3, 4),
+        params = psykoParams + (8 to ParamHuman(label = R.string.fxl_pattern_rotation)),
+    ))
     val copyParams = listOf(
         R.string.fxl_count, R.string.repeat_distribution, R.string.fxl_spacing, R.string.fxl_columns,
         R.string.fxl_radius, R.string.copies_end_layout, R.string.copies_morph, R.string.fxl_rotation_per_copy,
@@ -143,8 +173,8 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.transition.block_dissolve_reference", EffectHuman(name = R.string.fx_ref_block_name, keywords = "block dissolve dissolver blocos transicao", principal = listOf(0, 1, 2, 3, 4)))
     put("aurea.distort.wave_warp_reference", EffectHuman(name = R.string.fx_name_wave_warp, keywords = "wave warp onda senoide agua", principal = listOf(0, 1, 2, 3, 4, 5, 6, 7),
         params = mapOf(4 to ParamHuman(scale = 1f, suffix = "Hz", decimals = 2))))
-    put("aurea.distort.turbulent_displace_reference", EffectHuman(name = R.string.fx_name_turbulence, keywords = "turbulent displace turbulencia ruido calor agua", principal = listOf(0, 1, 2, 3, 4, 5),
-        params = mapOf(4 to ParamHuman(scale = 1f, suffix = "", decimals = 1))))
+    put("aurea.distort.turbulent_displace_reference", EffectHuman(name = R.string.fx_name_turbulent_displace, keywords = "turbulent displace turbulencia ruido calor agua", principal = listOf(0, 1, 2, 3, 4, 5),
+        params = mapOf(0 to ParamHuman(label = R.string.fxl_displacement_type), 4 to ParamHuman(scale = 1f, suffix = "", decimals = 1))))
     put("aurea.stylize.pixel_encoder", EffectHuman(keywords = "pixel encoder pixel_encoder megakrunch ascii letras grunge",
         principal = listOf(0, 1, 2, 3, 4)))
     put("aurea.stylize.pix_dither", EffectHuman(keywords = "pixdither pix dither pontilhado paleta atkinson bayer", principal = listOf(0, 1, 2)))
@@ -313,6 +343,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     // Efeitos 3D (beta 12/10/2026): partes do objeto 3D, Shatter e Stroke.
     put("aurea.3d.part_transform", EffectHuman(name = R.string.fx3d_name_part_transform,
         keywords = "animar parte 3d animate part mover girar escala objeto modelo forma keyframe peca", principal = (0..7).toList()))
+    put("aurea.3d.spacing", EffectHuman(name = R.string.fx3d_name_spacing, principal = listOf(0)))
     put("aurea.3d.part_hide", EffectHuman(name = R.string.fx3d_name_part_hide,
         keywords = "esconder partes 3d hide parts sumir ocultar visibilidade objeto modelo forma peca", principal = (0..3).toList()))
     put("aurea.3d.part_texture", EffectHuman(name = R.string.fx3d_name_part_texture,
@@ -712,8 +743,8 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.distort.turbulence",
         EffectHuman(
-            name = R.string.fx_name_turbulence,
-            keywords = "turbulencia displacement deslocamento ruido organico fumaca turbulent displace",
+            name = R.string.fx_name_turbulence_legacy,
+            keywords = "turbulencia displacement deslocamento ruido organico fumaca",
             principal = listOf(12, 0, 1, 2, 4),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_intensidade, suffix = "px", decimals = 0),
@@ -1229,6 +1260,14 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         principal = listOf(0, 1, 2, 6, 3, 4),
         params = mapOf(5 to ParamHuman(suffix = "%", decimals = 0), 6 to ParamHuman(suffix = "%", decimals = 0))))
     // Aprimorar (0.3.0): a restauração do Topaz (Proteus) com nome próprio.
+    put("aurea.hyper.upscale", EffectHuman(
+        keywords = "aurea detail melhorar qualidade upscale nitidez sharpen enhance anime resolução",
+        principal = listOf(2, 1, 0)))
+    put("aurea.hyper.enchance", EffectHuman(
+        name = R.string.hyper_preset_enchance,
+        keywords = "aurea enhance enchance reconstrução upscale 2x super resolution detalhes imagem vídeo",
+        principal = listOf(0),
+        params = mapOf(0 to ParamHuman(label = R.string.fxl_amount, suffix = "%", decimals = 0))))
     put("aurea.enhance.video", EffectHuman(
         name = R.string.fx030e_name,
         keywords = "aprimorar enhance topaz proteus restaurar melhorar qualidade upscale ruido denoise compressao deblock nitidez sharpen halo grao grain detalhe",
@@ -1623,19 +1662,33 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             23 to ParamHuman(label = R.string.fxl_quality),
         )))
     // Correção de cor (0.3.0): o corretor completo (os painéis Filtros/Ajustar usam o mesmo efeito).
+    val gradeParams = mapOf(
+        1 to ParamHuman(label = R.string.grade_temperature, decimals = 0),
+        2 to ParamHuman(label = R.string.grade_tint, decimals = 0),
+        3 to ParamHuman(label = R.string.grade_exposure, suffix = "EV", decimals = 2),
+        4 to ParamHuman(label = R.string.grade_contrast, decimals = 0),
+        11 to ParamHuman(label = R.string.grade_saturation, decimals = 0),
+        12 to ParamHuman(label = R.string.grade_vibrance, decimals = 0),
+        76 to ParamHuman(label = R.string.grade_intensity, decimals = 0),
+    )
     put("aurea.color.grade", EffectHuman(
         name = R.string.fx030_name_color_grade,
         keywords = "correcao de cor color grade grading lumetri resolve log slog vlog logc apple log lut rodas wheels lift gamma gain hsl curvas temperatura",
         principal = listOf(0, 1, 2, 3, 4, 11, 12, 76),
-        params = mapOf(
-            1 to ParamHuman(label = R.string.grade_temperature, decimals = 0),
-            2 to ParamHuman(label = R.string.grade_tint, decimals = 0),
-            3 to ParamHuman(label = R.string.grade_exposure, suffix = "EV", decimals = 2),
-            4 to ParamHuman(label = R.string.grade_contrast, decimals = 0),
-            11 to ParamHuman(label = R.string.grade_saturation, decimals = 0),
-            12 to ParamHuman(label = R.string.grade_vibrance, decimals = 0),
-            76 to ParamHuman(label = R.string.grade_intensity, decimals = 0),
-        )))
+        params = gradeParams,
+    ))
+    put("aurea.color.studio_grade", EffectHuman(
+        name = R.string.fx_studio_grade_name,
+        keywords = "estudio cor color studio colorista grade correcao grading balanço white balance wheels rodas curvas curves hsl exposição",
+        principal = listOf(3, 1, 2, 4, 11, 76),
+        params = gradeParams,
+    ))
+    put("aurea.color.studio_look", EffectHuman(
+        name = R.string.fx_studio_look_name,
+        keywords = "estudio cor look looks studio cc preset ffx after effects magic bullet film cinema lut color",
+        principal = listOf(76, 70, 71),
+        params = gradeParams,
+    ))
     // Tempo amplo (0.3.0): o CC Wide Time do AE.
     put("aurea.time.wide_time", EffectHuman(
         name = R.string.fx030_name_wide_time,

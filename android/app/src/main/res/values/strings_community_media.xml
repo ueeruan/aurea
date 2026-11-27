@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="social_activity">Notificações</string>
+    <string name="social_activity_unread">Notificações, %1$d não lidas</string>
+    <string name="social_activity_empty">Nenhuma notificação por enquanto.</string>
+    <string name="social_activity_mark_read">Marcar como lidas</string>
+    <string name="social_activity_reply">%1$s respondeu ao seu comentário.</string>
+    <string name="social_activity_announcement">%1$s publicou um anúncio.</string>
+    <string name="social_activity_comment">%1$s comentou na sua publicação.</string>
+    <string name="social_attach_media">Adicionar foto ou vídeo</string>
+    <string name="social_media_limits">Fotos de até 8 MB. Vídeos MP4 ou MOV de até 90 MB.</string>
+    <string name="social_media_error">Não foi possível abrir esta mídia.</string>
+    <string name="social_open_post">Abrir publicação</string>
+    <string name="social_play_video">Reproduzir vídeo</string>
+    <string name="social_post_title">Publicação</string>
+    <string name="social_reply">Responder</string>
+    <string name="social_reply_to">Respondendo a %1$s</string>
+    <string name="social_my_profile">Meu perfil</string>
+    <string name="social_feed_options">Opções do feed</string>
+    <string name="social_media_saved_gallery">Mídia salva na galeria.</string>
+    <string name="social_media_saved_file">Arquivo salvo.</string>
+    <string name="social_media_save_failed">Não foi possível salvar esta mídia.</string>
+</resources>

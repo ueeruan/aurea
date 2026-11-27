@@ -15,6 +15,7 @@
 
 #include "aurea/Engine.hpp"
 #include "aurea/text/Text.hpp"
+#include "aurea/text/TextLayerName.hpp"
 #include "aurea/timeline/Composition.hpp"
 #include "aurea/timeline/Layer.hpp"
 
@@ -142,10 +143,12 @@ bool Engine::set_text_source_key(u64 layerId, i64 frame, const std::string& cont
     if (at < 0 || content.size() > 64u * 1024u) return false;
     TextKey& key = l->text.sourceKeys[static_cast<usize>(at)];
     if (key.content == content) return true;
+    const bool rename = text::follows_source_name(*l);
     history_.before_mutation(*comp, project_->timeline().current(), "texto do key");
     bump_model_revision_locked();
     TextKey& k = l->text.sourceKeys[static_cast<usize>(at)];   // o histórico copia a composição, não a mexe
     k.content = content;
+    if (rename) l->name = text::source_layer_name(content);
     ae_anim::clip_spans(k.spans, content.size());
     project_->mark_dirty();
     request_render();

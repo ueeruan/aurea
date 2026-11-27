@@ -81,6 +81,10 @@ struct LayerRow {
     u32 reserved0     = 0;    // +68  alinhamento de 8 (o id é u64)
 };
 
+// LayerRow::reserved0 bit 0 is used for inline editing. Bit 1 tells clients
+// to enlarge the name buffer even when the first missing UTF-8 name was large.
+inline constexpr u32 kLayerRowNameBufferFull = 1u << 1;
+
 inline constexpr u32 kLayerRowFlagVisible  = 1u << 0;
 inline constexpr u32 kLayerRowFlagLocked   = 1u << 1;
 inline constexpr u32 kLayerRowFlagSolo     = 1u << 2;

@@ -949,6 +949,8 @@ struct Panel3DView: View {
     @ViewBuilder private var partsTab: some View {
         let names = isShape ? [] : model.engine.modelPartNames(layerId, includeJoints: true)
         VStack(alignment: .leading, spacing: 0) {
+            partEffectCard("aurea.3d.spacing", name: "fx3d_name_spacing", detail: "fx3d_desc_spacing", wholeModel: true)
+                .accessibilityIdentifier("panel3d.fx.spacing")
             if !isShape && !names.isEmpty {
                 // O modelo importado tem as abas Textura e Animação; isto sobra para um objeto 3D
                 // sem forma pronta que não é modelo importado (par do Android).
@@ -975,11 +977,17 @@ struct Panel3DView: View {
         }
     }
 
-    private func partEffectCard(_ key: String, name: String, detail: String) -> some View {
+    private func partEffectCard(_ key: String, name: String, detail: String, wholeModel: Bool = false) -> some View {
         Button {
             finishEditing()
-            let part = isShape ? max(0, Shape3DState.shared.part(model)) : modelPart
-            if model.addPartEffect(key, part: part) { model.openPanel(.effects) }
+            if wholeModel {
+                let type = fxEffectTypeId(key)
+                if !model.effects.contains(where: { $0.typeId == type }) { model.addCatalogEffect(type, layers: [layerId]) }
+                model.openPanel(.effects)
+            } else {
+                let part = isShape ? max(0, Shape3DState.shared.part(model)) : modelPart
+                if model.addPartEffect(key, part: part) { model.openPanel(.effects) }
+            }
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(AureaText.t(name)).font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.text)

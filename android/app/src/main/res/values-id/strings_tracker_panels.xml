@@ -1,0 +1,5 @@
+<resources>
+    <string name="trk_motion_title">Pelacak Gerakan</string>
+    <string name="trk_video_required">Pilih lapisan video.</string>
+    <string name="trk_back_to_result">Kembali ke hasil</string>
+</resources>

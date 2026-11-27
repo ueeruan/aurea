@@ -12,6 +12,8 @@
 
 namespace aurea::tracking {
 
+Tracks2D FeatureTracker::take_tracks() && noexcept { return std::move(tracks_); }
+
 namespace {
 
 constexpr f32 kNaN = std::numeric_limits<f32>::quiet_NaN();

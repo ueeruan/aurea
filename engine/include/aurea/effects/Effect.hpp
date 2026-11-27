@@ -350,6 +350,8 @@ inline constexpr u32 kEffectAuxImages = 8;
 struct EffectMotionState;
 class EffectResources {
 public:
+    /// 0 uses the saved parameter. 1–3 are temporary cutout views.
+    [[nodiscard]] virtual u32 cutout_view(const Layer*, const EffectInstance*) const noexcept { return 0; }
     virtual ~EffectResources() = default;
     /// Frames since the latest detected beat, or infinity when there is none.
     [[nodiscard]] virtual f64 frames_since_beat(f64) const noexcept {
@@ -517,9 +519,9 @@ class EffectBuildContext {
 public:
     EffectBuildContext(FrameGraph& graph, ShaderLibrary& shaders, Arena& frameArena,
                        EffectResources& resources, SurfaceFormat workFormat,
-                       u32 maxTextureSize) noexcept
+                       u32 maxTextureSize, Vec2 rasterPerCompPixel = Vec2{1.0f, 1.0f}) noexcept
         : graph_(graph), shaders_(shaders), arena_(frameArena), resources_(resources),
-          workFormat_(workFormat), maxTexture_(maxTextureSize) {}
+          workFormat_(workFormat), maxTexture_(maxTextureSize), rasterPerCompPixel_(rasterPerCompPixel) {}
 
     using TemporalCheckout = bool (*)(void*, u32, LayerImage&, Mat4&, f32&);
     void set_temporal_checkout(void* owner, TemporalCheckout checkout) noexcept {
@@ -533,6 +535,7 @@ public:
     [[nodiscard]] EffectResources& resources() noexcept { return resources_; }
     [[nodiscard]] SurfaceFormat work_format() const noexcept { return workFormat_; }
     [[nodiscard]] u32 max_texture_size() const noexcept { return maxTexture_; }
+    [[nodiscard]] Vec2 raster_per_comp_pixel() const noexcept { return rasterPerCompPixel_; }
     [[nodiscard]] f32 max_sampler_anisotropy() const noexcept { return shaders_.max_sampler_anisotropy(); }
 
     /// Textura de trabalho (formato de trabalho, alvo de render + amostrável).
@@ -612,6 +615,7 @@ private:
     EffectResources& resources_;
     SurfaceFormat    workFormat_;
     u32              maxTexture_;
+    Vec2             rasterPerCompPixel_;
     void* temporalOwner_ = nullptr;
     TemporalCheckout temporalCheckout_ = nullptr;
     LayerImage       history_{};

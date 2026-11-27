@@ -239,7 +239,6 @@ AUREA_TEST(HyperJob, PreviewFrameIsTheTurboExportFrame) {
     r.cap.keepFrames = true;
     hyper::Recipe recipe;
     recipe.upscale = 2;
-    recipe.deblock = true;
     recipe.path = hyper::Path::Turbo;
     std::vector<u8> before, after;
     u32 w = 0, h = 0;
@@ -249,7 +248,8 @@ AUREA_TEST(HyperJob, PreviewFrameIsTheTurboExportFrame) {
     AUREA_CHECK_EQ(w, 320u);
     AUREA_CHECK_EQ(h, 192u);
     AUREA_CHECK_EQ(after.size(), static_cast<usize>(w) * h * 4);
-    // O antes e o depois diferem (o Turbo age), mas mostram o mesmo quadro.
+    // Detail alone must change the decoded pixels, without another effect
+    // making the comparison pass if the scaler was bypassed.
     f64 diffBA = 0;
     for (usize i = 0; i < before.size(); i += 4) diffBA += std::abs(static_cast<int>(before[i + 1]) - static_cast<int>(after[i + 1]));
     AUREA_CHECK(diffBA / (w * h) > 0.05);
@@ -276,7 +276,7 @@ AUREA_TEST(HyperJob, PreviewFrameIsTheTurboExportFrame) {
     AUREA_CHECK_MSG(sum / (w * h) < 1.5 && worst <= 6, "o quadro da prévia Turbo é o do export Turbo");
 }
 
-AUREA_TEST(HyperJob, AiUpscaleExportStillWorksThroughTheHyperStage) {
+AUREA_TEST(HyperJob, LegacyUpscaleFlagExportsAtFullSizeWithoutInference) {
     Rig r(hyperjob::config(12, false), 30, 12, 3);
     AUREA_CHECK(r.ok);
     if (!r.ok) return;
@@ -301,7 +301,40 @@ AUREA_TEST(HyperJob, AiUpscaleExportStillWorksThroughTheHyperStage) {
     AUREA_CHECK_EQ(r.cap.video.width, 320u);
     AUREA_CHECK_EQ(r.cap.video.height, 192u);
     AUREA_CHECK_EQ(r.cap.pts.size(), static_cast<usize>(12));
-    AUREA_CHECK_MSG(sawAi, "a mensagem 'IA: quadro/total' das telas continua");
+    AUREA_CHECK_MSG(!sawAi, "the old export flag uses the spatial shader");
+}
+
+AUREA_TEST(HyperJob, AureaEnchanceRendersTheSamePixelsInPreviewAndExport) {
+    Rig r(hyperjob::config(12, false), 30, 12, 1);
+    AUREA_CHECK(r.ok);
+    if (!r.ok) return;
+    r.cap.keepFrames = true;
+    hyper::Recipe recipe;
+    recipe.path = hyper::Path::Turbo;
+    recipe.upscale = 4; // Enchance is always 2x, including requests loaded from a preset.
+    recipe.upscaleMode = hyper::UpscaleMode::Enchance;
+    u32 w = 0, h = 0;
+    std::vector<u8> before, after;
+    const auto preview = r.e.hyper_preview_frame(recipe, "sintetico", 0.0, recipe.path, before, after, w, h);
+    AUREA_CHECK(preview.ok());
+    if (!preview.ok()) return;
+    AUREA_CHECK_EQ(w, 320u);
+    AUREA_CHECK_EQ(h, 192u);
+    AUREA_CHECK(before != after);
+    const auto path = hyperjob::out_path("aurea-enchance.mp4");
+    AUREA_CHECK(r.e.start_hyper_job("sintetico", recipe, path.c_str()).ok());
+    const auto steps = hyperjob::wait_job(r.e);
+    AUREA_CHECK(steps.finished && steps.result == Errc::Ok);
+    AUREA_CHECK_EQ(r.cap.frames.size(), 12u);
+    if (r.cap.frames.empty()) return;
+    const auto& frame = r.cap.frames.front();
+    f64 error = 0;
+    for (usize i = 0; i < static_cast<usize>(w) * h; ++i) {
+        const u8* p = &after[i * 4];
+        const f64 y = 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
+        error += std::abs(y - (frame[i] - 16.0) * (255.0 / 219.0));
+    }
+    AUREA_CHECK_MSG(error / (w * h) < 1.5, "preview matches the encoded luma at the same timestamp");
 }
 
 AUREA_TEST(HyperMeter, ReturnsAProfileAndCachesIt) {
@@ -325,7 +358,7 @@ AUREA_TEST(HyperMeter, ReturnsAProfileAndCachesIt) {
         AUREA_CHECK(first.turboMsPerFrame > 0.0f);
         AUREA_CHECK(first.abi64 == (sizeof(void*) == 8));
         AUREA_CHECK(first.defaultPath != hyper::Path::Auto);
-        AUREA_CHECK(std::filesystem::exists(dir + "/hyper/device-profile.json"));
+        AUREA_CHECK(std::filesystem::exists(dir + "/hyper/detail-device-profile.json"));
         const auto t1 = std::chrono::steady_clock::now();
         const hyper::DeviceProfile again = r.e.hyper_device_profile(false);
         const f64 cached = std::chrono::duration<f64, std::milli>(std::chrono::steady_clock::now() - t1).count();
@@ -413,9 +446,8 @@ AUREA_TEST(HyperJob, LitePathRunsTheNetworksInTheGraphInOnePass) {
     if (!started.ok()) return;
     const hyper::JobSteps s = hyperjob::wait_job(r.e, 600);
     AUREA_CHECK(s.finished && s.result == Errc::Ok);
-    AUREA_CHECK(s.paths[static_cast<usize>(hyper::Step::Upscale)] == hyper::Path::Lite);
-    // Com rede de Motion registrada, o upscale neural e o Motion ficam no grafo
-    // da MESMA passagem (o upscale só processa os 12 quadros de origem).
+    AUREA_CHECK(s.paths[static_cast<usize>(hyper::Step::Upscale)] == hyper::Path::Turbo);
+    // The renderer handles Detail and the optional motion model stays in the graph.
     std::printf("[passagens %u, Motion %u] ", s.passCount, static_cast<u32>(s.paths[static_cast<usize>(hyper::Step::Motion)]));
     AUREA_CHECK_EQ(r.cap.video.width, 320u);
     AUREA_CHECK_EQ(r.cap.pts.size(), static_cast<usize>(24));

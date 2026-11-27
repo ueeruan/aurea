@@ -1,5 +1,6 @@
 import java.io.File
 import java.util.Properties
+import java.util.zip.ZipFile
 
 // =============================================================================
 //  Módulo :app — o app Aurea.
@@ -104,6 +105,7 @@ val aureasAbisPermitidas = setOf("armeabi-v7a", "arm64-v8a", "x86_64")
 require(aureaAbi == null || aureaAbi in aureasAbisPermitidas) {
     "aureaAbi invalida: $aureaAbi (esperado: armeabi-v7a, arm64-v8a ou x86_64 — este só para o emulador)"
 }
+val aureaNativeAbis = aureaAbi?.let { listOf(it) } ?: listOf("arm64-v8a", "armeabi-v7a")
 
 android {
     // The same licensed Roboto used by iOS; Samsung system font paths vary.
@@ -126,8 +128,8 @@ android {
         // duas — trocar de piso é consequência da arquitetura nova.
         minSdk = 26
         targetSdk = 36
-        versionCode = 2234
-        versionName = "1.0.9"
+        versionCode = 2236
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -157,11 +159,7 @@ android {
             "\"${project.findProperty("aureaDiscoveryBranch") ?: "main"}\"",
         )
 
-        if (aureaAbi != null) {
-            ndk { abiFilters += aureaAbi }
-        } else {
-            ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
-        }
+        ndk { abiFilters += aureaNativeAbis }
 
         externalNativeBuild {
             cmake {
@@ -334,7 +332,7 @@ val ffmpegPython = providers.gradleProperty("aureaPython").getOrElse(
     if (System.getProperty("os.name").startsWith("Windows")) "python" else "python3"
 )
 val aureaFFmpegCache = providers.gradleProperty("aureaFFmpegCache").orNull
-val ffmpegPrepareTasks = (aureaAbi?.let { listOf(it) } ?: listOf("arm64-v8a", "armeabi-v7a")).map { abi ->
+val ffmpegPrepareTasks = aureaNativeAbis.map { abi ->
     tasks.register<Exec>("prepareAureaFFmpeg" + abi.replace("-", "").replace("_", "")) {
         val prefix = File(aureaFFmpegRoot ?: rootProject.file("../build/ffmpeg/android").absolutePath, abi)
         inputs.file(rootProject.file("../tools/build_ffmpeg.py"))
@@ -494,4 +492,24 @@ tasks.matching { it.name == "signReleaseBundle" }.configureEach {
     val falhar = releaseComChaveDeDebug && !permitirAssinaturaDeDebug
     val mensagem = mensagemChaveDeDebug
     doFirst { if (falhar) throw GradleException(mensagem) }
+}
+
+// AGP stages the shared C++ runtime in externalNativeBuildRelease. A manual
+// Ninja build alone can leave a validly signed bundle that cannot load Aurea.
+val aureaReleaseBundle = layout.buildDirectory.file("outputs/bundle/release/app-release.aab")
+tasks.matching { it.name == "bundleRelease" }.configureEach {
+    val outputBundle = aureaReleaseBundle
+    val targetAbis = aureaNativeAbis
+    doLast {
+        ZipFile(outputBundle.get().asFile).use { bundle ->
+            for (abi in targetAbis) {
+                for (library in listOf("libaurea.so", "libc++_shared.so")) {
+                    val path = "base/lib/$abi/$library"
+                    if ((bundle.getEntry(path)?.size ?: 0) <= 0) {
+                        throw GradleException("AAB incompleto: $path ausente. Execute :app:bundleRelease com as tarefas nativas do Gradle.")
+                    }
+                }
+            }
+        }
+    }
 }

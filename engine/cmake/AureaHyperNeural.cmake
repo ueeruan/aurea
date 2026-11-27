@@ -7,17 +7,10 @@
 #  Incluído por cmake/AureaNcnn.cmake (depois do alvo ncnn existir).
 # =============================================================================
 set(hyper_asset_root "${CMAKE_CURRENT_SOURCE_DIR}/assets/hyper")
-# Embutidos no app (~18 MB). O GFPGAN (178 MB) é sob demanda e fica fora.
-# 1.0.6 (peso): só a referência do SPAN x2 entra — é a única que o motor lê
-# (probe do medidor em NeuralStages.cpp). reference-32-x4.rgb e
-# reference-dn50-32-x4.rgb continuam em assets/hyper para tools/hyper_models.py,
-# mas não iam a lugar nenhum dentro do app (~96 KB a menos por binário).
+# Optional neural cleanup and interpolation. Detail has no packaged weights.
+# GFPGAN is downloaded separately for the optional face tool.
 set(AUREA_HYPER_ASSETS
-    span-x2/span-x2-fp16.param span-x2/span-x2-fp16.bin
-    span-x2/reference-32-x2.rgb
-    span-x4/span-x4-fp16.param span-x4/span-x4-fp16.bin
     realesr-general-x4v3/srvgg-x4.param realesr-general-x4v3/x4v3.bin16 realesr-general-x4v3/wdn-x4v3.bin16
-    realesr-animevideov3/animevideov3-x4-int8.param realesr-animevideov3/animevideov3-x4-int8.bin
     rife-v4.6/flownet.param rife-v4.6/flownet.bin)
 set(hyper_asset_paths "")
 foreach(rel IN LISTS AUREA_HYPER_ASSETS)

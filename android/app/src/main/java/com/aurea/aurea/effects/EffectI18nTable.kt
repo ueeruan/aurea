@@ -2809,6 +2809,7 @@ internal object EffectI18nTable {
         m.put("aurea.generate.raster_extrude", 5, /* metal */ intArrayOf(R.string.fxl_metal))
         m.put("aurea.generate.raster_extrude", 6, /* roughness */ intArrayOf(R.string.fx_rugosidade))
         m.put("aurea.3d.part_transform", 0, /* part */ intArrayOf(R.string.fxl_part))
+        m.put("aurea.3d.spacing", 0, /* spacing */ intArrayOf(R.string.fxl_spacing))
         m.put("aurea.3d.part_transform", 1, /* position_x */ intArrayOf(R.string.fx_posicao_x))
         m.put("aurea.3d.part_transform", 2, /* position_y */ intArrayOf(R.string.fx_posicao_y))
         m.put("aurea.3d.part_transform", 3, /* position_z */ intArrayOf(R.string.fxl_position_z))
@@ -3376,7 +3377,6 @@ internal object EffectI18nTable {
         m.put("aurea.hyper.upscale", 0, /* scale */ intArrayOf(R.string.fxl_scale, R.string.fxo_2, R.string.fxo_4))
         m.put("aurea.hyper.upscale", 1, /* mode */ intArrayOf(R.string.fxl_content, R.string.fxo_general, R.string.fxo_anime))
         m.put("aurea.hyper.upscale", 2, /* sharpness */ intArrayOf(R.string.fxl_sea_sharpness))
-        m.put("aurea.hyper.upscale", 3, /* path */ intArrayOf(R.string.fxo_path, R.string.fxo_turbo_preview, R.string.fxo_lite, R.string.fxo_max))
         m.put("aurea.hyper.clean", 0, /* denoise */ intArrayOf(R.string.fxl_reduce_noise))
         m.put("aurea.hyper.clean", 1, /* deblock */ intArrayOf(R.string.fxl_remove_compression_blocks))
         m.put("aurea.hyper.clean", 2, /* deinterlace */ intArrayOf(R.string.fxl_deinterlace, R.string.fxo_off, R.string.fxo_auto, R.string.fxo_always))
@@ -4371,7 +4371,6 @@ internal object EffectI18nTable {
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.enhance.video"), 10), R.string.fxt_frames_on_each_side_used_by_noise_reduct) // temporal_frames
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.utility.copy_background"), 0), R.string.fxt_effects_after_this_one_act_on_the_layers) // window
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.hyper.upscale"), 0), R.string.fxt_upscales_the_layer_when_it_appears_large) // scale
-            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.hyper.upscale"), 3), R.string.fxt_the_preview_always_uses_turbo_lite_and_m) // path
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.hyper.clean"), 2), R.string.fxt_automatic_acts_only_when_the_frame_shows) // deinterlace
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.hyper.clean"), 3), R.string.fxt_frames_on_each_side_aligned_by_motion_1) // frames
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.hyper.clean"), 4), R.string.fxt_the_preview_always_uses_turbo_lite_and_m_2) // path

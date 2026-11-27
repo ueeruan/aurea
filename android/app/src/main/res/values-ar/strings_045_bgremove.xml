@@ -27,4 +27,12 @@
     <string name="bg_remove_o_person">شخص</string>
     <string name="bg_remove_tip_model">التلقائي يقص العنصر الرئيسي ويعمل على كل الأجهزة. الشخص يستخدم تحديد الأشخاص في النظام إن توفر في الجهاز؛ وإلا يُستخدم التلقائي.</string>
     <string name="bg_remove_tip_edge">يعيد بناء الحافة بدقة الفيديو (الشعر والخطوط الرفيعة). القيمة 0 تستخدم الحافة البسيطة.</string>
+    <string name="cutout_analyzing_scene">جارٍ تحليل المشهد</string>
+    <string name="cutout_analyzing_frame">جارٍ تحليل هذا الإطار</string>
+    <string name="cutout_brush">فرشاة القص</string>
+    <string name="cutout_brush_add">تضمين</string>
+    <string name="cutout_brush_subtract">استبعاد</string>
+    <string name="cutout_brush_help">المس العنصر لتحديده. استخدم الفرشاة لتضمين مناطق أو استبعادها.</string>
+    <string name="cutout_auto_help">أزل الخلفية تلقائيًا أو اضبط القص بالفرشاة.</string>
+    <string name="cutout_track">تتبّع العنصر</string>
 </resources>

@@ -8,7 +8,6 @@ import androidx.compose.animation.core.animateDecay
 import androidx.compose.animation.splineBasedDecay
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -46,7 +45,7 @@ import kotlin.math.max
  * Contratos que a spec pediu para acertar no port:
  * - a vista É o playhead do motor; o gesto que anda no tempo abre um scrub
  *   (`scrubStart/scrubTo/scrubEnd`, sempre em par) e a vista fracionária só
- *   existe enquanto ele dura (§8.3-1, bug 10.13);
+ *   existe enquanto ele dura (§8.3-1, bug 10.13). A pinça só muda a escala;
  * - todo arrasto que muda o projeto é UM passo de desfazer, aberto na 1ª
  *   mutação real e fechado ao soltar ou cancelar;
  * - um só contrato de losango: toque = escolhe e abre a curva; arrastar = move
@@ -278,7 +277,7 @@ internal class TimelineController(
 
     /** Leva a vista a `v` pelo scrub do motor (o 1º passo abre o scrub e pausa). */
     private fun holdView(v: Double) {
-        // Modo AE: segurar a vista (arrasto no vazio, inércia, pinça, auto-rolagem) só rola.
+        // Modo AE: segurar a vista (arrasto no vazio, inércia, auto-rolagem) só rola.
         if (TimelinePlatform.anchorAtStart) {
             state.aeOrigin = max(0.0, v - (centerX() - aeLeft()) / pxPerFrame())
             return
@@ -1663,28 +1662,15 @@ internal class TimelineController(
         }
     }
 
-    /**
-     * Pinça ancorada no instante sob os dedos (e pan de dois dedos junto). A
-     * vista anda pelo scrub do motor (coalescido), não por seek (bug 10.8).
-     * Tocando, o zoom é em volta do cabeçote e nada é pedido ao motor.
-     */
+    /** A pinça amplia em volta do cabeçote sem fazer scrub ou pausar. */
     private suspend fun AwaitPointerEventScope.pinch() {
         tick()
-        val pps0 = state.pps
-        val playing = store.playing
-        var zoom = 1f
-        var anchor = Double.NaN
         while (true) {
             val ev = awaitPointerEvent()
             if (pressedCount(ev) < 2) break
-            zoom *= ev.calculateZoom()
-            state.pps = Zoom.clamp(pps0 * zoom)
-            zoom = state.pps / pps0
-            if (!playing) {
-                val focus = ev.calculateCentroid(useCurrent = true)
-                if (anchor.isNaN()) anchor = frameAt(focus.x)
-                holdView(Zoom.anchoredView(anchor, focus.x, centerX(), pxPerFrame()))
-            }
+            val factor = ev.calculateZoom()
+            if (TimelinePlatform.anchorAtStart) aeZoom(factor)
+            else state.pps = Zoom.clamp(state.pps * factor)
             consumeAll(ev)
         }
         // O dedo que sobrou não vira scrub até todos levantarem.

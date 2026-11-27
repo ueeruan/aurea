@@ -238,10 +238,7 @@ struct TimelineView: View {
     @State private var heldView: Double?
     @State private var gesture: Interaction?
     @State private var pinchPPS = Zoom.defaultPPS
-    @State private var pinchFrame = 0.0
     @State private var pinching = false
-    /// A pinça começou com o play rodando: zoom em volta do cabeçote, sem scrub.
-    @State private var pinchPlaying = false
     @State private var guide = Snap.none
     @State private var selectedKey: (layer: Int64, frame: Int32, track: TimelineTrack?)?
     @State private var reorderSource = -1
@@ -524,7 +521,7 @@ struct TimelineView: View {
                     tap: { point, origin in tap(point, width: size.width, origin: origin) },
                     pan: { state, start, point, velocity in pan(state, start: start, point: point, velocity: velocity, size: size) },
                     hold: { state, start, point in hold(state, start: start, point: point, size: size) },
-                    pinch: { state, scale, focus in pinch(state, scale: scale, focus: focus, width: size.width) },
+                    pinch: pinch,
                     // Omega (P1-1/P1-7): o prazo do toque longo depende do alvo.
                     holdDuration: { point in omegaHoldDuration(point, width: size.width) }
                 )
@@ -642,7 +639,7 @@ struct TimelineView: View {
                 if let primary, compact && EditorTimelineRefresh.enabled { focusedLayer = primary }
             }
             .onReceive(pulse) { _ in tick(size: size) }
-            .onDisappear { finishCaptionTrim(); finish(cancelled: true); finishPinch() }
+            .onDisappear { finishCaptionTrim(); finish(cancelled: true); pinching = false }
             .clipped()
         }
         // A timeline não espelha em árabe: quadro 0 à esquerda, o tempo anda
@@ -2610,37 +2607,18 @@ struct TimelineView: View {
         model.refreshModel(force: true)
     }
 
-    /// PINÇA (par do Android): âncora no ponto entre os dedos. TOCANDO, não
-    /// pausa e não fala com o motor — o zoom fica em volta do cabeçote e o play
-    /// segue. Parado, a âncora move a janela e o motor faz scrub LEVE (sem
-    /// republicar o status a cada passo; só no fim).
-    private func pinch(_ state: UIGestureRecognizer.State, scale: CGFloat, focus: CGPoint, width: CGFloat) {
+    /// A pinça amplia em volta do cabeçote sem fazer scrub ou pausar.
+    private func pinch(_ state: UIGestureRecognizer.State, _ scale: CGFloat) {
         if state == .began {
             finish(cancelled: true); endScrubFling(); scrollVelocity = 0; pinching = true
-            pinchPlaying = model.status.playing != 0
-            pinchPPS = pps; pinchFrame = frame(focus.x, width: width)
-            if !pinchPlaying { model.engine.run { $0.scrubBegin() } }
+            pinchPPS = pps
             haptics.tick()
         }
-        if state == .began || state == .changed {
+        if pinching && (state == .began || state == .changed) {
             let next = Zoom.clamp(pinchPPS * scale)
             if abs(next - pps) > 0.001 { pps = next }
-            if !pinchPlaying {
-                let target = min(TimeAxis.clampView(Zoom.anchoredView(focusFrame: pinchFrame, focusX: focus.x, centerX: width / 2, pxPerFrame: ppf),
-                                                durationFrames: Int32(clamping: model.compositionDuration)), Double(model.navigationEnd))
-                heldView = target
-                model.timelineScrub(Int64(timelineFrame(target)))
-            }
         }
-        if state == .ended || state == .cancelled || state == .failed { finishPinch() }
-    }
-    private func finishPinch() {
-        guard pinching else { return }
-        if !pinchPlaying {
-            model.engine.run { $0.scrubEnd() }
-            if let held = heldView { model.optimisticPlayhead(Int64(timelineFrame(held))) }
-        }
-        pinching = false; pinchPlaying = false; heldView = nil
+        if state == .ended || state == .cancelled || state == .failed { pinching = false }
     }
     private func tick(size: CGSize) {
         let now = ProcessInfo.processInfo.systemUptime
@@ -2872,7 +2850,7 @@ private struct TimelineGestureSurface: UIViewRepresentable {
     var tap: (CGPoint, CGPoint) -> Void
     var pan: (UIGestureRecognizer.State, CGPoint, CGPoint, CGPoint) -> Void
     var hold: (UIGestureRecognizer.State, CGPoint, CGPoint) -> Void
-    var pinch: (UIGestureRecognizer.State, CGFloat, CGPoint) -> Void
+    var pinch: (UIGestureRecognizer.State, CGFloat) -> Void
     /// Omega (área 03): o prazo do toque longo pelo alvo sob o dedo (nil = 0,5 s de sempre).
     var holdDuration: ((CGPoint) -> TimeInterval)? = nil
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -2931,7 +2909,7 @@ private struct TimelineGestureSurface: UIViewRepresentable {
             let point = sender.location(in: sender.view)
             parent.hold(sender.state, holdStart, point)
         }
-        @objc func pinched(_ sender: UIPinchGestureRecognizer) { parent.pinch(sender.state, sender.scale, sender.location(in: sender.view)) }
+        @objc func pinched(_ sender: UIPinchGestureRecognizer) { parent.pinch(sender.state, sender.scale) }
     }
 }
 

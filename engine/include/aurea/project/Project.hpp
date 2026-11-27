@@ -78,7 +78,7 @@ struct ExportSettings {
     /// sessão: as dimensões de saída continuam as pedidas.
     u32 aiUpscale = 0;
     /// Refinamento temporal do upscale (TAA modo 4). Não persiste.
-    bool upscaleTemporal = true;
+    bool upscaleTemporal = true; // Reserved for compatibility with older export descriptors.
     /// Session export range. Does not shorten the project or its compositions.
     bool trimToContent = false;
     /// Qualidade da sessão (0 Baixa, 1 Normal, 2 Alta) para a taxa automática

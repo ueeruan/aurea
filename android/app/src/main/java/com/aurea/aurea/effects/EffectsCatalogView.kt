@@ -81,6 +81,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import com.aurea.aurea.R
+import com.aurea.aurea.editor.panels.colorParamSpecType
 import com.aurea.aurea.editor.panels.effectTypeId
 import com.aurea.aurea.engine.EffectCatalogEntry
 import com.aurea.aurea.state.EditorStore
@@ -196,7 +197,7 @@ internal fun effectPresetName(typeId: Int, presetId: String, engineName: String)
 
 @StringRes
 private fun effectPresetLabelRes(typeId: Int, id: String): Int? {
-    if (typeId == effectTypeId("aurea.color.grade")) return when (id) {
+    if (colorParamSpecType(typeId) == effectTypeId("aurea.color.grade")) return when (id) {
         "cinema" -> R.string.look_cinema
         "warm" -> R.string.look_warm
         "cool" -> R.string.look_cool

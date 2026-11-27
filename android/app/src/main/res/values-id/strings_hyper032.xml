@@ -22,7 +22,7 @@
     <string name="hyper_adjust_stable_on">Stabilkan</string>
     <string name="hyper_adjust_strength">Kekuatan</string>
     <string name="hyper_adjust_target_fps">Frame per detik</string>
-    <string name="hyper_adjust_upscale">Resolusi</string>
+    <string name="hyper_adjust_upscale">Aurea Detail</string>
     <string name="hyper_always">Selalu</string>
     <string name="hyper_audio_muted">Gerak lambat: video dihasilkan tanpa suara (audio tidak diregangkan).</string>
     <string name="hyper_back_to_preview">Kembali ke pratinjau</string>
@@ -56,7 +56,7 @@
     <string name="hyper_feature_motion">60 fps dan gerak lambat 2×, 4×, atau 8× dengan frame baru</string>
     <string name="hyper_feature_offline">Semua di perangkat: video tidak diunggah</string>
     <string name="hyper_feature_stable">Stabilisasi, dengan opsi menyimpan sebagai keyframe</string>
-    <string name="hyper_feature_upscale">Upscale 2× atau 4× (video asli atau anime)</string>
+    <string name="hyper_feature_upscale">Aurea Detail mempertahankan ukuran asli atau memperbesar 2× atau 4×.</string>
     <string name="hyper_frames">frame %1$d dari %2$d</string>
     <string name="hyper_keep">Pertahankan</string>
     <string name="hyper_locked_badge">Langganan bulanan</string>
@@ -66,7 +66,7 @@
     <string name="hyper_locked_intro">AureaHyper memulihkan dan menyempurnakan video langsung di perangkat: lebih tajam, lebih sedikit noise, lebih banyak frame, dan gambar lebih stabil.</string>
     <string name="hyper_locked_not_owned">Akun ini belum memiliki AureaHyper.</string>
     <string name="hyper_locked_offline">Akses tidak dapat dikonfirmasi saat ini. Sambungkan ke internet dan coba lagi.</string>
-    <string name="hyper_locked_payment_note">Langganan bulanan yang terhubung ke akun Aurea Anda. AureaHyper juga membuka semua efek berbayar dan Teks 3D.</string>
+    <string name="hyper_locked_payment_note">Langganan bulanan yang terhubung ke akun Aurea Anda. AureaHyper juga membuka semua efek berbayar.</string>
     <string name="hyper_locked_signed_out">Masuk ke akun Aurea Anda untuk memeriksa apakah akun itu memiliki AureaHyper.</string>
     <string name="hyper_measure_again">Ukur ulang perangkat</string>
     <string name="hyper_meter_almost">Hampir selesai…</string>
@@ -91,13 +91,15 @@
     <string name="hyper_path_turbo">Turbo</string>
     <string name="hyper_path_turbo_body">Paling cepat, di GPU. Berjalan di perangkat apa pun.</string>
     <string name="hyper_preset_anime">Anime</string>
-    <string name="hyper_preset_anime_body">Menggandakan resolusi dengan jaringan yang dibuat untuk kartun dan anime.</string>
+    <string name="hyper_preset_anime_body">Memperbesar animasi dan anime dengan tepi lebih jelas.</string>
     <string name="hyper_preset_fps60">60 fps</string>
     <string name="hyper_preset_fps60_body">Membuat frame di antara frame asli untuk gerakan yang lebih halus.</string>
     <string name="hyper_preset_restore">Pulihkan video lama</string>
     <string name="hyper_preset_restore_body">Menghapus noise dan blok, memperbaiki interlace, menggandakan resolusi, dan mempertajam wajah.</string>
-    <string name="hyper_preset_sharper">Lebih tajam</string>
-    <string name="hyper_preset_sharper_body">Menaikkan resolusi dengan detail baru.</string>
+    <string name="hyper_preset_sharper">Aurea Detail</string>
+    <string name="hyper_preset_sharper_body">Memperjelas detail dan tepi dalam satu proses GPU.</string>
+    <string name="hyper_preset_enchance">AureaEnchance</string>
+    <string name="hyper_preset_enchance_body">Merekonstruksi detail pada skala 2× dengan filter terlatih di GPU.</string>
     <string name="hyper_preset_slowmo">Gerak lambat</string>
     <string name="hyper_preset_slowmo_body">Memperlambat video dengan membuat frame baru, tanpa patah-patah.</string>
     <string name="hyper_preset_stabilize">Stabilkan</string>
@@ -126,7 +128,7 @@
     <string name="hyper_step_of">%1$d dari %2$d</string>
     <string name="hyper_step_prepare">Persiapan</string>
     <string name="hyper_step_stable">Stabilkan</string>
-    <string name="hyper_step_upscale">Naikkan resolusi</string>
+    <string name="hyper_step_upscale">Aurea Detail</string>
     <string name="hyper_time_hours">%1$d j %2$d mnt</string>
     <string name="hyper_time_left">%1$s lagi</string>
     <string name="hyper_time_minutes">%1$d mnt</string>
@@ -146,4 +148,5 @@
     <string name="licenses_oss_intro">Aurea menggunakan perangkat lunak dan model sumber terbuka. Ketuk item untuk membaca lisensinya persis seperti yang disertakan di aplikasi.</string>
     <string name="licenses_oss_title">Lisensi sumber terbuka</string>
     <string name="licenses_read_failed">File ini tidak dapat dibaca.</string>
+    <string name="hyper_detail_same_size">Ukuran asli</string>
 </resources>

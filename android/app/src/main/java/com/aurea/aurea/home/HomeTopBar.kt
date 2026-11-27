@@ -100,7 +100,7 @@ internal fun HomeTopBar(
             )
         }
         Row(Modifier.padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            // A abertura das Novidades uma vez por versão (e o pedido de doação) continua.
+            // As Novidades continuam abrindo uma vez por versão.
             ReleaseNotesEntry(button = false)
             Box {
                 val accountLabel = stringResource(R.string.om_home_account)

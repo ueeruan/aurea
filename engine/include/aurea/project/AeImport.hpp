@@ -158,6 +158,8 @@ struct Node {
     std::string effectName;  ///< fnam
     std::vector<EffectParamDef> params;
     std::vector<Node> children;
+    /// Serialized look recipe from an AE arbitrary-data property.
+    std::vector<u8> lookData;
 
     [[nodiscard]] bool hidden() const noexcept { return (flags & 2u) != 0; }
     [[nodiscard]] bool enabled() const noexcept { return (flags & 1u) != 0; }
@@ -214,6 +216,8 @@ public:
     /// Efeito novo no fim da pilha (as mesmas regras do EffectAdd). Devolve o
     /// id estável do efeito na camada (kInvalidIndex = recusado).
     [[nodiscard]] virtual u32 add_effect(LayerId layer, u32 effectType) noexcept = 0;
+    /// Save a decoded table from an imported look as a normal project LUT.
+    [[nodiscard]] virtual AssetId store_look_lut(std::string_view cube) { (void)cube; return {}; }
     /// Conteúdo/estilo do texto mudou: o motor refaz a caixa.
     virtual void text_changed(LayerId layer) noexcept = 0;
     /// Camada removida pelo script (layer.remove()).

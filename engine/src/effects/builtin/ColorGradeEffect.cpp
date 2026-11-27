@@ -38,6 +38,8 @@ static_assert(sizeof(GradeUniforms) <= binding::kMaxUniformBytes);
 
 class ColorGrade final : public Effect {
 public:
+    enum class Mode { Standard, Studio, Look };
+    explicit ColorGrade(Mode mode = Mode::Standard) : mode_(mode) {}
     enum : u32 {
         kLog = 0,
         kTemperature, kTint, kExposure, kContrast, kPivot, kHighlights, kShadows, kWhites, kBlacks, kBrightness,
@@ -57,10 +59,14 @@ public:
         kWindowType, kWindowCenter, kWindowSize, kWindowRotation, kWindowSoftness, kWindowInvert, kWindowShow,
         kCount,
     };
-    static_assert(kLut == 70 && kRole == 77 && kLook == 78, "índices usados pelo motor e pelas interfaces");
+    static_assert(kLut == effect_keys::kColorGradeLutParam && kRole == 77 && kLook == 78);
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kColorGrade, "Correção de cor", "Cor", EffectClass::Neighborhood};
+        static const EffectInfo studio{effect_keys::kColorStudio, "Estúdio de cor", "Cor", EffectClass::Neighborhood};
+        static const EffectInfo look{effect_keys::kLookStudio, "Estúdio de looks", "Cor", EffectClass::Neighborhood};
+        if (mode_ == Mode::Studio) return studio;
+        if (mode_ == Mode::Look) return look;
         return i;
     }
 
@@ -149,19 +155,21 @@ public:
         p.add_bool("window_invert", "Inverter janela", false);
         p.add_bool("window_show", "Mostrar janela", false);
 
-        p.add_section_range("basic", "Básico", kTemperature, kVibrance);
-        p.add_section_range("wheels", "Rodas de cor", kLift, kOffsetLuma);
-        p.add_section_range("curves", "Curvas", kCurves, kHueCurves);
+        const bool standard = mode_ == Mode::Standard;
+        p.add_section_range("basic", "Básico", kTemperature, kVibrance, kInvalidIndex, standard);
+        p.add_section_range("wheels", "Rodas de cor", kLift, kOffsetLuma, kInvalidIndex, standard);
+        p.add_section_range("curves", "Curvas", kCurves, kHueCurves, kInvalidIndex, standard);
         p.add_section_range("hsl", "HSL", kHslFirst, kHslFirst + 23, kInvalidIndex, false);
         p.add_section_range("secondary", "Correção secundária", kQHue, kQExposure, kQualifier, false);
-        p.add_section_range("creative", "Criativo", kFade, kGrainSize);
-        p.add_section_range("lut", "LUT", kLut, kLutIntensity);
-        p.add_section_range("window", "Janela de correção", kWindowType, kWindowShow);
+        p.add_section_range("creative", "Criativo", kFade, kGrainSize, kInvalidIndex, standard);
+        p.add_section_range("lut", "LUT", kLut, kLutIntensity, kInvalidIndex, standard);
+        p.add_section_range("window", "Janela de correção", kWindowType, kWindowShow, kInvalidIndex, standard);
     }
 
     /// Os looks dos Filtros (modo de edição): só valores parados, um passo de
     /// desfazer. A intensidade do filtro é a Mistura.
     std::span<const EffectPreset> presets() const noexcept override {
+        if (mode_ == Mode::Studio) return {};
         // Rodas: (cos, sen) da matiz × força. Matiz 0 = vermelho, 0,5 = ciano.
         static constexpr EffectPresetValue kCinema[] = {
             {kContrast, 15}, {kSaturation, 105},
@@ -322,6 +330,8 @@ public:
         }
         return OkStatus;
     }
+private:
+    Mode mode_;
 };
 
 // =============================================================================
@@ -463,7 +473,11 @@ public:
 
 } // namespace
 
-void register_color_grade_effect(EffectRegistry& r) { (void)r.add(std::make_unique<ColorGrade>()); }
+void register_color_grade_effect(EffectRegistry& r) {
+    (void)r.add(std::make_unique<ColorGrade>());
+    (void)r.add(std::make_unique<ColorGrade>(ColorGrade::Mode::Studio));
+    (void)r.add(std::make_unique<ColorGrade>(ColorGrade::Mode::Look));
+}
 void register_color_looks_effect(EffectRegistry& r) { (void)r.add(std::make_unique<ColorLooks>()); }
 
 } // namespace aurea::builtin

@@ -29,7 +29,6 @@ import com.aurea.aurea.ui.theme.AureaType
 internal object AureaDonations {
     /** Na Google Play não há doação por PIX/PayPal (política de pagamentos). */
     val enabled: Boolean = !com.aurea.aurea.BuildConfig.PLAY_STORE
-    var launchPromptPending by mutableStateOf(enabled)
     const val PIX = "00020126360014br.gov.bcb.pix0114+55889961267175204000053039865802BR5911Ruan  Pablo6009Sao Paulo62240520daqr16872346348818576304A1F0"
     /** Mercado Pago: cartão de crédito, débito, Pix e saldo na mesma página. */
     const val MERCADO_PAGO = "https://link.mercadopago.com.br/supportaureaeditor"

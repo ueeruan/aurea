@@ -1,0 +1,5 @@
+<resources>
+    <string name="trk_motion_title">متتبع الحركة</string>
+    <string name="trk_video_required">اختر طبقة فيديو.</string>
+    <string name="trk_back_to_result">العودة إلى النتيجة</string>
+</resources>

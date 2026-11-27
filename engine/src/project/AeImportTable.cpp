@@ -1451,6 +1451,21 @@ constexpr PRule kSapphireGlowDist[] = {
     U(9, "Mask from Layer", 0), I(10, "Load Preset"), I(11, "Save Preset"), I(12, "Edit Mocha"),
     I(13, "Show Glow Width"), I(14, "Help"),
 };
+constexpr PRule kSapphireVignette[] = {
+    U(45, "Effect", 1), P(50, "Center XY", "center", PConv::PointRel),
+    P(51, "Squareness", "squareness"), P(52, "Radius", "radius"),
+    P(53, "Rel Height", "relative_height"), P(54, "Rel Width", "relative_width"),
+    P(55, "Rotate", "rotation"), P(56, "Edge Softness", "softness"), P(57, "Smooth Curve", "curve"),
+    P(58, "Color", "color", PConv::Color), P(59, "Opacity", "opacity", PConv::Same, 100),
+    U(60, "Source Brightness", 1), U(61, "Combine", 1),
+    U(101, "Blur Amount", 0), U(102, "Blur Inside", 0),
+    I(200, "Show Radius"), I(201, "Show Rotate"), I(202, "Show Center"),
+    I(238, "Save Preset"), I(239, "Load Preset"), I(249, "Help"), I(241, "Edit Mocha"), I(250, "Mocha"),
+};
+constexpr PRule kSapphireSharpen[] = {
+    P(50, "Sharpen Amp", "strength"), P(106, "Small Detail Size", "detail_size"),
+    P(101, "Sharpen Chroma", "chroma"), I(0, "*"),
+};
 constexpr PRule kSapphireHueSatBright[] = {
     P(1, "Hue Shift", "hue", PConv::Same, 360), P(2, "Saturation", "chroma_scale"),
     P(3, "Brightness", "brightness_gain"), P(4, "Preserve Luma", "preserve_luma", PConv::Bool),
@@ -1487,6 +1502,15 @@ constexpr PRule kAeUnsharp[] = {
 };
 // Camera Lens Blur: o raio; íris, mapa de desfoque e realces ficam no padrão.
 constexpr PRule kCameraLensBlur[] = {P(1, "Blur Radius", "radius"), I(0, "*")};
+constexpr PRule kColorista[] = {
+    P(1, "Exposure", "exposure"), P(2, "Temperature", "temperature"), P(3, "Tint", "tint"),
+    P(4, "Contrast", "contrast"), P(5, "Saturation", "saturation"),
+    P(6, "Highlights", "highlights"), P(7, "Shadows", "shadows"),
+    P(8, "Whites", "whites"), P(9, "Blacks", "blacks"), P(10, "Strength", "mix"),
+};
+constexpr PRule kBccBrightnessContrast[] = {
+    P(2, "Brightness", "brightness"), P(3, "Contrast", "contrast"), I(0, "*"),
+};
 // O padrão do Flow Retime é 50 %; sem a velocidade do plugin, fica 100 %.
 constexpr FixedValue kRetimeFixed[] = {{"speed", {100, 0, 0, 0}}};
 
@@ -1539,6 +1563,8 @@ const ERule kRules[] = {
     RULEX("ADBE Shift Channels", "Shift Channels", effect_keys::kColorMatrix, kShiftChannels, nullptr, nullptr, 0,
           post_shift_channels),
     RULE("ADBE Brightness & Contrast 2", "Brightness & Contrast", effect_keys::kBrightnessContrast, kBrightnessContrast),
+    RULEX("BCC3Brightness-Contrast", "BCC Brightness-Contrast", effect_keys::kBrightnessContrast, kBccBrightnessContrast,
+          "brilho e contraste convertidos; a máscara e os controles secundários do BCC não foram convertidos", nullptr, 0, nullptr),
     // Desfoque
     RULE("ADBE Gaussian Blur 2", "Gaussian Blur", effect_keys::kGaussianBlur, kGaussian),
     RULE("ADBE Gaussian Blur", "Gaussian Blur (Legacy)", effect_keys::kGaussianBlur, kGaussian),
@@ -1702,8 +1728,9 @@ const ERule kRules[] = {
     RULEX("ADBE Optics Compensation", "Optics Compensation", effect_keys::kOpticsCompensation, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
     RULEX("CC Scale Wipe", "CC Scale Wipe", effect_keys::kScaleWipe, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
     RULEX("CC Light Rays", "CC Light Rays", effect_keys::kRays, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
-    RULEX("MB LookSuite3", "Looks", "aurea.color.looks", kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
-    RULEX("RG MB COLORISTA IV", "Colorista", effect_keys::kColorGrade, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+    ERule{"MB LookSuite3", "Looks", effect_keys::kLookStudio, nullptr, 0, nullptr, nullptr, 0, nullptr},
+    NAMED_RULE("RG MB COLORISTA IV", "Colorista", effect_keys::kColorStudio, kColorista,
+               "ajustes Colorista convertidos pelo nome publicado dos controles; a resposta tonal pode variar", nullptr, 0),
     RULEX("Twixtor Pro", "Twixtor Pro", effect_keys::kFlowRetime, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", kRetimeFixed, 1, nullptr),
     RULEX("RSMB", "RSMB", effect_keys::kFlowMotionBlur, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
     RULEX("CROSSPHERE_Bokeh", "Bokeh", effect_keys::kLensBlur, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
@@ -1735,13 +1762,17 @@ const ERule kRules[] = {
     SAPPHIRE("S_BleachBypass", "aurea.color.silver_retention"), SAPPHIRE("S_Solarize", "aurea.color.solarize"),
     SAPPHIRE("S_ClampChroma", "aurea.color.video_limiter"), SAPPHIRE("S_MathOps", "aurea.color.arithmetic"),
     SAPPHIRE("S_MatteOps", "aurea.key.matte_refine"), SAPPHIRE("S_ShowBadColors", "aurea.color.overbrights"),
-    SAPPHIRE("S_Vignette", "aurea.stylize.optical_vignette"), SAPPHIRE("S_Blur", "aurea.blur.photographic"),
+    RULEX("S_Vignette", "S_Vignette", "aurea.stylize.optical_vignette", kSapphireVignette,
+          "geometria e opacidade da vinheta convertidas; o perfil de suavidade pode variar", nullptr, 0, nullptr),
+    SAPPHIRE("S_Blur", "aurea.blur.photographic"),
     SAPPHIRE("S_BlurChannels", "aurea.blur.rgb_channels"), SAPPHIRE("S_BlurChroma", "aurea.blur.chroma_luma"),
     SAPPHIRE("S_BlurDirectional", "aurea.blur.photographic_direction"), SAPPHIRE("S_BlurMoCurves", "aurea.blur.motion_curves"),
     SAPPHIRE("S_BlurMotion", "aurea.blur.transform_motion"), SAPPHIRE("S_AdvancedDefocus", "aurea.blur.lens"),
     SAPPHIRE("S_DefocusPrism", "aurea.blur.prism_defocus"), SAPPHIRE("S_EdgeAwareBlur", "aurea.blur.bilateral"),
     SAPPHIRE("S_EdgeBlur", "aurea.blur.edge_masked"), SAPPHIRE("S_RackDefocus", "aurea.blur.rack_defocus"),
-    SAPPHIRE("S_Sharpen", "aurea.blur.detail_sharpen"), SAPPHIRE("S_SoftFocus", "aurea.blur.soft_focus"),
+    RULEX("S_Sharpen", "S_Sharpen", "aurea.blur.detail_sharpen", kSapphireSharpen,
+          "intensidade, detalhe e croma de nitidez convertidos; a escala de detalhes foi aproximada", nullptr, 0, nullptr),
+    SAPPHIRE("S_SoftFocus", "aurea.blur.soft_focus"),
     SAPPHIRE("S_Median", "aurea.blur.median"), SAPPHIRE("S_Glow", "aurea.light.chromatic_halo"),
     SAPPHIRE("S_GlowAura", "aurea.light.spectral_aura"), SAPPHIRE("S_GlowDarks", "aurea.light.shadow_halo"),
     NAMED_RULE("S_GlowDist", "GlowDist", "aurea.light.displaced_halo", kSapphireGlowDist,

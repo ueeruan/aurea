@@ -708,15 +708,8 @@ struct OffscreenTarget {
     /// quem chama espera o fence do frame e lê do buffer mapeado.
     BufferHandle yReadback{};
     BufferHandle uvReadback{};
-    /// Upscale do export (0.1.7): planos NV12 de `planeWidth`×`planeHeight`
-    /// (> a composição). `upscaled` recebe a composição ampliada (textureNicest)
-    /// e `upscaleHistory` é a do quadro anterior (TAA modo 4, se válida).
-    u32 planeWidth = 0;
-    u32 planeHeight = 0;
-    TextureHandle upscaled{};
-    TextureHandle upscaleHistory{};
-    bool upscaleTemporal = false;
-    bool upscaleHistoryValid = false;
+    /// Spatial detail enhancement on the full-resolution composition.
+    bool enhanceDetail = false;
     /// surface-direct (Android): se válido, a composição também sai em
     /// R'G'B' de 8 bits neste alvo RGBA8 (memória de AHardwareBuffer), do
     /// mesmo tamanho dos planos NV12, que continuam sendo gerados.
@@ -1002,6 +995,9 @@ public:
     /// curso (render/RendererDepth.cpp). Imagem: síncrono, uma vez. Vídeo: o
     /// export espera o quadro; o preview agenda e mostra o último pronto.
     [[nodiscard]] DepthMapResult depth_map(const DepthMapRequest& request) noexcept override;
+    [[nodiscard]] u32 cutout_view(const Layer* layer, const EffectInstance* effect) const noexcept override;
+    void set_cutout_view(const Composition* comp, const Layer* layer, const EffectInstance* effect,
+                         const Asset* asset, u32 mode) noexcept;
     /// Forma de onda / Espectro de áudio (render/RendererAudio.cpp): o som da
     /// camada escolhida, com os efeitos de áudio dela, numa janela em volta do
     /// quadro. Preview: blocos que faltam são pedidos e o quadro volta
@@ -1034,6 +1030,7 @@ public:
     /// "Analisar clipe": os quadros da fonte que a camada usa, no worker.
     bool bg_analyze(const Project& project, const Composition& comp, const Layer& layer,
                     const EffectInstance& instance, MediaManager* media) noexcept;
+    void bg_cancel_analysis(const Project& project, const Layer& layer, const EffectInstance& instance) noexcept;
     /// Estado do Remover fundo desta camada + instância: out[0] analisados,
     /// [1] total da análise, [2] analisando (0/1), [3] falhou (0 ou o motivo,
     /// DepthMapService::Failure), [4] recorte do quadro `sourceFrame` pronto,
@@ -1045,7 +1042,7 @@ public:
     static void bg_project_keys(const Project& project, std::vector<u64>& out);
     /// "Propagar clipe": todos os quadros da fonte da camada no worker do Roto.
     bool roto_propagate(const Project& project, const Composition& comp, const Layer& layer,
-                        const EffectInstance& instance, MediaManager* media) noexcept;
+                        const EffectInstance& instance, MediaManager* media, bool refresh = false) noexcept;
     /// Estado do Roto DESTA trilha (camada + instância), para a UI:
     /// out[0] quadros propagados, [1] total da propagação, [2] propagando (0/1),
     /// [3] falhou (0 = não; senão o motivo, DepthMapService::Failure: 1 geral,
@@ -1053,7 +1050,7 @@ public:
     /// [5] quadros do clipe já com recorte válido, [6] quadros do clipe,
     /// [7] há traços (0/1). Falso = camada sem Rotobrush com traços.
     bool roto_status(const Project& project, const Composition& comp, const Layer& layer,
-                     const EffectInstance& instance, i64 sourceFrame, i64* out8) noexcept;
+                     const EffectInstance& instance, i64 sourceFrame, i64* out8, u32* strokeCounts) noexcept;
     void set_foreground_model_directory(std::string path);
 
     // --- Consultas -------------------------------------------------------------
@@ -1534,6 +1531,8 @@ private:
     std::unique_ptr<ai::DepthMapService> depth_;
     std::unique_ptr<ai::DepthMapService> foreground_;
     std::shared_ptr<ai::RotoService> roto_;   ///< shared_ptr: tipo incompleto aqui
+    u64 cutoutViewTrack_ = 0;
+    u32 cutoutViewOverride_ = 0;
     [[nodiscard]] DepthMapResult roto_map(const DepthMapRequest& request,
                                           const std::vector<ai::RotoStroke>& strokes) noexcept;
     std::shared_ptr<ai::BgRemoveService> bg_;      ///< Remover fundo (nulo até o primeiro pedido)

@@ -13,9 +13,11 @@
 #include "aurea/scene3d/Shape3D.hpp"
 #include "aurea/scene3d/PartEffects.hpp"
 #include "aurea/scene3d/Animation.hpp"
+#include "aurea/scene3d/Importer.hpp"
 #include "aurea/scene3d/MaterialPreview.hpp"
 #include "aurea/scene3d/Text3D.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
+#include "aurea/render/ParticleExtras.hpp"
 #include "aurea/timeline/LayerAnimator.hpp"
 
 #include <algorithm>
@@ -1045,6 +1047,80 @@ EffectInstance part_effect(const char* key, u32 id) {
     initialize_instance(fx, *registry.params(fx.type));
     return fx;
 }
+}
+
+#if !defined(__ANDROID__)
+AUREA_TEST(Part3DEffects, BundledPropsRetainNamedPartsAndSpacingMovesEveryPart) {
+    const std::string folder = std::string(AUREA_TEST_DATA_DIR) + "/../../assets/model-library/ModelLibrary/";
+    const std::pair<const char*, usize> props[] = {
+        {"television", 10}, {"phone", 11}, {"microphone", 8}, {"headphones", 10},
+        {"console", 9}, {"mouse", 7}, {"building", 17},
+    };
+    Layer layer;
+    layer.kind = LayerKind::Model3D;
+    layer.effects.push_back(part_effect(effect_keys::kSpacing3D, 1));
+    auto& spacing = layer.effects[0];
+    for (const auto& [name, expected] : props) {
+        const auto imported = import_gltf_file(folder + "aurea-" + name + ".glb", ImportOptions{});
+        AUREA_CHECK(imported.asset != nullptr);
+        if (!imported.asset) continue;
+        const SceneAsset& asset = *imported.asset;
+        std::vector<u32> nodes;
+        std::vector<std::string> names;
+        part_nodes(asset, nodes);
+        part_names(asset, names);
+        AUREA_CHECK_EQ(nodes.size(), expected);
+        AUREA_CHECK_EQ(names.size(), expected);
+        AUREA_CHECK(std::none_of(names.begin(), names.end(), [](const std::string& n) { return n.empty(); }));
+        std::sort(names.begin(), names.end());
+        AUREA_CHECK(std::adjacent_find(names.begin(), names.end()) == names.end());
+
+        std::vector<i32> materials;
+        for (const u32 node : nodes) {
+            const auto& mesh = asset.meshes[static_cast<usize>(asset.nodes[node].mesh)];
+            AUREA_CHECK_EQ(mesh.primitives.size(), usize{1});
+            if (!mesh.primitives.empty()) materials.push_back(mesh.primitives.front().material);
+        }
+        AUREA_CHECK(std::none_of(materials.begin(), materials.end(), [](i32 material) { return material < 0; }));
+        std::sort(materials.begin(), materials.end());
+        AUREA_CHECK(std::adjacent_find(materials.begin(), materials.end()) == materials.end());
+
+        const auto rest = asset.rest_world_matrices();
+        auto world = rest;
+        std::vector<f32> opacity;
+        spacing.params[0].constant = ParamValue::scalar(32.0f);
+        apply_part_effects(asset, layer, 0.0, world, opacity);
+        for (const u32 node : nodes)
+            AUREA_CHECK((world[node].transform_point(Vec3{}) - rest[node].transform_point(Vec3{})).length() > 1e-4f);
+        spacing.params[0].constant = ParamValue::scalar(0.0f);
+        world = rest;
+        apply_part_effects(asset, layer, 0.0, world, opacity);
+        for (const u32 node : nodes)
+            AUREA_CHECK_NEAR((world[node].transform_point(Vec3{}) - rest[node].transform_point(Vec3{})).length(), 0.0f, 1e-7f);
+    }
+}
+#endif
+
+AUREA_TEST(Part3DEffects, MoneyParticlesReuseFoldedInstancedGeometry) {
+    Layer layer;
+    layer.kind = LayerKind::ParticleSystem;
+    layer.particles.particleType = static_cast<u32>(ParticleShape::Money);
+    particles::StaticCache cache;
+    particles::BuildContext context;
+    particles::FrameData first, second;
+    particles::build_frame(context, layer, layer.particles, cache, first);
+    AUREA_CHECK(first.meshMode && first.meshVertices > 12 && first.meshVertices % 3 == 0);
+    AUREA_CHECK(first.statics != nullptr);
+    if (!first.statics) return;
+    Aabb bounds;
+    for (usize vertex = 0; vertex < first.statics->mesh.size(); vertex += 2)
+        bounds.add(first.statics->mesh[vertex].xyz());
+    AUREA_CHECK(bounds.valid() && bounds.extent().z > 0.02f);
+    context.frameNumber = 2;
+    particles::build_frame(context, layer, layer.particles, cache, second);
+    AUREA_CHECK(second.statics == first.statics);
+    AUREA_CHECK_EQ(cache.builds(), 1u);
+    AUREA_CHECK_EQ(cache.hits(), 1u);
 }
 
 AUREA_TEST(Part3DEffects, MoveOnePartHideARangeAndPickTextures) {

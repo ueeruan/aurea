@@ -1275,11 +1275,9 @@ class Exporter internal constructor(
     }
 
     /**
-     * 0.4.5 (bug "exportação ainda falha"): a falha que aparece DEPOIS de a
-     * escada já ter tentado modos mais compatíveis ([attempt] > 0: H.264,
-     * encoder de software, resolução menor) diz isso — a frase do motivo sozinha
-     * mandava "tentar outra resolução", o que a escada já fez — e leva um código
-     * curto para o suporte: E<motivo>-<código Errc>-<degrau>. O mesmo no iOS
+     * Anexa o código de suporte após uma nova tentativa. O nível identifica a
+     * tentativa efetiva, cujas opções dependem da falha e do pedido original.
+     * Formato E<motivo>-<código Errc>-<degrau>. O mesmo no iOS
      * (AureaModel.exportAfterLadder). Cancelado e sem espaço ficam como estão.
      */
     private fun afterLadder(message: String, attempt: Int, failure: Int, code: Int): String =

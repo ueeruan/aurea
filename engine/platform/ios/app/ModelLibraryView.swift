@@ -6,10 +6,16 @@ private struct LibraryModel: Decodable, Identifiable {
     let names: [String: String]
     let provider: String
     let category: String
+    let license: String?
 
     var name: String {
         let language = AureaText.language.resolved
         return names[language == .pt ? "pt" : language.rawValue] ?? names["en"] ?? id
+    }
+
+    var credit: String {
+        let rights = license ?? "CC0"
+        return rights.isEmpty ? provider : "\(provider) · \(rights)"
     }
 
     func resource(_ ext: String) -> URL? {
@@ -75,7 +81,7 @@ struct ModelLibraryView: View {
             }.background(AureaColors.lightBackground).clipped()
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name).font(.aurea(size: 15, weight: .medium)).foregroundStyle(AureaColors.lightText)
-                Text("\(item.provider) · CC0").font(.aurea(size: 12)).foregroundStyle(AureaColors.lightTextMuted)
+                Text(item.credit).font(.aurea(size: 12)).foregroundStyle(AureaColors.lightTextMuted)
             }.padding(.horizontal, 10).padding(.top, 8)
             Button {
                 if let url { onUse(url, item.name) }

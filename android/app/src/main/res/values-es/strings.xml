@@ -1425,6 +1425,8 @@ para editar la curva.</string>
     <string name="fx_name_light_sweep">Barrido de luz</string>
     <string name="fx_name_shake">Sacudida</string>
     <string name="fx_name_turbulence">Desplazamiento turbulento</string>
+    <string name="fx_name_turbulence_legacy">Turbulencia clásica</string>
+    <string name="fx_name_turbulent_displace">Desplazamiento turbulento</string>
     <string name="fx_name_wave_warp">Deformación de onda</string>
     <string name="fx_name_warp">Deformar</string>
     <string name="fx_name_ripple_dissolve">Disolución ondulada</string>
@@ -2920,6 +2922,13 @@ para editar la curva.</string>
     <string name="afx_name_particular">Partículas 3D</string>
     <string name="afx_desc_particular">Sistema de partículas 3D: emisor de caja o esfera, velocidad, gravedad, viento, resistencia del aire, turbulencia, y color y tamaño a lo largo de la vida. La capa se vuelve el emisor.</string>
     <string name="layer_replace_media">Reemplazar medio</string>
+    <string name="layer_improve_source">Mejorar fuente</string>
+    <string name="layer_improve_source_detail">Elige la misma grabación completa en mayor resolución</string>
+    <string name="layer_improve_source_checking">Comprobando la grabación…</string>
+    <string name="layer_improve_source_done">Fuente actualizada en mayor resolución</string>
+    <string name="layer_improve_source_resolution">Elige un video con mayor ancho y alto.</string>
+    <string name="layer_improve_source_mismatch">Elige la misma grabación con el mismo encuadre, tiempo y audio.</string>
+    <string name="layer_improve_source_failed">No se pudo mejorar la fuente. %1$s</string>
     <string name="layer_replace_media_detail">Otra foto o video; transformación, keyframes, efectos y máscaras se mantienen</string>
     <string name="layer_replacing_media">Reemplazando el medio…</string>
     <string name="layer_media_replaced">Medio reemplazado por %1$s</string>
@@ -4418,7 +4427,7 @@ para editar la curva.</string>
     <string name="fxo_apply_distortion">Aplicar distorsión</string>
     <string name="fxo_2">2×</string>
     <string name="fxo_4">4×</string>
-    <string name="fxt_upscales_the_layer_when_it_appears_large">Amplía la capa cuando aparece más grande que la fuente (la escala de la capa en la composición). Sin ampliación en pantalla, solo actúa la nitidez.</string>
+    <string name="fxt_upscales_the_layer_when_it_appears_large">Realza los detalles al tamaño actual y reconstruye los bordes al ampliar la capa.</string>
     <string name="fxl_content">Contenido</string>
     <string name="fxo_general">General</string>
     <string name="fxo_anime">Anime</string>

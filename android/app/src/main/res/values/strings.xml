@@ -1004,6 +1004,8 @@
     <string name="fx_name_light_sweep">Faixa de luz</string>
     <string name="fx_name_shake">Tremor</string>
     <string name="fx_name_turbulence">Turbulência</string>
+    <string name="fx_name_turbulence_legacy">Turbulência clássica</string>
+    <string name="fx_name_turbulent_displace">Deslocamento turbulento</string>
     <string name="fx_name_wave_warp">Onda</string>
     <string name="fx_name_warp">Lente</string>
     <string name="fx_name_ripple_dissolve">Ondulação que dissolve</string>
@@ -2996,6 +2998,13 @@
     <string name="afx_name_particular">Partículas 3D</string>
     <string name="afx_desc_particular">Sistema de partículas 3D: emissor em caixa ou esfera, velocidade, gravidade, vento, resistência do ar, turbulência, e cor e tamanho ao longo da vida. A camada vira o emissor.</string>
     <string name="layer_replace_media">Substituir mídia</string>
+    <string name="layer_improve_source">Melhorar fonte</string>
+    <string name="layer_improve_source_detail">Escolha a mesma gravação completa em resolução maior</string>
+    <string name="layer_improve_source_checking">Verificando a gravação…</string>
+    <string name="layer_improve_source_done">Fonte atualizada em maior resolução</string>
+    <string name="layer_improve_source_resolution">Escolha um vídeo com largura e altura maiores.</string>
+    <string name="layer_improve_source_mismatch">Escolha a mesma gravação, com o mesmo enquadramento, tempo e áudio.</string>
+    <string name="layer_improve_source_failed">Não foi possível melhorar a fonte. %1$s</string>
     <string name="layer_replace_media_detail">Outra foto ou vídeo; transformação, keyframes, efeitos e máscaras ficam</string>
     <string name="layer_replacing_media">Substituindo a mídia…</string>
     <string name="layer_media_replaced">Mídia substituída por %1$s</string>
@@ -4497,7 +4506,7 @@
     <string name="fxo_apply_distortion">Aplicar distorção</string>
     <string name="fxo_2">2×</string>
     <string name="fxo_4">4×</string>
-    <string name="fxt_upscales_the_layer_when_it_appears_large">Amplia a camada quando ela aparece maior que a fonte (a escala da camada na composição). Sem ampliação na tela, só a nitidez age.</string>
+    <string name="fxt_upscales_the_layer_when_it_appears_large">Realça detalhes no tamanho atual e reconstrói bordas quando a camada é ampliada.</string>
     <string name="fxl_content">Conteúdo</string>
     <string name="fxo_general">Geral</string>
     <string name="fxo_anime">Anime</string>

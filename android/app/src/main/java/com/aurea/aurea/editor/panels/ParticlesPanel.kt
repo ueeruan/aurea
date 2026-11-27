@@ -153,7 +153,8 @@ private fun ParticleBody(env: PanelEnv, p: List<Float>, tab: Int) {
         if (tab == 3) {
         Choice(store, stringResource(R.string.particular_shape), P.ParticleType) {
             listOf(stringResource(R.string.particular_shape_circle), stringResource(R.string.particular_shape_square),
-                stringResource(R.string.particular_shape_streak), stringResource(R.string.particular_shape_soft), stringResource(R.string.world_purple_crystals))
+                stringResource(R.string.particular_shape_streak), stringResource(R.string.particular_shape_soft),
+                stringResource(R.string.world_purple_crystals), stringResource(R.string.fx3d_name_money))
         }
         Dim(store, stringResource(R.string.panel_tamanho_inicial), P.StartSize, p, .25f, .1f, 120f, " px", decimals = 1)
         Dim(store, stringResource(R.string.panel_tamanho_final), P.EndSize, p, .25f, 0f, 120f, " px", decimals = 1)
@@ -283,7 +284,7 @@ private fun Choice(store: EditorStore, label: String, param: Int, options: @Comp
     PropertyCustomRow(label, selected = sel == param, onSelect = { pick(param) }, keyframe = particleLook(store, param)) {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             options().forEachIndexed { i, name ->
-                val value = if (param == P.ParticleType && i == 4) 6 else i
+                val value = if (param == P.ParticleType && i >= 4) i + 2 else i
                 val on = value == current
                 Box(Modifier.clip(RoundedCornerShape(7.dp))
                     .background(if (on) AureaColors.Accent else AureaColors.Chip)

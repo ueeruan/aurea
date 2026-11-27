@@ -27,4 +27,12 @@
     <string name="bg_remove_o_person">Person</string>
     <string name="bg_remove_tip_model">Automatic cuts out the main object and works on every device. Person uses the system\'s people segmentation when the device has it; without it, Automatic is used.</string>
     <string name="bg_remove_tip_edge">Rebuilds the edge at video resolution (hair, thin outlines). 0 uses the simple edge.</string>
+    <string name="cutout_analyzing_scene">Analyzing the scene</string>
+    <string name="cutout_analyzing_frame">Analyzing this frame</string>
+    <string name="cutout_brush">Cutout brush</string>
+    <string name="cutout_brush_add">Include</string>
+    <string name="cutout_brush_subtract">Exclude</string>
+    <string name="cutout_brush_help">Tap the subject to select it. Paint to include or exclude areas.</string>
+    <string name="cutout_auto_help">Remove the background automatically or fine-tune the cutout with the brush.</string>
+    <string name="cutout_track">Track subject</string>
 </resources>

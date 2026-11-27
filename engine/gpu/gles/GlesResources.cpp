@@ -3,7 +3,7 @@
 #include "ShaderTranslate.hpp"
 #include <limits>
 #include <cstdio>
-#include <cstdlib>
+#include <new>
 #include <fstream>
 #include <filesystem>
 
@@ -102,17 +102,14 @@ Result<BufferHandle> Backend::create_buffer(const BufferDesc& desc) noexcept {
     auto& d = *impl_; Impl::Scope scope(d);
     if (!scope.valid) return Status{Errc::InvalidState};
     if (!desc.bytes) return Status{Errc::InvalidArgument};
+    if (desc.bytes > static_cast<u64>(std::numeric_limits<GLsizeiptr>::max()))
+        return Status{Errc::OutOfMemory, "GLES buffer exceeds addressable size"};
     Buffer b; b.desc = desc; b.gpuBytes = desc.bytes;
-    // A cópia na CPU num processo de 32 bits pode não caber (endereços
-    // fragmentados). Este alvo compila sem exceções (o vector abortaria o
-    // app): o bloco é sondado antes, e a falta de memória volta como erro — o
-    // export usa menos slots ou refaz menor.
+    // Own the actual allocation. A probe followed by vector::resize can
+    // still abort the process on low-memory builds with exceptions disabled.
     if (desc.access != MemoryAccess::GpuOnly) {
-        if (desc.bytes > static_cast<u64>(std::numeric_limits<usize>::max())) return Status{Errc::OutOfMemory, "buffer GLES"};
-        void* probe = std::malloc(static_cast<usize>(desc.bytes));
-        if (!probe) return Status{Errc::OutOfMemory, "buffer GLES"};
-        std::free(probe);
-        b.cpu.resize(static_cast<usize>(desc.bytes));
+        b.cpu.reset(new (std::nothrow) u8[static_cast<usize>(desc.bytes)]{});
+        if (!b.cpu) return Status{Errc::OutOfMemory, "GLES CPU buffer"};
     }
     glGenBuffers(1, &b.id); glBindBuffer(GL_COPY_WRITE_BUFFER, b.id);
     glBufferData(GL_COPY_WRITE_BUFFER, desc.bytes, nullptr,
@@ -131,25 +128,29 @@ Status Backend::write_buffer(BufferHandle h, usize offset, const void* data, usi
     auto& d = *impl_; Impl::Scope scope(d); auto* b = find(d.buffers, h.id);
     if (!scope.valid || !b) return Status{Errc::InvalidState};
     if (!data || offset > b->desc.bytes || bytes > b->desc.bytes - offset) return Status{Errc::OutOfRange};
-    if (!b->cpu.empty()) std::memcpy(b->cpu.data() + offset, data, bytes);
+    if (b->cpu && b->cpu.get() + offset != data) std::memmove(b->cpu.get() + offset, data, bytes);
     glBindBuffer(GL_COPY_WRITE_BUFFER, b->id); glBufferSubData(GL_COPY_WRITE_BUFFER, offset, bytes, data);
     d.uploadBytes += bytes; return d.check("write_buffer");
 }
 Status Backend::map_buffer(BufferHandle h, void*& pointer) noexcept {
     pointer = nullptr;
     auto& d = *impl_; Impl::Scope scope(d); auto* b = find(d.buffers, h.id);
-    if (!scope.valid || !b) return Status{Errc::InvalidState};
-    if (b->cpu.empty()) return Status{Errc::NotSupported};
+    if (!scope.valid) return d.deviceLost ? Errc::DeviceLost : Errc::InvalidState;
+    if (!b) return Errc::InvalidState;
+    if (!b->cpu) return Errc::NotSupported;
     if (b->pendingRead) {
         glBindBuffer(GL_COPY_READ_BUFFER, b->id);
         const auto* data = static_cast<const u8*>(glMapBufferRange(GL_COPY_READ_BUFFER, 0, b->gpuBytes, GL_MAP_READ_BIT));
-        if (!data) return Status{Errc::InvalidState, "GLES readback map failed"};
+        if (!data) {
+            const Status error = d.check("GLES readback map");
+            return error.ok() ? Status{Errc::InvalidState, "GLES readback map failed"} : error;
+        }
         if (b->rgbaReadback) {
             // 0.4.6 (export): laços por número de canais, sem o laço interno
             // variável — o compilador vetoriza (NEON). O R8/RG8 do NV12 do
             // export passa aqui a cada quadro (~2,6 M pixels em 1080p).
             const usize pixels = static_cast<usize>(b->readWidth) * b->readHeight;
-            u8* out = b->cpu.data();
+            u8* out = b->cpu.get();
             switch (b->readComponents) {
                 case 1: for (usize i = 0; i < pixels; ++i) out[i] = data[i * 4]; break;
                 case 2: for (usize i = 0; i < pixels; ++i) { out[i * 2] = data[i * 4]; out[i * 2 + 1] = data[i * 4 + 1]; } break;
@@ -158,18 +159,23 @@ Status Backend::map_buffer(BufferHandle h, void*& pointer) noexcept {
                     for (usize i = 0; i < pixels; ++i)
                         for (u32 c = 0; c < b->readComponents; ++c) out[i * b->readComponents + c] = data[i * 4 + c];
             }
-        } else std::memcpy(b->cpu.data(), data, b->desc.bytes);
+        } else std::memcpy(b->cpu.get(), data, b->desc.bytes);
         const GLboolean valid = glUnmapBuffer(GL_COPY_READ_BUFFER);
-        if (!valid) return Status{Errc::DeviceLost};
+        if (!valid) {
+            const Status error = d.check("GLES readback unmap");
+            // ES marks the buffer contents undefined. Return a failed frame
+            // without handing the encoder a pointer to unverified pixels.
+            return error.ok() ? Status{Errc::InvalidState, "GLES readback data invalidated"} : error;
+        }
         b->pendingRead = false;
     }
     if (const auto status = d.check("map_buffer"); !status.ok()) return status;
-    pointer = b->cpu.data(); return OkStatus;
+    pointer = b->cpu.get(); return OkStatus;
 }
 void Backend::unmap_buffer(BufferHandle h) noexcept {
     auto* b = find(impl_->buffers, h.id);
-    if (b && b->desc.access == MemoryAccess::Upload && !b->cpu.empty())
-        (void)write_buffer(h, 0, b->cpu.data(), b->cpu.size());
+    if (b && b->desc.access == MemoryAccess::Upload && b->cpu)
+        (void)write_buffer(h, 0, b->cpu.get(), b->desc.bytes);
 }
 
 Result<SamplerHandle> Backend::create_sampler(const SamplerDesc& desc) noexcept {
@@ -387,19 +393,33 @@ Status Backend::upload_texture(TextureHandle h, const void* data, u32 stride) no
     if (!stride) stride = t->desc.width * f.bytes;
     if (stride < t->desc.width * f.bytes || stride % f.bytes) return Status{Errc::OutOfRange};
     const usize rowBytes = static_cast<usize>(t->desc.width) * f.bytes;
+    const u64 transferBytes = static_cast<u64>(rowBytes) * t->desc.height;
+    if (transferBytes > static_cast<u64>(std::numeric_limits<GLsizeiptr>::max())
+        || static_cast<u64>(stride) * t->desc.height > std::numeric_limits<usize>::max())
+        return Status{Errc::OutOfRange, "GLES upload dimensions"};
     // Own the transfer memory. Passing an ImageReader's mapped plane directly
     // deadlocks the emulator GL transport; a packed CPU copy also avoids
     // exposing decoder padding/lifetime to the graphics driver.
-    auto& staged = d.uploadScratch;
-    staged.resize(rowBytes * t->desc.height);
+    const auto bytes = static_cast<usize>(transferBytes);
+    if (bytes > d.uploadScratchBytes) {
+        d.uploadScratch.reset();
+        d.uploadScratchBytes = 0;
+        d.uploadScratch.reset(new (std::nothrow) u8[bytes]);
+        if (!d.uploadScratch) return Status{Errc::OutOfMemory, "GLES texture upload staging"};
+        d.uploadScratchBytes = bytes;
+    }
+    u8* staged = d.uploadScratch.get();
     for (u32 y = 0; y < t->desc.height; ++y)
-        std::memcpy(staged.data() + y * rowBytes, static_cast<const u8*>(data) + static_cast<usize>(y) * stride, rowBytes);
+        std::memcpy(staged + y * rowBytes, static_cast<const u8*>(data) + static_cast<usize>(y) * stride, rowBytes);
     glBindTexture(t->target, t->id); glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1); glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glTexSubImage2D(t->target, 0, 0, 0, t->desc.width, t->desc.height, f.external, f.type, staged.data());
-    d.uploadBytes += rowBytes * t->desc.height;
+    glTexSubImage2D(t->target, 0, 0, 0, t->desc.width, t->desc.height, f.external, f.type, staged);
+    d.uploadBytes += bytes;
     // Retain common preview sizes, but don't pin the largest imported image.
-    if (staged.capacity() > 16 * 1024 * 1024) std::vector<u8>().swap(staged);
+    if (d.uploadScratchBytes > 16 * 1024 * 1024) {
+        d.uploadScratch.reset();
+        d.uploadScratchBytes = 0;
+    }
     return d.check("upload_texture");
 }
 Status Backend::generate_mipmaps(TextureHandle h) noexcept {
@@ -410,17 +430,31 @@ Status Backend::generate_mipmaps(TextureHandle h) noexcept {
 }
 Status Backend::read_texture(TextureHandle h, void* output, u32 stride) noexcept {
     auto& d = *impl_; Impl::Scope scope(d); auto* t = find(d.textures, h.id);
-    if (!scope.valid || !t) return Status{Errc::InvalidState};
+    if (!scope.valid) return d.deviceLost ? Errc::DeviceLost : Errc::InvalidState;
+    if (!t) return Errc::InvalidState;
     const auto f = format_of(t->desc.format);
     if (!output || f.compressed || t->desc.is_depth() || t->target != GL_TEXTURE_2D) return Status{Errc::NotSupported};
-    if (stride < t->desc.width * f.bytes) return Status{Errc::OutOfRange};
+    const u32 rowBytes = t->desc.width * f.bytes;
+    if (!stride) stride = rowBytes;
+    if (stride < rowBytes || static_cast<u64>(stride) * t->desc.height > std::numeric_limits<usize>::max())
+        return Status{Errc::OutOfRange, "GLES readback stride"};
     glBindFramebuffer(GL_READ_FRAMEBUFFER, d.readFramebuffer); d.attach(GL_READ_FRAMEBUFFER, t, nullptr);
-    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0); glPixelStorei(GL_PACK_ALIGNMENT, 1); glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
+    glPixelStorei(GL_PACK_SKIP_ROWS, 0);
     const bool floating = f.type == GL_HALF_FLOAT || f.type == GL_FLOAT;
-    const usize pixels = static_cast<usize>(t->desc.width) * t->desc.height;
+    const u64 pixelCount = static_cast<u64>(t->desc.width) * t->desc.height;
+    if (pixelCount > static_cast<u64>(std::numeric_limits<GLsizeiptr>::max()) / (floating ? 4 * sizeof(f32) : 4))
+        return Status{Errc::OutOfMemory, "GLES texture readback exceeds addressable size"};
+    const usize pixels = static_cast<usize>(pixelCount);
     const u32 components = f.external == GL_RED ? 1 : f.external == GL_RG ? 2 : 4;
     if (floating) {
-        std::vector<f32> data(pixels * 4); glReadPixels(0, 0, t->desc.width, t->desc.height, GL_RGBA, GL_FLOAT, data.data());
+        std::unique_ptr<f32[]> data(new (std::nothrow) f32[pixels * 4]);
+        if (!data) return Status{Errc::OutOfMemory, "GLES float texture readback"};
+        glReadPixels(0, 0, t->desc.width, t->desc.height, GL_RGBA, GL_FLOAT, data.get());
+        if (const Status read = d.check("read_texture float"); !read.ok()) return read;
         for (u32 y = 0; y < t->desc.height; ++y) for (u32 x = 0; x < t->desc.width; ++x) for (u32 c = 0; c < components; ++c) {
             u8* dst = static_cast<u8*>(output) + static_cast<usize>(y) * stride + x * f.bytes;
             const f32 value = data[(static_cast<usize>(y) * t->desc.width + x) * 4 + c];
@@ -428,12 +462,15 @@ Status Backend::read_texture(TextureHandle h, void* output, u32 stride) noexcept
             else std::memcpy(dst + c * 4, &value, 4);
         }
     } else if (f.type == GL_UNSIGNED_BYTE) {
-        std::vector<u8> data(pixels * 4); glReadPixels(0, 0, t->desc.width, t->desc.height, GL_RGBA, GL_UNSIGNED_BYTE, data.data());
+        std::unique_ptr<u8[]> data(new (std::nothrow) u8[pixels * 4]);
+        if (!data) return Status{Errc::OutOfMemory, "GLES byte texture readback"};
+        glReadPixels(0, 0, t->desc.width, t->desc.height, GL_RGBA, GL_UNSIGNED_BYTE, data.get());
+        if (const Status read = d.check("read_texture byte"); !read.ok()) return read;
         for (u32 y = 0; y < t->desc.height; ++y) for (u32 x = 0; x < t->desc.width; ++x)
             std::memcpy(static_cast<u8*>(output) + static_cast<usize>(y) * stride + x * components,
-                        data.data() + (static_cast<usize>(y) * t->desc.width + x) * 4, components);
+                        data.get() + (static_cast<usize>(y) * t->desc.width + x) * 4, components);
     } else return Status{Errc::NotSupported};
-    return d.check("read_texture");
+    return OkStatus;
 }
 Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc&) noexcept {
     return Status{Errc::UnsupportedFeature, "GLES uses the platform CPU-plane video decoder"};

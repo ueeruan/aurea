@@ -296,11 +296,13 @@ u32 Engine::query_group_layers(u64 groupLayerId, bridge::LayerRow* out, u32 capa
         row.flags = flags;
         row.parentIndex = kInvalidIndex;
         row.reserved0 = linear ? kGroupRowEditable : 0u;
-        if (outNameBlob && nameCursor + l->name.size() < nameBlobCapacity) {
+        if (outNameBlob && l->name.size() <= nameBlobCapacity - nameCursor) {
             std::memcpy(outNameBlob + nameCursor, l->name.data(), l->name.size());
             row.nameOffset = nameCursor;
             row.nameLength = static_cast<u32>(l->name.size());
             nameCursor += static_cast<u32>(l->name.size());
+        } else if (outNameBlob) {
+            row.reserved0 |= bridge::kLayerRowNameBufferFull;
         }
         out[written++] = row;
     }

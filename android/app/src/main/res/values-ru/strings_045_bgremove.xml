@@ -27,4 +27,12 @@
     <string name="bg_remove_o_person">Человек</string>
     <string name="bg_remove_tip_model">«Автоматически» вырезает главный объект и работает на всех устройствах. «Человек» использует системное выделение людей, если оно есть на устройстве; иначе используется «Автоматически».</string>
     <string name="bg_remove_tip_edge">Пересчитывает край в разрешении видео (волосы, тонкие контуры). 0 — простой край.</string>
+    <string name="cutout_analyzing_scene">Анализ сцены</string>
+    <string name="cutout_analyzing_frame">Анализ кадра</string>
+    <string name="cutout_brush">Кисть вырезания</string>
+    <string name="cutout_brush_add">Включить</string>
+    <string name="cutout_brush_subtract">Исключить</string>
+    <string name="cutout_brush_help">Коснитесь объекта, чтобы выбрать его. Закрасьте области, чтобы добавить или убрать их.</string>
+    <string name="cutout_auto_help">Удалите фон автоматически или уточните границы кистью.</string>
+    <string name="cutout_track">Отслеживать объект</string>
 </resources>

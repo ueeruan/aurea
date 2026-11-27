@@ -681,6 +681,7 @@ enum class ParticleShape : u32 {
     Texture,      ///< imagem do projeto (`textureAsset`)
     Mesh,         ///< malha 3D instanciada (`meshSource`)
     Crystal,      ///< faceted luminous shard with a soft halo
+    Money,        ///< built-in instanced banknote mesh
     Count,
 };
 

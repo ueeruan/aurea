@@ -61,7 +61,6 @@ Result<JobPlan> plan_job(const Recipe& recipe, const DeviceProfile& profile, con
     const Recipe r = sanitize(recipe);
     plan.recipe = r;
     const Path want = effective_path(r, profile);
-    const i32 upMode = static_cast<i32>(r.upscaleMode);
     auto step = [&](Step s) -> usize { return static_cast<usize>(s); };
     plan.present[step(Step::Prepare)] = plan.present[step(Step::Encode)] = plan.present[step(Step::Finish)] = true;
     for (Path& p : plan.paths) p = Path::Turbo;
@@ -79,11 +78,16 @@ Result<JobPlan> plan_job(const Recipe& recipe, const DeviceProfile& profile, con
     const f64 srcPerOut = source.fps / (static_cast<f64>(N) * outFps);
     const bool motion = N > 1 || (r.targetFps > 0.0 && srcPerOut < 1.0 - 1e-6);
     u32 outW = 0, outH = 0;
-    plan.resolutionCapped = fit_output(source.width * r.upscale, source.height * r.upscale, caps, outW, outH);
+    const u32 factor = std::max(1u, r.upscale);
+    plan.resolutionCapped = fit_output(source.width * factor, source.height * factor, caps, outW, outH);
     plan.outW = outW;
     plan.outH = outH;
-    const bool upscale = r.upscale > 1 && static_cast<u64>(outW) * outH > static_cast<u64>(source.width) * source.height;
-    if (r.upscale > 1 && !upscale) plan.note += "upscale sem efeito: a fonte ja esta no teto do aparelho; ";
+    const bool upscale = r.upscale != 1;
+    if (r.upscale > 1 && static_cast<u64>(outW) * outH <= static_cast<u64>(source.width) * source.height) {
+        plan.note += r.upscaleMode == UpscaleMode::Enchance
+            ? "AureaEnchance: realce na resolucao permitida pelo aparelho; "
+            : "Aurea Detail: realce na resolucao permitida pelo aparelho; ";
+    }
 
     // --- Caminho de cada etapa -------------------------------------------------
     const bool clean = r.denoise > 0.0f || r.deblock || r.deinterlace != 0;
@@ -94,12 +98,7 @@ Result<JobPlan> plan_job(const Recipe& recipe, const DeviceProfile& profile, con
         if (want != Path::Turbo && r.denoise > 0.0f && !cleanNet) plan.note += "Clean: sem rede neste aparelho, Turbo; ";
     }
     if (r.stabilize) plan.present[step(Step::Stable)] = true;
-    const StageDescriptor* upNet = upscale ? neural_for(registry, StageKind::Upscale, want, upMode, profile) : nullptr;
-    if (upscale) {
-        plan.present[step(Step::Upscale)] = true;
-        plan.paths[step(Step::Upscale)] = upNet ? upNet->path : Path::Turbo;
-        if (want != Path::Turbo && !upNet) plan.note += "Upscale: sem rede para este modo, Turbo; ";
-    }
+    if (upscale) plan.present[step(Step::Upscale)] = true;
     const StageDescriptor* faceNet = nullptr;
     if (r.face) {
         // Rosto não tem Turbo: no Turbo usa a rede mais leve que houver.
@@ -134,10 +133,7 @@ Result<JobPlan> plan_job(const Recipe& recipe, const DeviceProfile& profile, con
     }
     if (r.stabilize) plan.passes.back().renderStable = true;
     if (cleanNet) plan.passes.back().graph.push_back(cleanNet);
-    if (upscale) {
-        if (upNet) plan.passes.back().graph.push_back(upNet);
-        else open_render().renderUpscale = true;
-    }
+    if (upscale) open_render().renderUpscale = true;
     if (faceNet) plan.passes.back().graph.push_back(faceNet);
     if (motion) {
         if (motionNet) plan.passes.back().graph.push_back(motionNet);
@@ -159,8 +155,6 @@ Result<JobPlan> plan_job(const Recipe& recipe, const DeviceProfile& profile, con
         p.muteAudio = plan.muteAudio;
         const f64 s = static_cast<f64>(source.durationUs) / 1e6 * p.slowMotion;
         p.frames = frames_for(s, p.fps);
-        const bool graphUpscale = std::any_of(p.graph.begin(), p.graph.end(),
-                                              [](const StageDescriptor* d) { return d->kind == StageKind::Upscale; });
         if (p.renderUpscale && !upscaled) {
             p.renderW = outW;
             p.renderH = outH;
@@ -172,11 +166,6 @@ Result<JobPlan> plan_job(const Recipe& recipe, const DeviceProfile& profile, con
         }
         p.outW = p.renderW;
         p.outH = p.renderH;
-        if (graphUpscale && !upscaled) {
-            p.outW = outW;
-            p.outH = outH;
-            upscaled = true;
-        }
         srcW = p.outW;
         srcH = p.outH;
         srcFps = p.fps;
@@ -187,14 +176,14 @@ Result<JobPlan> plan_job(const Recipe& recipe, const DeviceProfile& profile, con
 
 namespace {
 
-/// Custo Turbo em "quadros de FSR 1080p" por quadro de saída.
+/// Custo Turbo em quadros medidos no perfil a 1080p.
 f64 turbo_units(const PassPlan& p, const Recipe& r) noexcept {
     const f64 outMp = static_cast<f64>(p.renderW) * p.renderH / 2.0736e6;
     const f64 srcMp = static_cast<f64>(p.sourceW) * p.sourceH / 2.0736e6;
     f64 u = 0.15 * outMp;   // composição + YUV
     if (p.renderClean) u += srcMp * ((p.renderDenoise ? 1.6 * std::max(1.0, 2.0 * r.denoise + 1.0) : 0.0)
                                      + (r.deblock ? 0.25 : 0.0) + (r.deinterlace ? 0.3 : 0.0));
-    if (p.renderUpscale) u += outMp * (r.upscale == 4 ? 1.6 : 1.0) * (r.upscaleMode == UpscaleMode::Anime ? 1.5 : 1.0);
+    if (p.renderUpscale) u += outMp;
     if (p.renderMotion) u += srcMp * 1.4;
     return u;
 }
@@ -224,9 +213,8 @@ Estimate estimate_job(const Recipe& recipe, const DeviceProfile& profile, const 
             const f64 decodeMs = srcFrames * 4.0 * static_cast<f64>(p.sourceW) * p.sourceH / 2.0736e6;
             const f64 encodeMs = frames * 6.0 * static_cast<f64>(p.outW) * p.outH / 2.0736e6;
             ms += decodeMs + encodeMs + frames * turbo_units(p, r) * turboMs;
-            u32 w = p.renderW, h = p.renderH;
             for (const StageDescriptor* d : p.graph) {
-                const f64 mp = static_cast<f64>(w) * h / 1e6;
+                const f64 mp = static_cast<f64>(p.renderW) * p.renderH / 1e6;
                 const f64 perMp = d->msPerMegapixel ? d->msPerMegapixel(profile)
                                 : (profile.liteMsPerTile > 0.0f ? profile.liteMsPerTile : 400.0) / 0.0128;
                 // As etapas antes do Motion só processam os quadros de ORIGEM
@@ -235,8 +223,7 @@ Estimate estimate_job(const Recipe& recipe, const DeviceProfile& profile, const 
                     [](const StageDescriptor* g) { return g->kind == StageKind::Motion; });
                 const f64 stageFrames = d->kind == StageKind::Motion ? frames : (graphMotion ? std::min(frames, srcFrames) : frames);
                 ms += stageFrames * perMp * mp;
-                if (d->kind == StageKind::Upscale) { w = p.outW; h = p.outH; }
-                peak = std::max<u64>(peak, static_cast<u64>(w) * h * 3 / 2 * 8 + (160ull << 20));
+                peak = std::max<u64>(peak, static_cast<u64>(p.renderW) * p.renderH * 3 / 2 * 8 + (160ull << 20));
             }
             // Render: ~8 alvos RGBA16F do tamanho da composição.
             peak = std::max<u64>(peak, static_cast<u64>(p.renderW) * p.renderH * 8 * 8);

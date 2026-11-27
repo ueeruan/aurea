@@ -1,4 +1,5 @@
 #include "GlesInternal.hpp"
+#include <limits>
 
 namespace aurea::gles {
 namespace {
@@ -197,20 +198,39 @@ void Backend::Impl::copy_texture_to_buffer(TextureHandle source, BufferHandle de
     auto* t = find(textures, source.id); auto* b = find(buffers, destination.id);
     if (!t || !b || b->desc.access != MemoryAccess::Readback) { fail(Errc::InvalidArgument, "GLES readback source/target missing"); return; }
     const auto f = format_of(t->desc.format);
-    if (f.type != GL_UNSIGNED_BYTE) { fail(Errc::NotSupported, "GLES asynchronous readback requires byte color planes"); return; }
+    if (f.type != GL_UNSIGNED_BYTE || f.compressed || t->target != GL_TEXTURE_2D) {
+        fail(Errc::NotSupported, "GLES asynchronous readback requires 2D byte color planes"); return;
+    }
     const u32 components = f.external == GL_RED ? 1 : f.external == GL_RG ? 2 : 4;
-    const usize bytes = static_cast<usize>(t->desc.width) * t->desc.height * 4;
+    const u64 required = static_cast<u64>(t->desc.width) * t->desc.height * 4;
+    if (required > static_cast<u64>(std::numeric_limits<GLsizeiptr>::max())) {
+        fail(Errc::OutOfMemory, "GLES readback buffer exceeds addressable size"); return;
+    }
+    const auto bytes = static_cast<usize>(required);
     if (b->desc.bytes < bytes / 4 * components) { fail(Errc::OutOfRange, "GLES readback buffer too small"); return; }
-    glBindBuffer(GL_PIXEL_PACK_BUFFER, b->id);
-    if (b->gpuBytes < bytes) { glBufferData(GL_PIXEL_PACK_BUFFER, bytes, nullptr, GL_STREAM_READ); bytesBuffers += bytes - b->gpuBytes; b->gpuBytes = bytes; }
     glBindFramebuffer(GL_READ_FRAMEBUFFER, readFramebuffer); attach(GL_READ_FRAMEBUFFER, t, nullptr);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1); glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+    if (!frameStatus.ok()) return;
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, b->id);
+    if (b->gpuBytes < bytes) {
+        glBufferData(GL_PIXEL_PACK_BUFFER, bytes, nullptr, GL_STREAM_READ);
+        if (!check("allocate GLES pixel pack buffer").ok()) {
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+            return;
+        }
+        bytesBuffers += bytes - b->gpuBytes;
+        b->gpuBytes = bytes;
+    }
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
+    glPixelStorei(GL_PACK_SKIP_ROWS, 0);
     // RGBA/UNSIGNED_BYTE is the portable ES read format for normalized targets;
     // map_buffer packs R8/RG8 into the stable CPU pointer held by the encoder.
     glReadPixels(0, 0, t->desc.width, t->desc.height, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    if (!check("copy_texture_to_buffer").ok()) return;
     b->readWidth = t->desc.width; b->readHeight = t->desc.height; b->readComponents = components;
-    b->rgbaReadback = true; b->pendingRead = true; glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-    (void)check("copy_texture_to_buffer");
+    b->rgbaReadback = true; b->pendingRead = true;
 }
 void Backend::Impl::begin_timer(const char* label) noexcept {
     if (!caps.timestampQueries || !settings.enableGpuTimers || !current) return;

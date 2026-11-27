@@ -6,6 +6,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
@@ -29,6 +30,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import com.aurea.aurea.editor.panels.EditorPanel
+import com.aurea.aurea.editor.panels.TrackingStageProgress
 import com.aurea.aurea.ui.i18n.AppText
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
@@ -99,8 +101,7 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
     val haptic = LocalHapticFeedback.current
     val insetPx = 0f
     // Pontos do rastreio de câmera no vídeo (painel de Rastreio aberto).
-    val showTrack = ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Tracking
-    val showCamera = showTrack && store.cameraTrackerVisible
+    val showCamera = ui.panel == EditorPanel.CameraTracking
     // O cabeçote só é lido com o rastreio de câmera à mostra: lido aqui, o palco
     // inteiro recompunha a cada quadro tocando.
     if (showCamera) CameraTrackFollower(store) else androidx.compose.runtime.LaunchedEffect(store.cameraTrack, store.primary) { store.refreshCameraFeatures(false) }
@@ -132,7 +133,7 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         // cima dos gestos do palco (ColorStage.kt); sem pedido, não põe nada.
         if (!store.rawPlayback) com.aurea.aurea.editor.panels.ColorStageOverlay(store, mapper)
         if (showCamera && store.cameraFeatures != null && store.pointPick == null) {
-            Spacer(Modifier.fillMaxSize().pointerInput(store, showTrack) {
+            Spacer(Modifier.fillMaxSize().pointerInput(store) {
                 detectTapGestures(
                     onTap = { point -> store.selectCameraPoint(mapper.cx(point.x), mapper.cy(point.y), 24.dp.toPx() / mapper.fit) },
                     onLongPress = { point ->
@@ -140,7 +141,7 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
                         store.cameraContextMenu = true
                     },
                 )
-            }.pointerInput(store, showTrack) {
+            }.pointerInput(store) {
                 detectDragGestures(onDragStart = { point ->
                     store.pause()
                     store.cameraSelectionFrame = store.playhead.toLong()
@@ -185,6 +186,12 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         VectorToolBanner(store, Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp, start = 8.dp, end = 8.dp))
         RigModeBar(store, Modifier.align(Alignment.TopCenter).padding(top = 8.dp, start = 8.dp, end = 8.dp))
         PreviewBufferBadge(store, Modifier.align(Alignment.BottomCenter).padding(horizontal = 12.dp, vertical = 8.dp))
+        if (!store.rawPlayback && !ui.fullscreen) {
+            Column(Modifier.align(Alignment.TopCenter).padding(horizontal = 8.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                TrackingStageProgress(store)
+                CutoutStageStatus(store, Modifier)
+            }
+        }
         // Omega chrome (área 02, P1-2): o botão de modo zoom do canvas e o
         // rótulo "NN%" no canto sup-esq (o chip "250 %" saiu: o 100 % mora no
         // número da coluna de modos).
@@ -597,21 +604,31 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
         }
         val arm = store.cameraPointSize.dp.toPx()
         val w = 1.2.dp.toPx()
+        val outlines = Path()
+        val selectedPoints = Path()
+        val solvedPoints = Path()
+        val rejectedPoints = Path()
+        fun cross(path: Path, x: Float, y: Float, radius: Float) {
+            path.moveTo(x - radius, y); path.lineTo(x + radius, y)
+            path.moveTo(x, y - radius); path.lineTo(x, y + radius)
+        }
         var k = 0
         while (k + 5 < f.size) {
             if (store.cameraGoodPointsOnly && f[k + 2] < 0.4f) { k += 6; continue }
-            val c = Offset(m.sx(f[k]), m.sy(f[k + 1]))
+            val x = m.sx(f[k]); val y = m.sy(f[k + 1])
             val r = store.cameraSelection
             val selected = f[k + 4] > 0.5f || (r != null && f[k] >= min(r[0],r[2]) && f[k] <= max(r[0],r[2]) && f[k+1] >= min(r[1],r[3]) && f[k+1] <= max(r[1],r[3]))
-            val col = if (selected) Color.Green else if (f[k + 2] > 0.5f) TrackSolved else TrackRejected
-            drawLine(Color.Black.copy(alpha = 0.5f), Offset(c.x - arm - 1, c.y), Offset(c.x + arm + 1, c.y), w + 1.5f)
-            drawLine(Color.Black.copy(alpha = 0.5f), Offset(c.x, c.y - arm - 1), Offset(c.x, c.y + arm + 1), w + 1.5f)
-            drawLine(col, Offset(c.x - arm, c.y), Offset(c.x + arm, c.y), w)
-            drawLine(col, Offset(c.x, c.y - arm), Offset(c.x, c.y + arm), w)
+            cross(outlines, x, y, arm + 1)
+            cross(if (selected) selectedPoints else if (f[k + 2] > 0.5f) solvedPoints else rejectedPoints, x, y, arm)
             k += 6
         }
+        drawPath(outlines, Color.Black.copy(alpha = .5f), style = Stroke(w + 1.5f))
+        val markerStroke = Stroke(w)
+        drawPath(rejectedPoints, TrackRejected, style = markerStroke)
+        drawPath(solvedPoints, TrackSolved, style = markerStroke)
+        drawPath(selectedPoints, Color.Green, style = markerStroke)
     }
-    if (ui.panel == EditorPanel.Tracking && !store.cameraTrackerVisible) {
+    if (ui.panel == EditorPanel.Tracking) {
         store.motionTrail()?.let { trail ->
             val previous = arrayOfNulls<Offset>(4)
             for (i in trail.indices step 4) {
@@ -722,7 +739,7 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     }
     // Setas XYZ e trackball: só no editor de cena 3D (têm prioridade no toque).
     if (store.gizmoAxes) store.gizmo?.let { if (!drawTrackball(store, m)) drawGizmo(m, it, store.gizmoTool) }
-    if (!chrome || store.pointPick != null || ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Tracking) return
+    if (!chrome || store.pointPick != null || ui.panel == EditorPanel.Tracking || ui.panel == EditorPanel.CameraTracking) return
     val anchor = m.scratch
     val gizmo = store.gizmo
     if (gizmo != null) { anchor[0] = gizmo[0]; anchor[1] = gizmo[1] }

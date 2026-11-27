@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
     #include <android/hardware_buffer.h>
@@ -1476,9 +1477,15 @@ Status Backend::read_texture(TextureHandle src, void* outData, u32 bytesPerRow) 
     if (!recordingStatus_.ok()) return recordingStatus_;
     Texture* t = textures_.get(src.id);
     if (!t || !outData) return Errc::InvalidArgument;
+    if (t->desc.is_depth() || is_block_compressed(t->desc.format) || t->desc.sampleCount != 1
+        || t->desc.depth != 1 || !(usage_for(t->desc) & VK_IMAGE_USAGE_TRANSFER_SRC_BIT))
+        return Status{Errc::UnsupportedFormat, "Vulkan texture is not a readable color target"};
     const u32 bpp = texel_bytes(t->format);
     const u32 w = t->desc.width, h = t->desc.height;
     const u32 rowBytes = w * bpp;
+    const u32 pitch = bytesPerRow ? bytesPerRow : rowBytes;
+    if (pitch < rowBytes || static_cast<u64>(h) * pitch > std::numeric_limits<usize>::max())
+        return Status{Errc::OutOfRange, "Vulkan readback stride"};
     const VkDeviceSize total = static_cast<VkDeviceSize>(rowBytes) * h;
 
     collect_immediate();
@@ -1492,7 +1499,7 @@ Status Backend::read_texture(TextureHandle src, void* outData, u32 bytesPerRow) 
     Buffer* b = buffers_.get(readback->id);
 
     struct Ctx { Texture* t; VkBuffer buf; u32 w, h; } ctx{t, b->buffer, w, h};
-    const Status st = submit_immediate([](Backend& be, VkCommandBuffer cmd, void* p) {
+    Status st = submit_immediate([](Backend& be, VkCommandBuffer cmd, void* p) {
         auto* c = static_cast<Ctx*>(p);
         const ResourceState before = c->t->state;
         be.transition(cmd, *c->t, ResourceState::TransferSrc, false);
@@ -1500,12 +1507,20 @@ Status Backend::read_texture(TextureHandle src, void* outData, u32 bytesPerRow) 
         region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         region.imageExtent = {c->w, c->h, 1};
         be.device_dispatch().vkCmdCopyImageToBuffer(cmd, c->t->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, c->buf, 1, &region);
+        VkBufferMemoryBarrier visible{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+        visible.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        visible.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+        visible.srcQueueFamilyIndex = visible.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        visible.buffer = c->buf;
+        visible.size = VK_WHOLE_SIZE;
+        be.device_dispatch().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &visible, 0, nullptr);
         if (before != ResourceState::Undefined) be.transition(cmd, *c->t, before, false);
     }, &ctx);
     if (st.ok()) {
         void* mapped = nullptr;
-        if (map_buffer(*readback, mapped).ok()) {
-            const u32 pitch = bytesPerRow ? bytesPerRow : rowBytes;
+        st = map_buffer(*readback, mapped);
+        if (st.ok()) {
             for (u32 y = 0; y < h; ++y) {
                 std::memcpy(static_cast<u8*>(outData) + static_cast<usize>(y) * pitch,
                             static_cast<const u8*>(mapped) + static_cast<usize>(y) * rowBytes, rowBytes);

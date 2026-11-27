@@ -56,7 +56,7 @@ public:
     /// Chave do pedido (o par de quadros e o instante).
     [[nodiscard]] static u64 key_of(u64 pairKey, f32 t) noexcept;
 
-    /// Os quadros servem para a rede (NV12 na CPU, sem rotação)?
+    /// Quadros de 8 bits em NV12, NV21 ou YUV420P na CPU, sem rotação.
     [[nodiscard]] static bool supported(DecodedFrame& a, DecodedFrame& b) noexcept;
 
     /// Síncrono (export). Falso = sem rede (o chamador usa o fluxo da GPU).

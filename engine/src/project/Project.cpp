@@ -2,6 +2,7 @@
 #include "aurea/project/Serialization.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
+#include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/media/SourceWindow.hpp"
 
 #include <algorithm>
@@ -104,6 +105,10 @@ void collect_layer_assets(const Layer& l, std::vector<AssetId>& used) {
     if (l.kind == LayerKind::Text && l.text.texture.kind == kTextTextureImage && l.text.texture.image != 0)
         used.push_back(AssetId::unpack(l.text.texture.image));
     for (const auto& effect : l.effects) {
+        if (effect_keys::is_color_grade(effect.type) && effect.params.size() > effect_keys::kColorGradeLutParam) {
+            const auto id = AssetId::unpack(effect.params[effect_keys::kColorGradeLutParam].constant.ref);
+            if (id.valid()) used.push_back(id);
+        }
         if (effect.type == effect_type_id("aurea.color.cube_lut") && !effect.params.empty()) {
             const auto id = AssetId::unpack(effect.params[0].constant.ref);
             if (id.valid()) used.push_back(id);

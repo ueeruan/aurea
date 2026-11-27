@@ -1,6 +1,7 @@
 package com.aurea.aurea.editor
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaExtractor
@@ -16,6 +17,8 @@ import com.aurea.aurea.engine.PodLayout
 import com.aurea.aurea.engine.LayerEffect
 import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.editor.panels.effectTypeId
+import com.aurea.aurea.presets.PresetKind
+import com.aurea.aurea.presets.PresetLibrary
 import com.aurea.aurea.state.Shape3DCatalog
 import com.aurea.aurea.state.Shape3DInfo
 import org.junit.After
@@ -239,6 +242,221 @@ class AstraExportDeviceTest {
         assertEquals(1, engine.submitCommands())
         assertEquals(0, engine.saveProject(File(folder, "portable-imported-video.aurea").absolutePath))
         export("portable-imported-video", 60, 320, 180, true, safeMode = 2)
+    }
+
+    @Test fun importsColorLooksAndRendersEachPreset() {
+        val input = File(context.filesDir, "color-studio-input")
+        org.junit.Assume.assumeTrue(input.isDirectory)
+        val source = File(input, "original.jpg")
+        val image = checkNotNull(BitmapFactory.decodeFile(source.absolutePath))
+        val width = image.width
+        val height = image.height
+        val imagePixels = ByteBuffer.allocateDirect(width * height * 4)
+        val row = IntArray(width)
+        for (y in 0 until height) {
+            image.getPixels(row, 0, width, 0, y, width, 1)
+            for (pixel in row) {
+                imagePixels.put((pixel shr 16).toByte()).put((pixel shr 8).toByte())
+                    .put(pixel.toByte()).put((pixel ushr 24).toByte())
+            }
+        }
+        image.recycle()
+        val output = File(folder, "color-studio").apply { mkdirs() }
+        fun capture(name: String? = null): ByteArray {
+            val buffer = ByteBuffer.allocateDirect(width * height * 4)
+            val dimensions = IntArray(2)
+            assertEquals(buffer.capacity(), engine.captureFrame(maxOf(width, height), buffer, dimensions))
+            assertArrayEquals(intArrayOf(width, height), dimensions)
+            buffer.rewind()
+            if (name != null) {
+                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                bitmap.copyPixelsFromBuffer(buffer)
+                File(output, "$name.png").outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                bitmap.recycle()
+                buffer.rewind()
+            }
+            return ByteArray(buffer.capacity()).also { buffer.get(it) }
+        }
+        val galleryNames = linkedMapOf(
+            "4K QUALITY CC" to "Pulso Cromático",
+            "DARK CC" to "Sombra Fria",
+            "HDR CC" to "Luz de Estádio",
+            "Lapis CC" to "Azul Mineral",
+        )
+        val galleryPresets = mutableListOf<Pair<String, String>>()
+        fun importPortrait(): Long {
+            scene(30, width, height)
+            imagePixels.rewind()
+            val layer = engine.importImage(imagePixels, width, height, "Retrato", source.absolutePath)
+            assertTrue(layer > 0)
+            return layer
+        }
+        for ((preset, galleryName) in galleryNames) {
+            val layer = importPortrait()
+            val original = capture("Original")
+            val file = File(input, "$preset.ffx")
+            val report = org.json.JSONObject(engine.importAeData(file.readBytes(), file.name, layer))
+            File(output, "$preset.json").writeText(report.toString(2))
+            assertTrue(report.toString(), report.getBoolean("ok"))
+            val rows = ByteBuffer.allocateDirect(32 * LayerEffect.ROW_BYTES).order(ByteOrder.nativeOrder())
+            val names = ByteBuffer.allocateDirect(16384)
+            val count = engine.queryLayerEffects(layer, rows, 32, names)
+            val stack = (0 until count).map { LayerEffect.read(rows, it, names) }
+            val looks = stack.filter { it.typeId == effectTypeId("aurea.color.studio_look") }
+            assertTrue(report.toString(), looks.any { it.enabled })
+            val result = capture(preset)
+            assertFalse(preset, result.contentEquals(original))
+            if (preset == "4K QUALITY CC" || preset == "HDR CC") {
+                val project = File(output, "$preset.aurea")
+                assertTrue(looks.any { engine.colorLutName(layer, it.effectId).endsWith(".cube") })
+                assertEquals(0, engine.saveProject(project.absolutePath))
+                assertEquals(0, engine.loadProject(project.absolutePath))
+                assertTrue(looks.any { engine.colorLutName(layer, it.effectId).endsWith(".cube") })
+            }
+            engine.beginCommandBatch()
+            val batch = CommandBatch(engine)
+            for (look in looks) assertTrue(batch.setEffectEnabled(layer, look.effectId, false))
+            assertEquals(looks.size, engine.submitCommands())
+            assertFalse(preset, capture().contentEquals(result))
+            engine.beginCommandBatch()
+            val isolate = CommandBatch(engine)
+            for (entry in stack) {
+                val queued = if (entry in looks) isolate.setEffectEnabled(layer, entry.effectId, entry.enabled)
+                    else isolate.removeEffect(layer, entry.effectId)
+                assertTrue(queued)
+            }
+            assertEquals(stack.size, engine.submitCommands())
+            val lookRender = capture("$preset-looks")
+            assertFalse(preset, lookRender.contentEquals(original))
+            val portable = checkNotNull(engine.savePreset(layer, PresetKind.Effects.id, galleryName))
+            val embeddedLut = org.json.JSONObject(portable).optJSONArray("colorLuts")
+            if (preset in setOf("4K QUALITY CC", "HDR CC")) {
+                assertEquals(1, embeddedLut?.length())
+                val single = checkNotNull(engine.saveEffectPreset(layer, looks.first().effectId, galleryName))
+                assertEquals(1, org.json.JSONObject(single).optJSONArray("colorLuts")?.length())
+            }
+            val destination = importPortrait()
+            assertNull(engine.applyPreset(destination, portable))
+            assertTrue("$galleryName changed when reapplied", capture().contentEquals(lookRender))
+            galleryPresets.add(galleryName to portable)
+        }
+        if (InstrumentationRegistry.getArguments().getString("aureaSeedColorGallery") == "true") {
+            val library = PresetLibrary(context.applicationContext as android.app.Application)
+            for ((name, json) in galleryPresets) {
+                if (library.exists(PresetKind.Effects, name)) {
+                    val entry = library.entries(PresetKind.Effects).first { !it.builtin && it.name == name }
+                    assertEquals(library.jsonOf(entry), json)
+                } else {
+                    assertNotNull(library.save(PresetKind.Effects, name, json))
+                }
+            }
+        }
+    }
+
+    @Test fun importKeepsOtherEffectsWhenALookRecipeIsIncomplete() {
+        val fixture = File(context.filesDir, "color-studio-input/DARK CC.ffx")
+        org.junit.Assume.assumeTrue(fixture.isFile)
+        val source = fixture.readBytes()
+        val signature = "MBL2".toByteArray(Charsets.US_ASCII)
+        val start = (0..source.size - signature.size).first { i -> signature.indices.all { source[i + it] == signature[it] } }
+        val raw = ByteBuffer.wrap(source).order(ByteOrder.BIG_ENDIAN)
+        fun record(tag: String, tool: String? = null): Int {
+            var cursor = start + 8
+            while (cursor + 8 <= source.size) {
+                val kind = source.decodeToString(cursor, cursor + 4)
+                val length = raw.getInt(cursor + 4)
+                check(length in 0..(source.size - cursor - 8))
+                if (kind == tag && (tool == null || (length >= 4 &&
+                            source.decodeToString(cursor + 8, cursor + 12) == tool))) return cursor
+                cursor += 8 + length
+            }
+            error("Missing fixture record $tag")
+        }
+        fun patch(at: Int, value: Int) = source.copyOf().also { ByteBuffer.wrap(it).putInt(at, value) }
+        fun apply(data: ByteArray): org.json.JSONObject {
+            scene(10, 32, 32)
+            val pixels = ByteBuffer.allocateDirect(4).putInt(-1).apply { rewind() }
+            val layer = engine.importImage(pixels, 1, 1, "Fixture", "")
+            assertTrue(layer > 0)
+            val report = org.json.JSONObject(engine.importAeData(data, fixture.name, layer))
+            assertTrue(report.toString(), report.getBoolean("ok"))
+            return report
+        }
+        fun skips(report: org.json.JSONObject): List<org.json.JSONObject> {
+            val items = report.getJSONArray("skipped")
+            return (0 until items.length()).map(items::getJSONObject)
+        }
+        val expected = apply(source).getInt("effects")
+        assertEquals(expected, apply(patch(start + 4, 999)).getInt("effects"))
+        val unsupportedTool = apply(patch(record("tool", "husa") + 8, 0x6e657721)) // "new!"
+        assertEquals(expected, unsupportedTool.getInt("effects"))
+        assertTrue(skips(unsupportedTool).any { it.optString("name").endsWith("new!") })
+
+        for ((at, value) in listOf(
+            record("#tls") + 8 to 0,
+            record("Tstr") + 8 to 1024,
+            record("strn") + 4 to Int.MAX_VALUE,
+            record("strn") + 8 to 0x7ff80000,
+        )) {
+            val report = apply(patch(at, value))
+            assertEquals(report.toString(), expected - 1, report.getInt("effects"))
+            assertTrue(skips(report).any { it.optString("reasonKey") == "ae_reason_looks_invalid" })
+        }
+    }
+
+    @Test fun dynamicTurbulenceUsesTheReferenceEffectAndPinsNegativeDisplacement() {
+        val width = 256
+        val height = 144
+        scene(60, width, height)
+        val colors = intArrayOf(0xffffff, 0xffff00, 0x00ffff, 0x00ff00, 0xff00ff, 0xff0000, 0x0000ff, 0)
+        val source = ByteBuffer.allocateDirect(width * height * 4)
+        for (y in 0 until height) for (x in 0 until width) {
+            val color = colors[x * colors.size / width]
+            source.put((color shr 16).toByte()).put((color shr 8).toByte()).put(color.toByte()).put((-1).toByte())
+        }
+        source.rewind()
+        val layer = engine.importImage(source, width, height, "Turbulent Displace bars", "")
+        assertTrue(layer > 0)
+        fun capture(): ByteArray {
+            val pixels = ByteBuffer.allocateDirect(width * height * 4)
+            assertEquals(pixels.capacity(), engine.captureFrame(width, pixels, IntArray(2)))
+            return ByteArray(pixels.capacity()).also { pixels.rewind(); pixels.get(it) }
+        }
+        val original = capture()
+        val presets = org.json.JSONArray(context.assets.open("presets/efeitos.json").bufferedReader().use { it.readText() })
+        val preset = (0 until presets.length()).map(presets::getJSONObject).single {
+            it.getString("name").startsWith("Preset Turbul")
+        }
+        val presetEffect = preset.getJSONArray("effects").getJSONObject(0)
+        assertEquals("evolution", presetEffect.getJSONArray("tracks").getJSONObject(0).getString("param"))
+        engine.applyPreset(layer, preset.toString())
+        val rows = ByteBuffer.allocateDirect(LayerEffect.ROW_BYTES).order(ByteOrder.nativeOrder())
+        val names = ByteBuffer.allocateDirect(1024)
+        assertEquals(1, engine.queryLayerEffects(layer, rows, 1, names))
+        val effect = LayerEffect.read(rows, 0, names)
+        assertEquals(effectTypeId("aurea.distort.turbulent_displace_reference"), effect.typeId)
+
+        fun pins(mode: Float) {
+            engine.beginCommandBatch()
+            val commands = CommandBatch(engine)
+            assertTrue(commands.setEffectParam(layer, effect.effectId, 1, -180f))
+            assertTrue(commands.setEffectParam(layer, effect.effectId, 2, 65f))
+            assertTrue(commands.setEffectParam(layer, effect.effectId, 9, mode))
+            assertEquals(3, engine.submitCommands())
+        }
+        fun changedEdge(pixels: ByteArray): Int = (0 until width).count { x ->
+            (0..2).any { offset ->
+                val i = x * 4 + offset
+                kotlin.math.abs((original[i].toInt() and 255) - (pixels[i].toInt() and 255)) > 2
+            }
+        }
+        pins(0f)
+        val free = capture()
+        pins(8f)
+        val locked = capture()
+        assertTrue("An unpinned edge should move", changedEdge(free) > 20)
+        assertEquals("Negative amount must preserve the locked edge", 0, changedEdge(locked))
+        assertFalse("Locking the edge must still distort the interior", original.contentEquals(locked))
     }
 
     @Test fun faceRigDoesNotPaintDarkBandsFromTransparentSkinSamples() {
@@ -586,6 +804,32 @@ class AstraExportDeviceTest {
         assertEquals(0, engine.loadProject(project.absolutePath))
         assertFalse(edgeOn.contentEquals(capture()))
     }
+    @Test fun cameraMotionBlurKeepsShadowsOnStationaryModels() {
+        val frames = 12
+        val width = 960
+        val height = 540
+        scene(frames, width, height)
+        val models = (0 until 24).map { engine.addShape3d(it % 3, "Stationary model $it").also { id -> assertTrue(id > 0) } }
+        val camera = engine.addCamera()
+        val light = engine.addLight(0)
+        assertTrue(camera > 0 && light > 0)
+        engine.beginCommandBatch()
+        val commands = CommandBatch(engine)
+        models.forEachIndexed { index, model ->
+            assertTrue(commands.setLayerTimeRange(model, 0, frames))
+            assertTrue(commands.setScale(model, .24f, .24f, .24f))
+            assertTrue(commands.setPosition(model, 185f + index % 6 * 115f, 110f + index / 6 * 100f, 0f))
+        }
+        assertTrue(commands.setLayerTimeRange(camera, 0, frames))
+        assertTrue(commands.setLayerTimeRange(light, 0, frames))
+        assertTrue(commands.insertKeyframe(camera, TrackProperty.POSITION_X, -1, 0, 0, 375f))
+        assertTrue(commands.insertKeyframe(camera, TrackProperty.POSITION_X, -1, 0, frames - 1, 585f))
+        assertTrue(engine.submitCommands() > 0)
+        models.forEach { assertTrue(engine.setMotionBlur(it, true)) }
+        assertTrue(engine.setMotionBlurSettings(MotionBlurSettings(true, 270f, -135f, 16, 16, 4)))
+        export("stationary-models-camera-motion-blur", frames, width, height, false)
+    }
+
     @Test fun heavy3DParticlesTextAndMotionBlurRemainAnimated() {
         scene(60, 960, 540)
         val models = (0 until 24).map { engine.addShape3d(it % 3, "Mesh $it").also { id -> assertTrue(id > 0) } }

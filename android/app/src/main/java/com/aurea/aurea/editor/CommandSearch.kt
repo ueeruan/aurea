@@ -215,7 +215,7 @@ private fun executeEditorCommand(id: String, store: EditorStore, ui: EditorUi) {
         "text" -> if (store.text3d != null) store.openTextContentEditor() else panel(EditorPanel.Text)
         "effects" -> panel(EditorPanel.Effects)
         "appearance" -> panel(EditorPanel.Appearance)
-        "tracking" -> panel(EditorPanel.Tracking)
+        "tracking" -> com.aurea.aurea.editor.panels.openEffectTool(store, ::panel, com.aurea.aurea.effects.EffectTool.Tracking)
         "environment" -> panel(EditorPanel.Element3D)
         "particles" -> panel(EditorPanel.Particles)
         "vector" -> panel(EditorPanel.VectorPaths)

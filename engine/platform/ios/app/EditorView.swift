@@ -529,8 +529,8 @@ private struct ModelOptimizePrompt: ViewModifier {
                 .overlay { if !model.fullscreen && !model.rawPlayback { OmegaContentStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { RealCameraStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { Shape3DPartOverlay() } }
-            if model.panel == .tracking && model.cameraTrackerVisible && !model.cameraFeatures.isEmpty && model.pointPick == nil { CameraTrackingOverlay() }
-            if model.panel == .tracking && !model.cameraTrackerVisible && model.pointPick == nil {
+            if model.panel == .cameraTracking && !model.cameraFeatures.isEmpty && model.pointPick == nil { CameraTrackingOverlay() }
+            if model.panel == .tracking && model.pointPick == nil {
                 MotionSurfaceOverlay()
             }
             if let layer = model.selectedLayer, model.selection.count == 1, layer.locked {
@@ -540,6 +540,10 @@ private struct ModelOptimizePrompt: ViewModifier {
             }
             if !model.fullscreen && !model.rawPlayback {
                 RigModeBar().padding(.top, 8).padding(.horizontal, 8).frame(maxHeight: .infinity, alignment: .top)
+                VStack(spacing: 6) {
+                    TrackerStageProgress()
+                    CutoutStageStatus()
+                }.padding(.top, 8).padding(.horizontal, 8).frame(maxHeight: .infinity, alignment: .top)
             }
             if model.panel == .vector && (model.vectorFreehand || model.vectorEditingPoints) {
                 ShellStageBanner(label: vectorHint, button: AureaText.t("editor_concluir")) {
@@ -1157,7 +1161,9 @@ struct ContextSheet: View {
             case .particles:
                 ParticlesPanel()
             case .tracking:
-                TrackingPanel()
+                MotionTrackerPanel()
+            case .cameraTracking:
+                CameraTrackerPanel()
             case .captions:
                 CaptionsPanel()
             case .vector:
@@ -1921,6 +1927,8 @@ private struct AddLayerSheet: View {
                         } else {
                         card("model_library_3d", glyph: CupertinoGlyph.Cube, accent: true) { modelLibrary = true }
                             .accessibilityIdentifier("add.model3d.library")
+                        card("fx3d_name_money", glyph: CupertinoGlyph.Sparkles, color: ShellColors.text3D) { model.addParticles(19); close() }
+                            .accessibilityIdentifier("add.model3d.money")
                         cardBody("shape3d_title", action: { shapes3D = true }) { Shape3DGlyph(kind: 0).frame(width: 30, height: 30) }
                         card("scene_workspace", glyph: CupertinoGlyph.Cube, accent: true) { close(); model.enterSceneEditor() }
                         card("sh_add_model_3d", glyph: CupertinoGlyph.Cube, accent: true) { files(.model) }
@@ -3695,16 +3703,26 @@ private struct ShellAddCategoryDialog: View {
                     for i in stride(from: 2, to: ring.count-1, by: 2) { target.addLine(to: CGPoint(x: CGFloat(ring[i])*fit+ox, y: CGFloat(ring[i+1])*fit+oy)) }
                     target.closeSubpath(); context.fill(target, with: .color(.green.opacity(0.15))); context.stroke(target, with: .color(.green), lineWidth: 2)
                 }
+                var selectedPoints = Path()
+                var solvedPoints = Path()
+                var rejectedPoints = Path()
+                let arm = CGFloat(model.cameraPointSize)
+                func cross(_ path: inout Path, _ x: CGFloat, _ y: CGFloat) {
+                    path.move(to: CGPoint(x: x - arm, y: y)); path.addLine(to: CGPoint(x: x + arm, y: y))
+                    path.move(to: CGPoint(x: x, y: y - arm)); path.addLine(to: CGPoint(x: x, y: y + arm))
+                }
                 for i in stride(from: 0, to: points.count - points.count % 6, by: 6) {
                     if model.cameraGoodPointsOnly && points[i+2] < 0.4 { continue }
                     let point = CGPoint(x: CGFloat(points[i]), y: CGFloat(points[i + 1]))
                     let x = point.x * fit + ox, y = point.y * fit + oy
-                    let arm = CGFloat(model.cameraPointSize)
-                    var path = Path(); path.move(to: CGPoint(x: x-arm, y: y)); path.addLine(to: CGPoint(x: x+arm, y: y))
-                    path.move(to: CGPoint(x: x, y: y-arm)); path.addLine(to: CGPoint(x: x, y: y+arm))
                     let selected = points[i+4] > 0.5 || model.cameraSelection?.contains(point) == true
-                    context.stroke(path, with: .color(selected ? .green : points[i + 2] > 0.5 ? .yellow : .red), lineWidth: 2)
+                    if selected { cross(&selectedPoints, x, y) }
+                    else if points[i + 2] > 0.5 { cross(&solvedPoints, x, y) }
+                    else { cross(&rejectedPoints, x, y) }
                 }
+                context.stroke(rejectedPoints, with: .color(.red), lineWidth: 2)
+                context.stroke(solvedPoints, with: .color(.yellow), lineWidth: 2)
+                context.stroke(selectedPoints, with: .color(.green), lineWidth: 2)
                 if let r = model.cameraSelection {
                     let box = CGRect(x: r.minX * fit + ox, y: r.minY * fit + oy, width: r.width * fit, height: r.height * fit)
                     context.stroke(Path(box), with: .color(.green), lineWidth: 1)

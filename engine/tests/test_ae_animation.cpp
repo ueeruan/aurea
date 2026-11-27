@@ -170,6 +170,7 @@ AUREA_TEST(AeAnimation, SourceTextEngineCommandsAreUndoable) {
     const auto added = r.e.add_text("AB");
     if (!added.ok()) { std::printf("(sem fonte no host: pulado) "); return; }
     const u64 id = *added;
+    AUREA_CHECK(r.L(id)->name == "AB");
     r.L(id)->end = FrameIndex{60};
     r.seek(0);
     AUREA_CHECK_EQ(r.e.add_text_source_key(id), i64{0});
@@ -178,6 +179,7 @@ AUREA_TEST(AeAnimation, SourceTextEngineCommandsAreUndoable) {
     // Com keys, editar o texto no cabeçote cria o key ali (cronômetro do AE).
     r.seek(10);
     r.set_text(id, "XYZ");
+    AUREA_CHECK(r.L(id)->name == "XYZ");
     AUREA_CHECK_EQ(r.e.query_text_source_keys(id, frames, 8), 2u);
     AUREA_CHECK_EQ(frames[1], i64{10});
     r.seek(5);
@@ -200,9 +202,11 @@ AUREA_TEST(AeAnimation, SourceTextEngineCommandsAreUndoable) {
     AUREA_CHECK_EQ(nav.visibleCount, 2u);
     // Trocar o conteúdo do key; desfazer volta.
     AUREA_CHECK(r.e.set_text_source_key(id, 10, "Q"));
+    AUREA_CHECK(r.L(id)->name == "Q");
     std::string content;
     AUREA_CHECK(r.e.text_source_key_content(id, 10, content) && content == "Q");
     r.undo();
+    AUREA_CHECK(r.L(id)->name == "XYZ");
     AUREA_CHECK(r.e.text_source_key_content(id, 10, content) && content == "XYZ");
     // Mover pelo comando de keyframe da timeline (um passo de desfazer).
     Command mv;
@@ -233,6 +237,30 @@ AUREA_TEST(AeAnimation, SourceTextEngineCommandsAreUndoable) {
     AUREA_CHECK(r.L(id)->text.sourceExpression != nullptr);
     AUREA_CHECK(r.L(id)->tracks.find(TrackProperty::TextSource) == nullptr);
     std::printf("keys: auto-key ao editar, mover/trocar/apagar com desfazer, trilha congelada na timeline; ");
+}
+
+AUREA_TEST(AeAnimation, TextLabelsPreserveCustomNamesAndDuplicateSourceUnicode) {
+    Rig r;
+    AUREA_CHECK(r.ok);
+    if (!r.ok) return;
+    // Exercise a layer from an older project that still has a generated label.
+    const LayerId id = r.comp()->add_layer(LayerKind::Text, "Text copy 12");
+    r.set_text(id.pack(), "Café 🚀");
+    AUREA_CHECK(r.L(id.pack())->name == "Café 🚀");
+    const LayerId copy = r.comp()->duplicate_layer(id, FrameIndex{0});
+    AUREA_CHECK(copy.valid());
+    if (!copy.valid()) return;
+    AUREA_CHECK(r.L(copy.pack())->name == "Café 🚀");
+    Command name;
+    name.type = CommandType::LayerSetName;
+    name.layer_ref.layer = copy;
+    AUREA_CHECK(r.e.apply_command(name, "Título principal").ok());
+    r.set_text(copy.pack(), "Novo texto");
+    AUREA_CHECK(r.L(copy.pack())->name == "Título principal");
+    bridge::LayerRow rows[2];
+    char tinyNames[4];
+    AUREA_CHECK_EQ(r.e.query_layers(rows, 2, tinyNames, 4), 2u);
+    AUREA_CHECK(rows[0].reserved0 & bridge::kLayerRowNameBufferFull);
 }
 
 // -----------------------------------------------------------------------------

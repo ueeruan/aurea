@@ -155,6 +155,7 @@ public:
     [[nodiscard]] SamplerHandle sampler(CommonSampler s) const noexcept;
     /// Actual backend limit, also bounded by the common sampler request.
     [[nodiscard]] f32 max_sampler_anisotropy() const noexcept;
+    [[nodiscard]] bool supports_rgba16f_storage() const noexcept;
 
     /// Devolve (ou cria) o pipeline. Falha é registrada e o chamador pula o
     /// passe — nunca se desenha com pipeline inválido.

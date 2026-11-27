@@ -59,6 +59,7 @@ internal object PodLayout {
     const val LAYER_OFF_TRACK_ID = 64
     /** u32 `reserved0`; nas linhas de dentro de um grupo (queryGroupLayers) o bit 0 = editável no lugar. */
     const val LAYER_OFF_RESERVED0 = 68
+    const val LAYER_NAME_BUFFER_FULL = 1 shl 1
 
     /** Bits de `LayerRow::flags`, na ordem definida em BridgePods.hpp. */
     const val FLAG_VISIBLE = 1 shl 0
@@ -253,16 +254,16 @@ class LayerRow internal constructor(
     val durationFrames: Int get() = endFrame - startFrame
     val hasParent: Boolean get() = parentIndex != INVALID_INDEX
 
-    /** Nome da camada. Uma alocação de String, só quando o chamador pede. */
-    val name: String
-        get() {
-            if (nameLength <= 0) return ""
+    /** A decodificação fica com o snapshot imutável usado pela timeline. */
+    val name: String by lazy(LazyThreadSafetyMode.NONE) {
+        if (nameLength <= 0) "" else {
             val bytes = ByteArray(nameLength)
             val dup = nameBlob.duplicate()
             dup.position(nameOffset)
             dup.get(bytes, 0, nameLength)
-            return String(bytes, Charsets.UTF_8)
+            String(bytes, Charsets.UTF_8)
         }
+    }
 
     /** Mesmos campos e mesmo nome, sem alocar. */
     fun sameAs(o: LayerRow): Boolean {

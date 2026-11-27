@@ -350,7 +350,7 @@ struct HyperLockedSheet: View {
                 Spacer().frame(height: 10)
                 HStack(spacing: 8) {
                     ForEach(p.variants, id: \.self) { v in
-                        HyperChip(title: "\(v)×", id: "hyper.receita.\(p.id).\(v)", on: selected && flow.variant == v) { flow.choose(p, variant: v) }
+                        HyperChip(title: v == 0 ? AureaText.t("hyper_detail_same_size") : "\(v)×", id: "hyper.receita.\(p.id).\(v)", on: selected && flow.variant == v) { flow.choose(p, variant: v) }
                     }
                 }
             }
@@ -373,16 +373,30 @@ struct HyperLockedSheet: View {
 
     var body: some View {
         let r = flow.recipe
+        let enchance = r.upscaleMode == .enchance
+        let factors = enchance ? [1, 2] : HyperRecipe.upscaleFactors
         VStack(alignment: .leading, spacing: 0) {
-            section("hyper_adjust_upscale")
-            chips(HyperRecipe.upscaleFactors.map { $0 == 1 ? AureaText.t("common_off") : "\($0)×" },
-                  selected: HyperRecipe.upscaleFactors.firstIndex(of: r.upscale) ?? 0, id: "hyper.ajuste.upscale") { i in
-                var n = r; n.upscale = HyperRecipe.upscaleFactors[i]; flow.edit(n)
+            section(enchance ? "hyper_preset_enchance" : "hyper_adjust_upscale")
+            chips(factors.map { factor in
+                switch factor {
+                case 0: return AureaText.t("hyper_detail_same_size")
+                case 1: return AureaText.t("common_off")
+                default: return "\(factor)×"
+                }
+            },
+                  selected: factors.firstIndex(of: r.upscale) ?? 0, id: "hyper.ajuste.upscale") { i in
+                var n = r; n.upscale = factors[i]; flow.edit(n)
             }
-            if r.upscale > 1 {
+            if r.upscale != 1 {
                 Spacer().frame(height: 8)
-                chips([AureaText.t("hyper_mode_general"), AureaText.t("hyper_mode_anime")], selected: r.upscaleMode.rawValue, id: "hyper.ajuste.modo") { i in
-                    var n = r; n.upscaleMode = i == 1 ? .anime : .general; flow.edit(n)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    chips([AureaText.t("hyper_mode_general"), AureaText.t("hyper_mode_anime"), AureaText.t("hyper_preset_enchance")],
+                          selected: r.upscaleMode.rawValue, id: "hyper.ajuste.modo") { i in
+                        var n = r
+                        n.upscaleMode = HyperUpscaleMode(rawValue: i) ?? .general
+                        if n.upscaleMode == .enchance { n.upscale = 2 }
+                        flow.edit(n)
+                    }
                 }
             }
             section("hyper_adjust_clean")
@@ -706,7 +720,7 @@ private struct HyperMeterPanel: View {
             switch step {
             case .clean: return r.denoise > 0 || r.deblock || r.deinterlace > 0
             case .stable: return r.stabilize
-            case .upscale: return r.upscale > 1
+            case .upscale: return r.upscale != 1
             case .face: return r.face
             case .motion: return r.targetFps > 0 || r.slowMotion > 1
             default: return true
@@ -722,6 +736,7 @@ private struct HyperMeterPanel: View {
     }
 
     private func stepRow(_ step: HyperStep, _ state: HyperStepState) -> some View {
+        let name = AureaText.t(step == .upscale && flow.recipe.upscaleMode == .enchance ? "hyper_preset_enchance" : step.nameKey)
         let path = flow.jobInfo.flatMap { $0.present(step) ? $0.path(step) : nil }.flatMap { $0 == .auto || !step.processing ? nil : $0 }
         let stateKey: String = {
             switch state {
@@ -740,14 +755,14 @@ private struct HyperMeterPanel: View {
                 case .waiting: Image(systemName: "circle").fontWeight(AureaIconWeight.symbol).foregroundStyle(AureaColors.muted)
                 }
             }.frame(width: 22, height: 22)
-            Text(AureaText.t(step.nameKey)).font(.aurea(size: 15, weight: state == .running ? .semibold : .regular))
+            Text(name).font(.aurea(size: 15, weight: state == .running ? .semibold : .regular))
                 .foregroundStyle(state == .waiting || state == .skipped ? AureaColors.muted : AureaColors.text)
             Spacer()
             if let path { Text(AureaText.t(path.nameKey)).font(.aurea(size: 12, weight: .semibold)).foregroundStyle(AureaColors.muted) }
         }
         .frame(minHeight: 36)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(AureaText.t(step.nameKey) + ": " + AureaText.t(stateKey) + (path.map { " (\(AureaText.t($0.nameKey)))" } ?? ""))
+        .accessibilityLabel(name + ": " + AureaText.t(stateKey) + (path.map { " (\(AureaText.t($0.nameKey)))" } ?? ""))
         .accessibilityIdentifier("hyper.etapa.\(step.id)")
     }
 }

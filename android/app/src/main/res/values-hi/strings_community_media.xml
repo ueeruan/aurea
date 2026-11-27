@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="social_activity">सूचनाएँ</string>
+    <string name="social_activity_unread">सूचनाएँ, %1$d अपठित</string>
+    <string name="social_activity_empty">अभी कोई सूचना नहीं है।</string>
+    <string name="social_activity_mark_read">पढ़ा हुआ चिह्नित करें</string>
+    <string name="social_activity_reply">%1$s ने आपकी टिप्पणी का जवाब दिया।</string>
+    <string name="social_activity_announcement">%1$s ने एक घोषणा प्रकाशित की।</string>
+    <string name="social_activity_comment">%1$s ने आपकी पोस्ट पर टिप्पणी की।</string>
+    <string name="social_attach_media">फ़ोटो या वीडियो जोड़ें</string>
+    <string name="social_media_limits">फ़ोटो 8 MB तक। MP4 या MOV वीडियो 90 MB तक।</string>
+    <string name="social_media_error">इस मीडिया को खोला नहीं जा सका।</string>
+    <string name="social_open_post">पोस्ट खोलें</string>
+    <string name="social_play_video">वीडियो चलाएँ</string>
+    <string name="social_post_title">पोस्ट</string>
+    <string name="social_reply">जवाब दें</string>
+    <string name="social_reply_to">%1$s को जवाब दे रहे हैं</string>
+    <string name="social_my_profile">मेरी प्रोफ़ाइल</string>
+    <string name="social_feed_options">फ़ीड के विकल्प</string>
+    <string name="social_media_saved_gallery">मीडिया गैलरी में सेव हो गया।</string>
+    <string name="social_media_saved_file">फ़ाइल सेव हो गई।</string>
+    <string name="social_media_save_failed">इस मीडिया को सेव नहीं किया जा सका।</string>
+</resources>

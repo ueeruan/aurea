@@ -799,6 +799,7 @@ enum PivotMath {
     let start: SIMD2<Float>
     private let position: [Float], anchor: [Float], rotation: [Float], scale: [Float], affine: [Float]
     private let threeD: Bool, depthFollowsWidth: Bool
+    private let basis: [Float]
     private let parentStart: (Float, Float)
 
     init?(model: AureaModel, pivot: SIMD2<Float>) {
@@ -808,10 +809,12 @@ enum PivotMath {
         rotation = StageGeom.floats(d["rotation"]); scale = StageGeom.floats(d["scale"])
         affine = StageGeom.floats(d["parentAffine"])
         guard position.count >= 2, anchor.count >= 2 else { return nil }
-        layer = id; start = pivot
+        layer = id
+        basis = model.engine.pivotDragBasis(id).map(\.floatValue)
+        start = basis.count == 14 ? SIMD2(basis[0], basis[1]) : pivot
         threeD = row.threeD || [UInt32(8), 9, 10].contains(row.kind)
         depthFollowsWidth = row.kind != 8 && row.kind != 9
-        parentStart = StageGeom.invertAffine(affine, pivot.x, pivot.y) ?? (pivot.x, pivot.y)
+        parentStart = StageGeom.invertAffine(affine, start.x, start.y) ?? (start.x, start.y)
     }
 
     /// Onde o pivô está na composição: a origem do gizmo (3D) ou a posição
@@ -828,11 +831,18 @@ enum PivotMath {
 
     /// Leva o pivô ao ponto da composição `to`; a posição compensa a âncora.
     func move(to target: SIMD2<Float>, model: AureaModel) {
+        func at(_ v: [Float], _ i: Int) -> Float { v.count > i ? v[i] : 0 }
+        if basis.count == 14 {
+            let dx = target.x - start.x, dy = target.y - start.y
+            model.setPivot(layer, anchor: (0..<3).map { at(anchor, $0) + basis[8 + $0] * dx + basis[11 + $0] * dy },
+                           position: (0..<3).map { at(position, $0) + basis[2 + $0] * dx + basis[5 + $0] * dy })
+            return
+        }
+        if threeD && depthFollowsWidth { return }
         let p = StageGeom.invertAffine(affine, target.x, target.y) ?? (target.x, target.y)
         let dx = p.0 - parentStart.0, dy = p.1 - parentStart.1
         guard let da = PivotMath.anchorDelta(dx: dx, dy: dy, rotation: rotation, scale: scale,
                                              threeD: threeD, depthFollowsWidth: depthFollowsWidth) else { return }
-        func at(_ v: [Float], _ i: Int) -> Float { v.count > i ? v[i] : 0 }
         model.setPivot(layer, anchor: (0..<3).map { at(anchor, $0) + da[$0] },
                        position: [at(position, 0) + dx, at(position, 1) + dy, at(position, 2)])
     }

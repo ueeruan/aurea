@@ -162,7 +162,13 @@ fun HomeScreen(store: EditorStore) {
             LiveNoticeBanners(vm.notices, banners = pluginTab || vm.tab != HomeViewModel.HOME_TAB)
             com.aurea.aurea.config.AppConfigBanner()
             val signedIn = (conta.estado as? ContaEstado.Dentro)?.email
-            Crossfade(selecting, animationSpec = tween(300), label = "topo") { picking ->
+            val communityChrome = !pluginTab && vm.tab == HomeViewModel.COMMUNITY_TAB && !selecting
+            fun signIn() {
+                accountRecoveryEmail = null
+                conta.entrando = true
+                showAccount = true
+            }
+            if (!communityChrome) Crossfade(selecting, animationSpec = tween(300), label = "topo") { picking ->
                 if (picking) {
                     HomeSelectionHeader(
                         count = selection.size,
@@ -176,11 +182,7 @@ fun HomeScreen(store: EditorStore) {
                         onImportAe = { aeProjectPicker.launch(arrayOf("*/*")) },
                         signedInEmail = signedIn,
                         onAccount = {
-                            if (signedIn == null) {
-                                accountRecoveryEmail = null
-                                conta.entrando = true
-                                showAccount = true
-                            } else accountMenu = true
+                            if (signedIn == null) signIn() else accountMenu = true
                         },
                         accountMenuOpen = accountMenu,
                         onDismissAccountMenu = { accountMenu = false },
@@ -216,7 +218,7 @@ fun HomeScreen(store: EditorStore) {
                         onOpen = openProject,
                         onMural = { vm.selectTab(HomeViewModel.MURAL_TAB) },
                     )
-                    HomeViewModel.COMMUNITY_TAB -> com.aurea.aurea.community.CommunityScreen(store, conta, false)
+                    HomeViewModel.COMMUNITY_TAB -> com.aurea.aurea.community.CommunityScreen(store, conta, false, onSignIn = ::signIn)
                     HomeViewModel.MURAL_TAB -> com.aurea.aurea.community.MuralScreen(store, conta) { vm.selectTab(HomeViewModel.HOME_TAB) }
                     HomeViewModel.PROFILE_TAB -> com.aurea.aurea.community.CommunityScreen(store, conta, true)
                     HomeViewModel.PRESETS_TAB -> PresetsTab(store)

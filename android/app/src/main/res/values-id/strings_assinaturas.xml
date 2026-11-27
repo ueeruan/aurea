@@ -2,9 +2,9 @@
 <resources>
     <!-- 16/11/2026: assinaturas; 1.0.9: AureaHyper semanal, mensal e anual (hyper/Paywall.kt, AureaSubscriptions.swift; docs/release/assinaturas.md). -->
     <string name="assinatura_badge">Fitur berbayar</string>
-    <string name="assinatura_intro_efeito">Efek ini bagian dari AureaHyper. Berlangganan AureaHyper mingguan, bulanan, atau tahunan untuk membuka semua efek berbayar, Teks 3D, dan alat Hyper.</string>
+    <string name="assinatura_intro_efeito">Efek ini bagian dari AureaHyper. Berlangganan AureaHyper mingguan, bulanan, atau tahunan untuk membuka semua efek berbayar dan alat Hyper.</string>
     <string name="assinatura_intro_texto3d">Teks 3D bagian dari AureaHyper. Berlangganan AureaHyper mingguan, bulanan, atau tahunan untuk juga membuka semua efek berbayar dan alat Hyper.</string>
-    <string name="assinatura_intro_hyper">AureaHyper membuka semua efek berbayar, Teks 3D, dan alat Hyper.</string>
+    <string name="assinatura_intro_hyper">AureaHyper membuka semua efek berbayar dan alat Hyper.</string>
     <string name="assinatura_so_efeito">Berlangganan efek ini saja</string>
     <string name="assinatura_so_texto3d">Berlangganan Teks 3D saja</string>
     <string name="assinatura_escolha_plano">Pilih paket AureaHyper Anda. Semua paket membuka semuanya.</string>

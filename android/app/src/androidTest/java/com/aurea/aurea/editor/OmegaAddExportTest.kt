@@ -6,11 +6,14 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
+import com.aurea.aurea.R
+import com.aurea.aurea.captions.CaptionSettings
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaTheme
 import org.junit.Assert.assertEquals
@@ -18,6 +21,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 /**
  * Omega 0.3.2, área 08: as jornadas por id (as mesmas do iOS) — a barra de
@@ -49,6 +54,40 @@ class OmegaAddExportTest {
         compose.waitUntil(30000) { ::store.isInitialized && store.engineReady }
         compose.runOnIdle { store.newProject(720, 1280, 30f, title) }
         compose.waitUntil(15000) { store.project.title == title }
+    }
+
+    @Test fun captionStarOpensFromTheBottomBarAndShowsItsFourTabs() {
+        launch("AUREA · Auto Caption Star")
+        val samples = 48000 * 2
+        val audio = File(context.cacheDir, "caption-star.wav")
+        audio.writeBytes(ByteBuffer.allocate(44 + samples * 2).order(ByteOrder.LITTLE_ENDIAN).apply {
+            put("RIFF".toByteArray()); putInt(capacity() - 8); put("WAVEfmt ".toByteArray())
+            putInt(16); putShort(1); putShort(1); putInt(48000); putInt(96000); putShort(2); putShort(16)
+            put("data".toByteArray()); putInt(samples * 2)
+        }.array())
+        compose.runOnIdle { store.importAudioSource(audio.absolutePath, "Caption Star source") }
+        compose.waitUntil(10000) { store.detail?.kind == 3 }
+        compose.runOnIdle {
+            val words = arrayOf("Sua", "história", "ganha", "ritmo", "com", "legendas")
+            val times = doubleArrayOf(0.0, 0.24, 0.25, 0.55, 0.56, 0.85, 0.86, 1.15, 1.16, 1.37, 1.38, 1.8)
+            val look = CaptionSettings(maxWords = 2, style = 5, uppercase = true)
+            assertTrue(store.engineForStress.createCaptionsJson(checkNotNull(store.primary), words, times, look.toJson()) >= 0)
+        }
+        compose.waitUntil(10000) { store.captionTracks.isNotEmpty() }
+        compose.runOnIdle { store.clearSelection() }
+        compose.onNodeWithTag("addBar.Captions").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Caption Star source").performClick()
+        for (tab in listOf("list", "style", "setup", "presets")) {
+            compose.onNodeWithTag("captions.tab.$tab").assertIsDisplayed().performClick()
+        }
+        val saved = java.util.concurrent.atomic.AtomicBoolean(false)
+        compose.runOnIdle { store.saveProject { saved.set(true) } }
+        compose.waitUntil(15000) { saved.get() }
+        compose.onNodeWithTag("captions.tab.list").performClick()
+        val count = store.captionTracks.single().segments.size
+        compose.onNodeWithText(context.getString(R.string.caption_star_to_layers)).assertIsDisplayed().performClick()
+        compose.waitUntil(5000) { store.captionTracks.isEmpty() && store.layers.size == count + 1 }
+        assertTrue(store.layers.any { it.name.contains("Sua", ignoreCase = true) })
     }
 
     @Test fun addBarOpensEmbeddedContentAndAddsFromEachCategory() {

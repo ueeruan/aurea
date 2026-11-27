@@ -14,7 +14,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
 import com.aurea.aurea.R
-import com.aurea.aurea.home.AureaDonations
+import com.aurea.aurea.effects.Text3DGate
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.state.Screen
 import org.junit.After
@@ -56,7 +56,6 @@ class HyperScreenDeviceTest {
         context.getSharedPreferences("aurea.releaseNotes", android.content.Context.MODE_PRIVATE).edit()
             .putString("read", "${com.aurea.aurea.BuildConfig.VERSION_NAME}:${com.aurea.aurea.BuildConfig.VERSION_CODE}").commit()
         context.getSharedPreferences("aurea_hyper", android.content.Context.MODE_PRIVATE).edit().clear().commit()
-        AureaDonations.launchPromptPending = false
         compose.setContent {
             store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
             com.aurea.aurea.ui.AureaApp(store)
@@ -77,6 +76,7 @@ class HyperScreenDeviceTest {
         compose.runOnUiThread { HyperEntitlements.clear(); store.openHyper() }
         compose.waitForIdle()
         assertEquals(Screen.Hyper, store.screen)
+        compose.runOnIdle { assertTrue("Texto 3D fica disponível sem conta", !Text3DGate.locked()) }
         compose.onNodeWithTag("hyper.bloqueado").assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.hyper_locked_badge)).assertIsDisplayed()
         compose.onNodeWithTag("hyper.bloqueado.entrar").performScrollTo().assertIsDisplayed()
@@ -125,6 +125,11 @@ class HyperScreenDeviceTest {
         compose.onNodeWithTag("hyper.receita.sharper").performScrollTo().performClick()
         compose.onNodeWithTag("hyper.receita.sharper.4").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(4, store.hyper.recipe.upscale) }
+        compose.onNodeWithTag("hyper.receita.enchance").performScrollTo().assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals(HyperUpscaleMode.Enchance, store.hyper.recipe.upscaleMode)
+            assertEquals(2, store.hyper.recipe.upscale)
+        }
         compose.onNodeWithTag("hyper.ajustar").performScrollTo().performClick()
         compose.onNodeWithTag("hyper.ajuste.rosto").performScrollTo().assertIsDisplayed()
         compose.runOnIdle { assertTrue("o rosto fica desligado fora da restauração", !store.hyper.recipe.face) }
@@ -135,6 +140,11 @@ class HyperScreenDeviceTest {
         compose.onNodeWithTag("hyper.previa").assertIsDisplayed()
         for (p in listOf("turbo", "lite", "max")) compose.onNodeWithTag("hyper.caminho.$p").performScrollTo().assertIsDisplayed()
         compose.waitUntil(60_000) { !store.hyper.measuring && !store.hyper.estimating }
+        compose.waitUntil(60_000) { store.hyper.preview != null }
+        compose.runOnIdle {
+            val preview = checkNotNull(store.hyper.preview)
+            assertTrue("AureaEnchance changes the rendered frame", !preview.before.sameAs(preview.after))
+        }
         compose.onNodeWithTag("hyper.comecar").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("hyper.voltar").performClick()
         compose.runOnIdle { assertEquals(HyperFlow.Step.Recipe, store.hyper.step) }

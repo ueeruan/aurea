@@ -33,4 +33,7 @@
     <string name="fxp_explode_glass">Estilhaçar vidro</string>
     <string name="fxp_explode_assemble">Montar</string>
     <string name="fxp_explode_side_impact">Impacto lateral</string>
+    <string name="fx3d_name_spacing">Espaçamento 3D</string>
+    <string name="fx3d_desc_spacing">Afasta as partes do modelo. Anime o espaçamento para separar ou montar o objeto.</string>
+    <string name="fx3d_name_money">Chuva de dinheiro 3D</string>
 </resources>

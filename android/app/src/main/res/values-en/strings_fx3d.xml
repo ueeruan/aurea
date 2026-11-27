@@ -33,4 +33,7 @@
     <string name="fxp_explode_glass">Shatter glass</string>
     <string name="fxp_explode_assemble">Assemble</string>
     <string name="fxp_explode_side_impact">Side impact</string>
+    <string name="fx3d_name_spacing">3D Spacing</string>
+    <string name="fx3d_desc_spacing">Spreads the model’s parts apart. Animate the spacing to assemble or separate the object.</string>
+    <string name="fx3d_name_money">3D Money Rain</string>
 </resources>

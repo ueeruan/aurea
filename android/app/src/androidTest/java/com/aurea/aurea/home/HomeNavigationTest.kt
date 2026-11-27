@@ -38,7 +38,6 @@ class HomeNavigationTest {
         // D5: sem aba gravada = primeira abertura.
         context.getSharedPreferences("aurea.home", android.content.Context.MODE_PRIVATE).edit()
             .remove(HomeViewModel.KEY_TAB).commit()
-        AureaDonations.launchPromptPending = false
     }
 
     @Test fun appWithoutSessionOpensStartAndOptionalLoginCanBeClosed() {
@@ -145,7 +144,6 @@ class HomeNavigationTest {
         check(context.packageName.endsWith(".uitest"))
         val preferences = context.getSharedPreferences("aurea.releaseNotes", android.content.Context.MODE_PRIVATE)
         preferences.edit().putString("read", "0.0.5:2123-1").commit()
-        AureaDonations.launchPromptPending = false
         compose.setContent { AureaTheme { ReleaseNotesEntry() } }
         val version = "Aurea Beta ${com.aurea.aurea.BuildConfig.VERSION_NAME.removeSuffix("-uitest")} (${com.aurea.aurea.BuildConfig.VERSION_CODE})"
         compose.onNodeWithText(version, substring = true).assertIsDisplayed()

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="psyko_color_cycles">रंग चक्र</string>
+    <string name="psyko_source_detail">छवि का विवरण</string>
+    <string name="psyko_blobs_desc">जैविक आकारों और समय के साथ बदलते रंगों से छवि को दोबारा रंगता है।</string>
+    <string name="psyko_stripes_desc">दिशात्मक धारियों और समय के साथ बदलते रंगों से छवि को दोबारा रंगता है।</string>
+</resources>

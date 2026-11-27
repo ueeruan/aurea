@@ -413,6 +413,46 @@ u32 pack_rgba8(Vec4 c) noexcept {
     return q(c.x) | (q(c.y) << 8) | (q(c.z) << 16) | (q(c.w) << 24);
 }
 
+void banknote_mesh(StaticData& out) {
+    // A folded paper strip, printed on both sides with an original design.
+    constexpr Vec4 paper{0.49f, 0.76f, 0.38f, 1.0f};
+    constexpr Vec4 ink{0.10f, 0.34f, 0.20f, 1.0f};
+    constexpr Vec4 seal{0.85f, 0.66f, 0.27f, 1.0f};
+    auto quad = [&](f32 left, f32 top, f32 right, f32 bottom, f32 face, f32 depth, Vec4 color) {
+        const u32 encoded = pack_rgba8(color);
+        f32 packed;
+        std::memcpy(&packed, &encoded, sizeof(packed));
+        auto vertex = [&](f32 x, f32 y) {
+            const f32 phase = x * 5.0f;
+            const f32 slope = 0.26f * std::cos(phase);
+            const f32 inv = face / std::sqrt(1.0f + slope * slope);
+            out.mesh.emplace_back(x, y, 0.052f * std::sin(phase) + face * depth, 0.0f);
+            out.mesh.emplace_back(-slope * inv, 0.0f, inv, packed);
+        };
+        vertex(left, top);
+        if (face > 0.0f) { vertex(right, top); vertex(left, bottom); }
+        else { vertex(left, bottom); vertex(right, top); }
+        vertex(right, bottom);
+        if (face > 0.0f) { vertex(left, bottom); vertex(right, top); }
+        else { vertex(right, top); vertex(left, bottom); }
+    };
+    for (const f32 face : {-1.0f, 1.0f}) {
+        for (u32 i = 0; i < 6; ++i) {
+            const f32 x = static_cast<f32>(i) / 6.0f - 0.5f;
+            const f32 next = static_cast<f32>(i + 1) / 6.0f - 0.5f;
+            quad(x, -0.27f, next, 0.27f, face, 0.003f, paper);
+            quad(x, -0.23f, next, -0.205f, face, 0.008f, ink);
+            quad(x, 0.205f, next, 0.23f, face, 0.008f, ink);
+        }
+        for (const f32 x : {-0.43f, 0.40f}) quad(x, -0.205f, x + 0.03f, 0.205f, face, 0.008f, ink);
+        quad(-0.095f, -0.15f, 0.095f, 0.15f, face, 0.011f, seal);
+        for (const f32 x : {-0.36f, 0.17f}) {
+            quad(x, -0.11f, x + 0.19f, -0.08f, face, 0.011f, ink);
+            quad(x, 0.07f, x + 0.19f, 0.10f, face, 0.011f, ink);
+        }
+    }
+}
+
 /// A malha da PARTÍCULA de malha: o modelo inteiro na pose de repouso, no
 /// espaço da camada (Y para baixo), centrado e com o maior lado = 1 — o
 /// "tamanho" da partícula passa a ser o tamanho da malha em px.
@@ -735,7 +775,17 @@ void build_frame(const BuildContext& ctx, const Layer& pl, const ParticleData& p
     }
     // --- Partícula de malha ----------------------------------------------------
     std::shared_ptr<const StaticData> mesh;
-    if (pd.particleType == static_cast<u32>(ParticleShape::Mesh) && comp && pd.meshSource != 0) {
+    if (pd.particleType == static_cast<u32>(ParticleShape::Money)) {
+        constexpr u64 key = 0x415552454142494Cull; // shared banknote geometry
+        mesh = cache.find(key, ctx.frameNumber);
+        if (!mesh) {
+            auto built = std::make_shared<StaticData>();
+            built->key = key;
+            banknote_mesh(*built);
+            cache.put(built, ctx.frameNumber);
+            mesh = std::move(built);
+        }
+    } else if (pd.particleType == static_cast<u32>(ParticleShape::Mesh) && comp && pd.meshSource != 0) {
         const Layer* ml = comp->layer(LayerId::unpack(pd.meshSource));
         if (ml && ml->kind == LayerKind::Model3D) {
             const u64 key = mix64(0x3E5Bull, ml->model.scene.pack());
@@ -748,14 +798,14 @@ void build_frame(const BuildContext& ctx, const Layer& pl, const ParticleData& p
                 if (asset) cache.put(built, ctx.frameNumber);   // sem asset (ainda carregando): tenta de novo
                 mesh = std::move(built);
             }
-            if (mesh && mesh->mesh_vertices() >= 3) {
-                flags |= kFlagMesh;
-                out.meshMode = true;
-                out.meshVertices = mesh->mesh_vertices();
-                staticKey = mix64(staticKey, mesh->key);
-                hasStatic = true;
-            }
         }
+    }
+    if (mesh && mesh->mesh_vertices() >= 3) {
+        flags |= kFlagMesh;
+        out.meshMode = true;
+        out.meshVertices = mesh->mesh_vertices();
+        staticKey = mix64(staticKey, mesh->key);
+        hasStatic = true;
     }
     // --- Partícula de textura ------------------------------------------------
     if (pd.particleType == static_cast<u32>(ParticleShape::Texture) && pd.textureAsset != 0 && ctx.imageLookup) {

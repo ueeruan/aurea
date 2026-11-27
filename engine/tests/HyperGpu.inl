@@ -84,7 +84,7 @@ AUREA_TEST(HyperGpu, DeclaresTheThreeLayerEffects) {
     AUREA_CHECK(clean && clean->wants_neighbors());
 }
 
-AUREA_TEST(HyperGpu, FsrIsSharperThanBilinearAndDoesNotRing) {
+AUREA_TEST(HyperGpu, AureaDetailIsSharperThanBilinearAndDoesNotRing) {
     AUREA_REQUIRE_GPU();
     constexpr u32 W = 64, H = 36;
     // Degrau vertical (40 | 200) e um diagonal: o que o upscale borra.
@@ -104,7 +104,7 @@ AUREA_TEST(HyperGpu, FsrIsSharperThanBilinearAndDoesNotRing) {
         }
         return s.render(FrameIndex{0}, 1, true);
     };
-    const FloatImage bil = render(false), fsr = render(true);
+    const FloatImage bil = render(false), detail = render(true);
     // Nitidez: o maior degrau entre vizinhos na borda vertical (linhas 4..24).
     auto steepest = [](const FloatImage& img) {
         f64 best = 0.0;
@@ -112,24 +112,105 @@ AUREA_TEST(HyperGpu, FsrIsSharperThanBilinearAndDoesNotRing) {
             for (u32 x = 56; x < 72; ++x) best = std::max(best, hy::code(img, x + 1, y) - hy::code(img, x, y));
         return best;
     };
-    const f64 sb = steepest(bil), sf = steepest(fsr);
-    std::printf("[degrau bilinear %.1f, FSR %.1f] ", sb, sf);
-    AUREA_CHECK_MSG(sf > 1.25 * sb, "o FSR tem de deixar a borda mais nítida que o bilinear");
+    const f64 sb = steepest(bil), sf = steepest(detail);
+    std::printf("[degrau bilinear %.1f, Detail %.1f] ", sb, sf);
+    AUREA_CHECK_MSG(sf > 1.05 * sb && sf < 1.22 * sb, "moderately sharper edges without excessive contrast");
     // Sem anel: nada passa do intervalo da fonte além de 3 códigos.
     f64 lo = 1e9, hi = -1e9;
-    for (u32 y = 2; y < fsr.height - 2; ++y)
-        for (u32 x = 2; x < fsr.width - 2; ++x) {
-            const f64 c = hy::code(fsr, x, y);
+    for (u32 y = 2; y < detail.height - 2; ++y)
+        for (u32 x = 2; x < detail.width - 2; ++x) {
+            const f64 c = hy::code(detail, x, y);
             lo = std::min(lo, c);
             hi = std::max(hi, c);
         }
-    std::printf("[faixa FSR %.1f..%.1f] ", lo, hi);
-    // EASU é preso ao mínimo/máximo dos 4 vizinhos; o RCAS (nitidez de 1
-    // parada) só passa do intervalo no lobo limitado: até 12 códigos (5%).
-    AUREA_CHECK_MSG(lo >= 28.0 && hi <= 212.0, "sem anel além do limite");
+    std::printf("[faixa Detail %.1f..%.1f] ", lo, hi);
+    AUREA_CHECK_MSG(lo >= 38.0 && hi <= 202.0, "sem anel além do limite");
     // A parte lisa continua lisa.
-    AUREA_CHECK_NEAR(hy::code(fsr, 8, 10), 40.0, 2.0);
-    AUREA_CHECK_NEAR(hy::code(fsr, 110, 10), 200.0, 2.0);
+    AUREA_CHECK_NEAR(hy::code(detail, 8, 10), 40.0, 2.0);
+    AUREA_CHECK_NEAR(hy::code(detail, 110, 10), 200.0, 2.0);
+}
+
+AUREA_TEST(HyperGpu, AureaDetailPreservesCutoutAndPremultipliedColor) {
+    AUREA_REQUIRE_GPU();
+    constexpr u32 W = 64, H = 36;
+    ImagePixels px = uniform_image(W, H, 250, 45, 25);
+    for (u32 y = 0; y < H; ++y)
+        for (u32 x = 0; x < W; ++x)
+            px.rgba[(static_cast<usize>(y) * W + x) * 4 + 3] = x < W / 2 ? 255 : 0;
+    auto render = [&](bool detail) {
+        Scene s(W * 2, H * 2);
+        s.comp->set_background_choice(Color{0, 0, 0, 0});
+        const auto layer = s.image(px, W, H, 2.0f);
+        if (detail) s.add_effect(layer, hyper::effect_keys::kHyperUpscale);
+        return s.render(FrameIndex{0}, 1, true);
+    };
+    const FloatImage before = render(false), after = render(true);
+    for (u32 x = W - 4; x < W + 4; ++x) {
+        const Vec4 a = before.v(x, H), b = after.v(x, H);
+        AUREA_CHECK_NEAR(a.w, b.w, 0.003f);
+        AUREA_CHECK_NEAR(a.x, b.x, 0.003f);
+    }
+}
+
+AUREA_TEST(HyperGpu, AureaDetailUsesOutputResolutionAndHonorsZeroStrength) {
+    AUREA_REQUIRE_GPU();
+    constexpr u32 W = 64, H = 36;
+    ImagePixels px = uniform_image(W, H, 96, 96, 96);
+    for (u32 y = 0; y < H; ++y)
+        for (u32 x = 0; x < W; ++x) {
+            const u8 gray = x < 30 ? 96 : x < 34 ? static_cast<u8>(100 + (x - 30) * 15) : 160;
+            u8* p = &px.rgba[(static_cast<usize>(y) * W + x) * 4];
+            p[0] = p[1] = p[2] = gray;
+        }
+    const auto render = [&](bool largerComposition, f32 strength) {
+        const u32 scale = largerComposition ? 2 : 1;
+        Scene s(W * scale, H * scale);
+        const LayerId id = s.image(px, W * scale * .5f, H * scale * .5f, static_cast<f32>(scale));
+        if (strength >= 0.0f) {
+            EffectInstance& e = s.add_effect(id, hyper::effect_keys::kHyperUpscale);
+            hy::set(e, hyper::effect_keys::kHyperUpscale, "sharpness", strength);
+        }
+        return s.render(FrameIndex{0}, 1, true, {}, largerComposition ? 1 : 2);
+    };
+    const auto off = render(false, -1), zero = render(false, 0);
+    const auto scaledExport = render(false, 100), scaledLayer = render(true, 100);
+    f64 peakChange = 0;
+    for (u32 x = 48; x < 80; ++x) {
+        const f64 base = hy::code(off, x, H), exportDetail = hy::code(scaledExport, x, H);
+        AUREA_CHECK_NEAR(base, hy::code(zero, x, H), 0.1);
+        AUREA_CHECK_NEAR(exportDetail, hy::code(scaledLayer, x, H), 0.5);
+        AUREA_CHECK(exportDetail >= 95.0 && exportDetail <= 161.0);
+        peakChange = std::max(peakChange, std::abs(base - exportDetail));
+    }
+    AUREA_CHECK_MSG(peakChange >= 3.0, "the upscaled result restores a measurable soft edge");
+}
+
+AUREA_TEST(HyperGpu, AureaEnchanceAppliesLearnedFilterAndPreservesMatte) {
+    AUREA_REQUIRE_GPU();
+    constexpr u32 W = 63, H = 35;
+    ImagePixels px = uniform_image(W, H, 64, 105, 150);
+    for (u32 y = 0; y < H; ++y) for (u32 x = 0; x < W; ++x) {
+        u8* p = &px.rgba[(static_cast<usize>(y) * W + x) * 4];
+        if (x < 7) p[3] = 0;
+        else if ((3 * x + 2 * y) % 17 < 6) { p[0] = 190; p[1] = 158; p[2] = 100; }
+    }
+    const auto render = [&](const char* key) {
+        Scene s(W * 2, H * 2);
+        s.comp->set_background_choice(Color{0, 0, 0, 0});
+        const auto id = s.image(px, W, H, 2.0f);
+        if (key) s.add_effect(id, key);
+        return s.render(FrameIndex{0}, 1, true);
+    };
+    const auto baseline = render(nullptr);
+    const auto detail = render(hyper::effect_keys::kHyperUpscale);
+    const auto enchance = render(hyper::effect_keys::kHyperEnchance);
+    f64 changed = 0.0;
+    for (u32 x = 0; x < W * 2; ++x) {
+        AUREA_CHECK_NEAR(enchance.v(x, H).w, baseline.v(x, H).w, 0.002f);
+        if (x < 18) AUREA_CHECK_NEAR(enchance.v(x, H).x, baseline.v(x, H).x, 0.002f);
+        if (x > 24) changed += std::abs(hy::code(enchance, x, H) - hy::code(detail, x, H));
+    }
+    AUREA_CHECK_MSG(changed > 35.0, "the learned filter ran instead of the Aurea Detail fallback");
 }
 
 AUREA_TEST(HyperGpu, AnimeUpscaleKeepsLinesDarkAndThin) {
@@ -343,7 +424,7 @@ AUREA_TEST(HyperGpu, FullHdCostPerModulePrints) {
         const f32 general = cost(s, 10);
         hy::set(e, hyper::effect_keys::kHyperUpscale, "mode", 1.0f);
         const f32 anime = cost(s, 10);
-        std::printf("\n    1080p (de 540p) GPU total: sem %.3f ms, Upscale General (FSR 1) +%.3f ms, Anime +%.3f ms",
+        std::printf("\n    1080p (de 540p) GPU total: sem %.3f ms, Aurea Detail Geral +%.3f ms, Anime +%.3f ms",
                     none, general - none, anime - none);
     }
     // Clean e Motion em 1080p.

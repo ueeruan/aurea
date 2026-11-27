@@ -33,4 +33,7 @@
     <string name="fxp_explode_glass">काँच तोड़ें</string>
     <string name="fxp_explode_assemble">जोड़ना</string>
     <string name="fxp_explode_side_impact">साइड से टक्कर</string>
+    <string name="fx3d_name_spacing">3D अंतर</string>
+    <string name="fx3d_desc_spacing">मॉडल के भागों को अलग करता है। वस्तु को जोड़ने या बिखेरने के लिए अंतर को एनिमेट करें।</string>
+    <string name="fx3d_name_money">3D नोटों की बारिश</string>
 </resources>

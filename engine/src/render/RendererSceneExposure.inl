@@ -109,11 +109,11 @@ Status Renderer::render_bounded_scene_exposures(const FrameSnapshot& snap, const
                 return OkStatus;
             };
             if (!held.display.valid()) held.display = pool_.acquire(desc);
-            if (!held.hdr.valid()) held.hdr = pool_.acquire(desc);
-            if (!held.display.valid() || !held.hdr.valid())
+            if (!held.display.valid())
                 return finish(Status{Errc::OutOfDeviceMemory, "acumulador de exposicao 3D"});
             const FGTexture display = graph_.import_texture("3d-exposicao-display", held.display, desc);
-            const FGTexture radiance = graph_.import_texture("3d-exposicao-linear", held.hdr, desc);
+            FGTexture radiance;
+            if (held.hdr.valid()) radiance = graph_.import_texture("3d-exposicao-linear", held.hdr, desc);
             const u32 stop = std::min(count, first + batch.samplesPerBatch);
             auto integrate = [&](FGTexture destination, FGTexture source, LoadOp load, bool hdr) {
                 const u32 pass = graph_.add_raster_pass("3d-desfoque", PassStage::Composite,
@@ -129,15 +129,22 @@ Status Renderer::render_bounded_scene_exposures(const FrameSnapshot& snap, const
                 if (pass != kInvalidIndex) ++integrationDraws;
                 return pass != kInvalidIndex;
             };
+            scene3d::SceneRenderer::ExposureShadow exposureShadow;
             for (u32 sample = first; sample < stop; ++sample) {
                 if (cancelled()) return finish(Errc::Cancelled);
                 FGTexture color, hdr;
                 if (!scene3d_.build(graph_, arena_, group.blurFrames[sample], width, height,
-                        frame.frameNumber, color, nullptr, nullptr, 0, nullptr, &hdr))
+                        frame.frameNumber, color, nullptr, nullptr, 0, nullptr, &hdr, {}, &exposureShadow))
                     return finish(Status{Errc::InvalidState, "amostra de exposicao 3D incompleta"});
                 if (!integrate(display, color, sample == 0 ? LoadOp::Clear : LoadOp::Load, false))
                     return finish(Status{Errc::OutOfMemory, "passe de exposicao 3D"});
                 if (hdr.valid()) {
+                    if (!radiance.valid()) {
+                        held.hdr = pool_.acquire(desc);
+                        if (!held.hdr.valid())
+                            return finish(Status{Errc::OutOfDeviceMemory, "acumulador HDR de exposicao 3D"});
+                        radiance = graph_.import_texture("3d-exposicao-linear", held.hdr, desc);
+                    }
                     if (!integrate(radiance, hdr, hdrUsed ? LoadOp::Load : LoadOp::Clear, true))
                         return finish(Status{Errc::OutOfMemory, "passe HDR de exposicao 3D"});
                     hdrUsed = true;

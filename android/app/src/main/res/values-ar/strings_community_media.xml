@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="social_activity">الإشعارات</string>
+    <string name="social_activity_unread">الإشعارات، %1$d غير مقروءة</string>
+    <string name="social_activity_empty">لا توجد إشعارات حتى الآن.</string>
+    <string name="social_activity_mark_read">تحديد كمقروءة</string>
+    <string name="social_activity_reply">ردّ %1$s على تعليقك.</string>
+    <string name="social_activity_announcement">نشر %1$s إعلانًا.</string>
+    <string name="social_activity_comment">علّق %1$s على منشورك.</string>
+    <string name="social_attach_media">إضافة صورة أو فيديو</string>
+    <string name="social_media_limits">صور حتى 8 ميغابايت. فيديو MP4 أو MOV حتى 90 ميغابايت.</string>
+    <string name="social_media_error">تعذّر فتح هذه الوسائط.</string>
+    <string name="social_open_post">فتح المنشور</string>
+    <string name="social_play_video">تشغيل الفيديو</string>
+    <string name="social_post_title">المنشور</string>
+    <string name="social_reply">رد</string>
+    <string name="social_reply_to">الرد على %1$s</string>
+    <string name="social_my_profile">ملفي الشخصي</string>
+    <string name="social_feed_options">خيارات الخلاصة</string>
+    <string name="social_media_saved_gallery">حُفظت الوسائط في المعرض.</string>
+    <string name="social_media_saved_file">حُفظ الملف.</string>
+    <string name="social_media_save_failed">تعذّر حفظ هذه الوسائط.</string>
+</resources>

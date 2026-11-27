@@ -1068,11 +1068,16 @@ Status Backend::read_texture(TextureHandle src, void* outData, u32 bytesPerRow) 
         Impl& d = *impl_;
         Texture* t = d.textures.get(src.id);
         if (!t || !outData) return Errc::InvalidArgument;
+        if (t->desc.is_depth() || is_block_compressed(t->desc.format) || t->desc.sampleCount != 1
+            || t->desc.depth != 1)
+            return Status{Errc::UnsupportedFormat, "Metal texture is not a readable color target"};
         const u32 bpp = t->desc.bytes_per_pixel();
         if (bpp == 0) return Status{Errc::InvalidArgument, "formato sem bytes por texel"};
         const u32 w = t->desc.width;
         const u32 h = t->desc.height;
         const u32 rowBytes = w * bpp;
+        const u32 pitch = bytesPerRow ? bytesPerRow : rowBytes;
+        if (pitch < rowBytes) return Status{Errc::OutOfRange, "Metal readback stride"};
         const usize total = static_cast<usize>(rowBytes) * h;
 
         BufferDesc rd;
@@ -1091,7 +1096,7 @@ Status Backend::read_texture(TextureHandle src, void* outData, u32 bytesPerRow) 
 
         struct Ctx { id<MTLTexture> src; id<MTLBuffer> dst; u32 w, h, rowBytes; usize total; bool managed; }
             ctx{t->texture, target, w, h, rowBytes, total, managed};
-        const Status st = d.submit_immediate([](Impl&, id<MTLCommandBuffer> cb, void* p) {
+        Status st = d.submit_immediate([](Impl&, id<MTLCommandBuffer> cb, void* p) {
             auto* c = static_cast<Ctx*>(p);
             id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
             [blit copyFromTexture:c->src
@@ -1109,14 +1114,13 @@ Status Backend::read_texture(TextureHandle src, void* outData, u32 bytesPerRow) 
             [blit endEncoding];
         }, &ctx);
         if (st.ok()) {
-            const u32 pitch = bytesPerRow ? bytesPerRow : rowBytes;
             const u8* mapped = static_cast<const u8*>(target.contents);
             if (mapped) {
                 for (u32 y = 0; y < h; ++y) {
                     std::memcpy(static_cast<u8*>(outData) + static_cast<usize>(y) * pitch,
                                 mapped + static_cast<usize>(y) * rowBytes, rowBytes);
                 }
-            }
+            } else st = Status{Errc::InvalidState, "Metal readback buffer is not mapped"};
         }
         Buffer dead;
         if (d.buffers.remove(readback->id, dead)) d.destroy_buffer_now(dead);

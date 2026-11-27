@@ -77,6 +77,9 @@ internal fun LayerMenu(store: EditorStore, ui: EditorUi, id: Long, expanded: Boo
     val replacePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
         if (uri != null) store.replaceMedia(id, uri)
     }
+    val improvePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) store.replaceMedia(id, uri, verifyUpgrade = true)
+    }
     var showInfo by remember(id) { mutableStateOf(false) }
     if (showInfo) MediaInfoDialog(store, id) { showInfo = false }
     if (!expanded) return
@@ -91,6 +94,10 @@ internal fun LayerMenu(store: EditorStore, ui: EditorUi, id: Long, expanded: Boo
     val actions = if (index >= 0) layerMenuEntries(
         store, ui, row, index,
         onReplace = { replacePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
+        onImproveSource = {
+            if (store.playing) store.pause()
+            improvePicker.launch(arrayOf("video/*"))
+        },
         onInfo = { showInfo = true },
     ) else emptyList()
     val entries = layerSecondaryEntries(store, ui, row) + actions +
@@ -147,6 +154,7 @@ private fun layerMenuEntries(
     row: LayerRow,
     index: Int,
     onReplace: () -> Unit,
+    onImproveSource: () -> Unit,
     onInfo: () -> Unit,
 ): List<MenuEntry> {
     val id = row.id
@@ -282,12 +290,23 @@ private fun layerMenuEntries(
             }
             LayerMenuAction.ReplaceMedia -> {
                 out += MenuEntry.Header(mediaHeader)
-                out += MenuEntry.Item(
+                val replace = MenuEntry.Item(
                     stringResource(R.string.layer_replace_media),
                     glyph = CupertinoGlyph.Arrow2Squarepath,
                     sublabel = stringResource(R.string.layer_replace_media_detail),
                     enabled = !row.locked,
                 ) { onReplace() }
+                if (type == LayerType.Video) {
+                    val better = MenuEntry.Item(
+                        stringResource(R.string.layer_improve_source),
+                        glyph = CupertinoGlyph.Sparkles,
+                        sublabel = stringResource(R.string.layer_improve_source_detail),
+                        enabled = !row.locked,
+                        tag = "layer.menu.improveSource",
+                    ) { onImproveSource() }
+                    out += MenuEntry.Item(stringResource(R.string.layer_replace_media), glyph = CupertinoGlyph.Arrow2Squarepath,
+                        submenu = listOf(better, replace), enabled = !row.locked)
+                } else out += replace
             }
             // 0.4.5: Remover fundo — o efeito na camada e, no vídeo, a análise do clipe.
             LayerMenuAction.RemoveBackground -> out += MenuEntry.Item(

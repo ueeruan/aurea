@@ -2,9 +2,9 @@
 <resources>
     <!-- 16/11/2026: assinaturas; 1.0.9: AureaHyper semanal, mensal e anual (hyper/Paywall.kt, AureaSubscriptions.swift; docs/release/assinaturas.md). -->
     <string name="assinatura_badge">Paid feature</string>
-    <string name="assinatura_intro_efeito">This effect is part of AureaHyper. Subscribe to AureaHyper (weekly, monthly or yearly) to unlock every paid effect, 3D Text and the Hyper tools.</string>
+    <string name="assinatura_intro_efeito">This effect is part of AureaHyper. Subscribe to AureaHyper (weekly, monthly or yearly) to unlock every paid effect and the Hyper tools.</string>
     <string name="assinatura_intro_texto3d">3D Text is part of AureaHyper. Subscribe to AureaHyper (weekly, monthly or yearly) to also unlock every paid effect and the Hyper tools.</string>
-    <string name="assinatura_intro_hyper">AureaHyper unlocks every paid effect, 3D Text and the Hyper tools.</string>
+    <string name="assinatura_intro_hyper">AureaHyper unlocks every paid effect and the Hyper tools.</string>
     <string name="assinatura_so_efeito">Subscribe to this effect only</string>
     <string name="assinatura_so_texto3d">Subscribe to 3D Text only</string>
     <string name="assinatura_escolha_plano">Choose your AureaHyper plan. Every plan unlocks everything.</string>

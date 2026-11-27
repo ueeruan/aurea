@@ -498,6 +498,9 @@ private fun rememberEditActions(store: EditorStore, ui: EditorUi, setLevel: (Edi
     val replace = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
         if (uri != null && replaceTarget != 0L) store.replaceMedia(replaceTarget, uri)
     }
+    val improveSource = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null && replaceTarget != 0L) store.replaceMedia(replaceTarget, uri, verifyUpgrade = true)
+    }
     val visual = PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
     // 0.3.0: sequência de imagens (render do Blender com alfa) numa linha própria, no
     // cabeçote, como a "Camada": é para compor por cima do vídeo.
@@ -595,13 +598,20 @@ private fun rememberEditActions(store: EditorStore, ui: EditorUi, setLevel: (Edi
                     if (clip != null && clip.kind != 12) add(EditDockItem("replace", EditIcon.Replace, R.string.edit_clip_replace) {
                         replaceTarget = clip.id; if (store.playing) store.pause(); replace.launch(visual)
                     })
+                    if (clip?.kind == 1 && !clip.locked) add(EditDockItem("improveSource", EditIcon.Replace, R.string.layer_improve_source) {
+                        replaceTarget = clip.id
+                        if (store.playing) store.pause()
+                        improveSource.launch(arrayOf("video/*"))
+                    })
                     // 0.4.5: Remover fundo (vídeo/imagem): efeito + análise do clipe.
                     if (clip != null && (clip.kind == 1 || clip.kind == 2)) add(EditDockItem("bgRemove", EditIcon.Cutout, R.string.bg_remove_action) {
                         if (store.removeBackground(clip.id)) panel(EditorPanel.Effects)
                     })
                     if (video) add(EditDockItem("freeze", EditIcon.Freeze, R.string.edit_clip_freeze) { store.freezeFrame() })
                     if (video) add(EditDockItem("extract", EditIcon.Extract, R.string.edit_clip_extract_audio) { store.extractAudio() })
-                    if (video) add(EditDockItem("stabilize", EditIcon.Track, R.string.edit_clip_stabilize) { panel(EditorPanel.Tracking) })
+                    if (video) add(EditDockItem("stabilize", EditIcon.Track, R.string.edit_clip_stabilize) {
+                        com.aurea.aurea.editor.panels.openEffectTool(store, ::panel, com.aurea.aurea.effects.EffectTool.Tracking)
+                    })
                     // 1.0.8: Edição automática do clipe (cortes, zoom, sons, música, voz, cor, legendas).
                     if (video && clip != null) add(EditDockItem("autoEdit", EditIcon.Sequence, R.string.autoedit_title) {
                         if (store.playing) store.pause(); store.autoEdit.open(clip.id)

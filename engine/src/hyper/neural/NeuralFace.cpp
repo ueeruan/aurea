@@ -458,7 +458,7 @@ bool face_available(const DeviceProfile&) noexcept {
 f64 cost_gfpgan(const DeviceProfile& p) noexcept {
     // Um rosto 512² ≈ 900× o tile do SPAN (medido no host); por MP de quadro
     // com um rosto a cada N quadros (Lite 8): o grafo pede ms por MP.
-    const f64 ms = p.liteMsPerTile > 0.0f ? p.liteMsPerTile : 300.0;
+    const f64 ms = p.liteMsPerTile > 0.0f ? p.liteMsPerTile / 2.9 : 300.0;
     return ms * 900.0 / 4.0;
 }
 

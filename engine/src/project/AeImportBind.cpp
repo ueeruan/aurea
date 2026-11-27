@@ -143,6 +143,9 @@ constexpr KnownText kMessages[] = {
     {"Erro interno ao importar", "ae_err_internal", false},
 };
 constexpr KnownText kReasons[] = {
+    {"receita Looks incompleta ou inválida", "ae_reason_looks_invalid", false},
+    {"receita Looks ausente ou em formato ainda não suportado", "ae_reason_looks_missing", false},
+    {"ajuste do Looks ainda sem conversão completa", "ae_reason_looks_tool_partial", false},
     {"efeito sem equivalente no Aurea", "ae_reason_effect_unknown", false},
     {"parâmetro sem equivalente no Aurea", "ae_reason_param_unknown", false},
     {"arquivo de origem ausente", "ae_reason_media_missing", false},

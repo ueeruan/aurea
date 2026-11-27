@@ -337,6 +337,14 @@ internal enum class Tab3D(val label: Int, val glyph: Char) {
 private fun PartsTab(env: PanelEnv, shape: com.aurea.aurea.state.Shape3DInfo?) {
     val store = env.store
     var modelPart by rememberSaveable(store.primary) { mutableIntStateOf(0) }
+    Box(Modifier.testTag("panel3d.fx.spacing")) {
+        ActionCard(stringResource(R.string.fx3d_name_spacing), stringResource(R.string.fx3d_desc_spacing)) {
+            val type = effectTypeId("aurea.3d.spacing")
+            if (store.effects.none { it.typeId == type }) store.addEffect(type, listOfNotNull(store.primary))
+            env.onOpenPanel(EditorPanel.Effects)
+        }
+    }
+    Spacer(Modifier.height(6.dp))
     if (shape != null) {
         Shape3DSection(env, shape, Shape3DPage.Shape)
     } else {

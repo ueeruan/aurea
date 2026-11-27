@@ -61,6 +61,9 @@
     <string name="ae_reason_param_unknown">parâmetro sem equivalente no Aurea (o resto do efeito entrou)</string>
     <string name="ae_reason_media_missing">arquivo de origem ausente; vincule a mídia original ou importe um pacote com ela</string>
     <string name="ae_reason_text_document">o texto do AE ainda precisa ser preenchido</string>
+    <string name="ae_reason_looks_invalid">O efeito Looks contém dados incompletos ou inválidos.</string>
+    <string name="ae_reason_looks_missing">Os dados do Looks estão ausentes ou usam uma versão ainda incompatível.</string>
+    <string name="ae_reason_looks_tool_partial">Conversão parcial ou indisponível para este ajuste do Looks.</string>
     <string name="ae_reason_params_approx">parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão</string>
     <string name="ae_reason_params_doc_order">parâmetros pela ordem da documentação do AE</string>
     <string name="ae_reason_curve_defaults">curva aproximada: os pontos do AE não são lidos; a curva entrou neutra para ajustar</string>

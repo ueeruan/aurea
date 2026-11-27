@@ -2,9 +2,9 @@
 <resources>
     <!-- 16/11/2026: assinaturas; 1.0.9: AureaHyper semanal, mensal e anual (hyper/Paywall.kt, AureaSubscriptions.swift; docs/release/assinaturas.md). -->
     <string name="assinatura_badge">Función de pago</string>
-    <string name="assinatura_intro_efeito">Este efecto es parte de AureaHyper. Suscríbete a AureaHyper (por semana, mes o año) y desbloquea todos los efectos de pago, el Texto 3D y las herramientas Hyper.</string>
+    <string name="assinatura_intro_efeito">Este efecto es parte de AureaHyper. Suscríbete a AureaHyper (por semana, mes o año) y desbloquea todos los efectos de pago y las herramientas Hyper.</string>
     <string name="assinatura_intro_texto3d">El Texto 3D es parte de AureaHyper. Suscríbete a AureaHyper (por semana, mes o año) y desbloquea también todos los efectos de pago y las herramientas Hyper.</string>
-    <string name="assinatura_intro_hyper">AureaHyper desbloquea todos los efectos de pago, el Texto 3D y las herramientas Hyper.</string>
+    <string name="assinatura_intro_hyper">AureaHyper desbloquea todos los efectos de pago y las herramientas Hyper.</string>
     <string name="assinatura_so_efeito">Suscribirse solo a este efecto</string>
     <string name="assinatura_so_texto3d">Suscribirse solo al Texto 3D</string>
     <string name="assinatura_escolha_plano">Elige tu plan de AureaHyper. Todos desbloquean todo.</string>

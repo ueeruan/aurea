@@ -578,7 +578,8 @@ public:
     /// máscaras e tempo. A mídia nova ocupa a MESMA caixa na tela (cabe dentro
     /// da antiga; âncora e máscaras acompanham na proporção). Vídeo novo mais
     /// curto que o trecho encurta o fim. Um passo de desfazer. Devolve o id.
-    [[nodiscard]] Result<u64> replace_layer_video(u64 layerId, const VideoImport& request) noexcept;
+    [[nodiscard]] Result<u64> replace_layer_video(u64 layerId, const VideoImport& request,
+                                                   bool verifyUpgrade = false) noexcept;
     [[nodiscard]] Result<u64> replace_layer_image(u64 layerId, const u8* rgba, u32 width, u32 height,
                                                   const char* name, const char* sourcePath, u8 orientation = 1) noexcept;
     /// Arquivo de origem da camada de vídeo, áudio ou imagem (caminho legível
@@ -1318,7 +1319,7 @@ public:
     /// Estado do Roto desta camada+efeito (Renderer::roto_status): out8 =
     /// [propagados, total, propagando, falhou, quadro atual pronto, quadros do
     /// clipe prontos, quadros do clipe, há traços]. Falso = sem traços.
-    bool roto_status(u64 layerId, u32 effectId, i64* out8) noexcept;
+    bool roto_status(u64 layerId, u32 effectId, i64* out8, u32* strokeCounts = nullptr) noexcept;
     void roto_cancel() noexcept;
     /// Modo de vista (0 final, 1 máscara, 2 sobreposição) sem passo de desfazer:
     /// o modo de pintura liga a sobreposição e devolve o anterior ao sair.
@@ -2208,6 +2209,9 @@ public:
     bool query_gizmo(u64 layerId, f32 length, f32* out8, bool localSpace = false) noexcept;
     /// Position, screen-to-parent pan basis, rotation and rotation gain (13 floats).
     bool query_preview_gesture_basis(u64 layerId, f32* out13) noexcept;
+    /// Projected 3D pivot XY, then position and anchor XYZ deltas per screen X/Y pixel.
+    static constexpr u32 kPivotDragFloats = 14;
+    bool query_pivot_drag_basis(u64 layerId, f32 out[kPivotDragFloats]) noexcept;
     /// Posição LOCAL (espaço do pai) que leva a camada `amount` unidades do
     /// mundo ao longo do eixo `axis` (0 X, 1 Y, 2 Z) a partir de onde está.
     /// axis 0..2 uses world XYZ; 3..5 uses evaluated local XYZ. Output is parent-local position.

@@ -14,6 +14,7 @@
 #include "aurea/render/Renderer.hpp"
 
 #include "aurea/ai/BackgroundRemoval.hpp"
+#include "aurea/ai/RotoMatte.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/project/Project.hpp"
@@ -96,6 +97,8 @@ bool Renderer::bg_analyze(const Project& project, const Composition& comp, const
                           const EffectInstance& instance, MediaManager* media) noexcept try {
     if (instance.type != effect_type_id(effect_keys::kBackgroundRemove)) return false;
     if (layer.kind != LayerKind::Video || !media || !media->factory()) return layer.kind == LayerKind::Image;
+    ai::RotoStrokes strokes;
+    if (ai::roto_instance_strokes(instance, strokes)) return roto_propagate(project, comp, layer, instance, media);
     const Asset* asset = project.asset(layer.source);
     if (!asset || !asset->has_video()) return false;
     if (!foreground_) foreground_ = std::make_unique<ai::DepthMapService>(true);
@@ -126,6 +129,15 @@ bool Renderer::bg_analyze(const Project& project, const Composition& comp, const
     return true;
 } catch (...) {
     return false;
+}
+
+void Renderer::bg_cancel_analysis(const Project& project, const Layer& layer, const EffectInstance& instance) noexcept {
+    if (!bg_ || instance.type != effect_type_id(effect_keys::kBackgroundRemove) || layer.kind != LayerKind::Video) return;
+    const Asset* asset = project.asset(layer.source);
+    if (!asset || !asset->has_video()) return;
+    const auto progress = bg_->progress();
+    if (progress.running && progress.matteKey == bg_key_of(*asset, true, ai::bg_effective_model(requested_model(instance))))
+        bg_->cancel();
 }
 
 bool Renderer::bg_status(const Project& project, const Composition& comp, const Layer& layer,

@@ -1248,6 +1248,22 @@ void Backend::wait_idle() noexcept {
     allocator_.trim_empty_blocks();
 }
 
+// 1.0.9: só consulta (timeout 0), não recolhe nada: quem soltaria recursos é
+// quem espera de verdade (wait_frame/poll_export_work/wait_idle).
+bool Backend::has_pending_gpu_work() const noexcept {
+    if (!device_ || deviceLost_) return false;
+    if (current_) return true;
+    for (u32 i = 0; i < framesInFlight_; ++i) {
+        const FrameContext& f = frames_[i];
+        if (f.submitted && f.fence
+            && deviceFunctions_.vkWaitForFences(device_, 1, &f.fence, VK_TRUE, 0) == VK_TIMEOUT) return true;
+    }
+    for (const PendingImmediate& p : pendingImmediate_) {
+        if (p.fence && deviceFunctions_.vkWaitForFences(device_, 1, &p.fence, VK_TRUE, 0) == VK_TIMEOUT) return true;
+    }
+    return false;
+}
+
 Status Backend::poll_export_work(Status* completedFailure) noexcept {
     if (completedFailure) *completedFailure = OkStatus;
     if (!device_) return Status{Errc::InvalidState, "backend nao inicializado"};

@@ -2713,6 +2713,7 @@ enum EffectI18nTable {
     aurea.generate.raster_extrude|5|metal|fxl_metal|
     aurea.generate.raster_extrude|6|roughness|fx_rugosidade|
     aurea.3d.part_transform|0|part|fxl_part|
+    aurea.3d.spacing|0|spacing|fxl_spacing|
     aurea.3d.part_transform|1|position_x|fx_posicao_x|
     aurea.3d.part_transform|2|position_y|fx_posicao_y|
     aurea.3d.part_transform|3|position_z|fxl_position_z|
@@ -3265,7 +3266,6 @@ enum EffectI18nTable {
     aurea.hyper.upscale|0|scale|fxl_scale|fxo_2,fxo_4
     aurea.hyper.upscale|1|mode|fxl_content|fxo_general,fxo_anime
     aurea.hyper.upscale|2|sharpness|fxl_sea_sharpness|
-    aurea.hyper.upscale|3|path|fxo_path|fxo_turbo_preview,fxo_lite,fxo_max
     aurea.hyper.clean|0|denoise|fxl_reduce_noise|
     aurea.hyper.clean|1|deblock|fxl_remove_compression_blocks|
     aurea.hyper.clean|2|deinterlace|fxl_deinterlace|fxo_off,fxo_auto,fxo_always
@@ -4248,7 +4248,6 @@ enum EffectI18nTable {
     aurea.enhance.video|10|temporal_frames|fxt_frames_on_each_side_used_by_noise_reduct
     aurea.utility.copy_background|0|window|fxt_effects_after_this_one_act_on_the_layers
     aurea.hyper.upscale|0|scale|fxt_upscales_the_layer_when_it_appears_large
-    aurea.hyper.upscale|3|path|fxt_the_preview_always_uses_turbo_lite_and_m
     aurea.hyper.clean|2|deinterlace|fxt_automatic_acts_only_when_the_frame_shows
     aurea.hyper.clean|3|frames|fxt_frames_on_each_side_aligned_by_motion_1
     aurea.hyper.clean|4|path|fxt_the_preview_always_uses_turbo_lite_and_m_2

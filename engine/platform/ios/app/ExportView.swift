@@ -1071,7 +1071,6 @@ private struct ExportResultPage: View {
                                 .disabled(model.exportPublishing)
                                 .accessibilityIdentifier("export.result.saveAs")
                             }
-                            DonationCard(exporting: false).padding(.top, 12)
                         }.padding(20)
                     }
                 }

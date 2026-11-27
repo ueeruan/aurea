@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="caption_star_title">Auto Caption Star</string>
+    <string name="caption_star_setup">Настройки</string>
+    <string name="caption_star_motion">Ритм</string>
+    <string name="caption_star_cut">Резкая смена</string>
+    <string name="caption_star_impact">Стиль «Акцент»</string>
+    <string name="caption_star_save">Сохранить как пресет</string>
+    <string name="caption_star_empty_presets">Здесь появятся сохранённые пресеты.</string>
+    <string name="caption_star_save_failed">Не удалось сохранить пресет.</string>
+    <string name="caption_star_reflow_failed">Не удалось перегруппировать субтитры.</string>
+    <string name="caption_star_to_layers">Преобразовать в слои</string>
+    <string name="caption_star_to_layers_failed">Не удалось преобразовать дорожку. Проверьте, заблокирована ли она, используют ли её другие слои и достигнут ли лимит слоёв композиции.</string>
+</resources>

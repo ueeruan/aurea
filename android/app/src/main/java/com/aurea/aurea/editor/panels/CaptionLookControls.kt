@@ -57,7 +57,7 @@ import com.aurea.aurea.ui.theme.tocavel
 internal val CaptionTemplateNames = mapOf(
     "highlight" to R.string.pn_caption_style_highlight, "classic" to R.string.pn_caption_style_classic,
     "box" to R.string.panel_caixa, "neon" to R.string.pn_caption_style_neon, "karaoke" to R.string.pn_karaoke,
-    "pop" to R.string.pn_pop, "soft" to R.string.pack_text_4, "glow" to R.string.pack_text_5,
+    "pop" to R.string.edt_tp_pop, "soft" to R.string.pack_text_4, "glow" to R.string.pack_text_5,
     "gold" to R.string.cap046_tpl_gold, "bubble" to R.string.cap046_tpl_bubble, "mint" to R.string.cap046_tpl_mint,
     "comic" to R.string.cap046_tpl_comic, "tag" to R.string.cap046_tpl_tag, "minimal" to R.string.cap046_tpl_minimal,
     "news" to R.string.cap053_tpl_news, "cinema" to R.string.cap053_tpl_cinema,
